@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  vllm-server:
+    image: vllm/vllm-openai:latest
+    container_name: genesis-proxy-v2
+    restart: unless-stopped
+    ports:
+      - "8318:8318"
+    networks:
+      lanbridge:
+        ipv4_address: 172.20.0.224
+        ipv6_address: fd00:172:20::8
+    volumes:
+      - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
+      - ./cache/triton:/root/.triton/cache
+      - ./cache/compile:/root/.cache/vllm/torch_compile_cache
+      - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_NO_USAGE_STATS=1
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
+      - OMP_NUM_THREADS=1
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+    shm_size: "16gb"
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        pip install pandas scipy xxhash -q
+        python3 -m vllm._genesis.patches.apply_all
+        exec vllm serve "$@"
+      - --
+    command:
+      - --model
+      - "YuYu1015/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-int4-AutoRound"
+      - --served-model-name
+      - qwen3.6-35b-a3b-autoround
+      - --quantization
+      - auto_round
+      - --dtype
+      - float16
+      - --tensor-parallel-size
+      - "2"
+      - --max-model-len
+      - "32768"
+      - --gpu-memory-utilization
+      - "0.92"
+      - --max-num-seqs
+      - "1"
+      - --max-num-batched-tokens
+      - "4096"
+      - --kv-cache-dtype
+      - fp8_e5m2
+      - --trust-remote-code
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+      - --reasoning-parser
+      - qwen3
+      - --enable-prefix-caching
+      - --enable-chunked-prefill
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8318"
+      - --api-key
+      - "${VLLM_API_KEY:-}"
+
+networks:
+  lanbridge:
+    external: true
