@@ -152,6 +152,9 @@ class TextPatcher:
         # anchor is missing, abort without writing.
         modified = content
         applied_patches: list[str] = []
+        # Compat con wirings portados de sndr_core_engine (2026-07-04): el
+        # TextPatcher nuevo expone la lista de subs aplicadas como atributo.
+        self.applied_sub_patches = applied_patches
 
         for sp in self.sub_patches:
             if sp.anchor not in modified:

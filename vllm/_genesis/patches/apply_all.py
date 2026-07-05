@@ -1729,6 +1729,52 @@ def apply_patch_N66_multiturn_think_leak() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN348 Qwen3 MTP backbone dedup (vendored vllm#44644)")
+def apply_patch_N348_qwen3_mtp_backbone_dedup() -> PatchResult:
+    """PN348: skip duplicate embed_tokens + lm_head on the MTP backbone when
+    the target model shares them (Qwen3.5/3.6, PP=1). ~1 GiB VRAM freed per
+    worker. Ported 2026-07-04 from sndr_core_engine (anchors 0.23.x).
+
+    Default ON; opt-out via GENESIS_DISABLE_PN348=1.
+    """
+    name = "PN348 Qwen3 MTP backbone dedup"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_N348_qwen3_mtp_backbone_dedup
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N348_qwen3_mtp_backbone_dedup.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN77 FP8 lm_head compression (Phase E.5)")
+def apply_patch_N77_fp8_lm_head() -> PatchResult:
+    """PN77: compress lm_head BF16→FP8 e4m3 + per-channel scale (~606 MiB/rank
+    on 27B). Marlin path on Ampere. Ported 2026-07-04 from sndr_core_engine
+    (anchors 0.23.x) junto con kernels_legacy/lm_head_fp8_{method,compressor}.
+
+    Status: opt-in via GENESIS_ENABLE_PN77_FP8_LM_HEAD=1.
+    """
+    name = "PN77 FP8 lm_head compression"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.perf_hotfix import patch_N77_fp8_lm_head
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N77_fp8_lm_head.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN67 thinking_token_budget inverted bool fix (vllm#41674)")
 def apply_patch_N67_thinking_budget_inverted_bool() -> PatchResult:
     """Patch PN67: 1-line trivial backport of vllm#41674 (JasonKeyiL, OPEN).

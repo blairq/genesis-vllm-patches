@@ -70,6 +70,15 @@ GENESIS_P6869_MARKER = "Genesis P68/P69 long-context tool-call adherence v7.13"
 # ─── Sub-patch: insert hook call at top of create_chat_completion ───────────
 # Anchor on the docstring closing + "# Streaming response" comment +
 # tokenizer fetch. Insert hook call AFTER docstring but BEFORE first action.
+#
+# Two anchor variants (re-anchored 2026-07-04 for 0.23.0):
+#   V020 — pins 0.20.x: docstring + body live together in
+#          create_chat_completion.
+#   V023 — vllm 0.23.0: upstream split the method into a thin wrapper
+#          (docstring + _with_kv_transfer_rejection_cleanup) plus the real
+#          body in _create_chat_completion. Hook goes at the top of the body
+#          so the request mutation still precedes any rendering/streaming.
+# _make_patcher() picks whichever anchor exists in the target file.
 
 P6869_OLD = (
     "    async def create_chat_completion(\n"
@@ -119,11 +128,62 @@ P6869_NEW = (
     "        tokenizer = self.renderer.tokenizer\n"
 )
 
+_P6869_HOOK_BLOCK = (
+    "        # [Genesis P68/P69 long-ctx tool-call adherence] Mutate request\n"
+    "        # in-place if conditions met (env-gated). No-op when env flags\n"
+    "        # off, when no tools, or when prompt below threshold.\n"
+    "        try:\n"
+    "            from vllm._genesis.middleware.long_ctx_tool_adherence import (\n"
+    "                apply_hook as _genesis_p6869_apply_hook,\n"
+    "            )\n"
+    "            _genesis_p6869_apply_hook(self, request)\n"
+    "        except Exception:\n"
+    "            # Hook failure is non-fatal — fall through to standard path.\n"
+    "            import logging as _genesis_p6869_logging\n"
+    "            _genesis_p6869_logging.getLogger(\n"
+    "                'genesis.middleware.long_ctx_tool_adherence'\n"
+    "            ).debug('Genesis P68/P69 hook raised; ignored', exc_info=True)\n"
+)
+
+# vllm 0.23.0: hook at the top of the split-out body method.
+P6869_OLD_V023 = (
+    "    async def _create_chat_completion(\n"
+    "        self,\n"
+    "        request: ChatCompletionRequest,\n"
+    "        raw_request: Request | None = None,\n"
+    "    ) -> AsyncGenerator[str, None] | ChatCompletionResponse | ErrorResponse:\n"
+    "        # Streaming response\n"
+    "        tokenizer = self.renderer.tokenizer\n"
+)
+
+P6869_NEW_V023 = (
+    "    async def _create_chat_completion(\n"
+    "        self,\n"
+    "        request: ChatCompletionRequest,\n"
+    "        raw_request: Request | None = None,\n"
+    "    ) -> AsyncGenerator[str, None] | ChatCompletionResponse | ErrorResponse:\n"
+    + _P6869_HOOK_BLOCK +
+    "        # Streaming response\n"
+    "        tokenizer = self.renderer.tokenizer\n"
+)
+
 
 def _make_patcher() -> TextPatcher | None:
     target = resolve_vllm_file("entrypoints/openai/chat_completion/serving.py")
     if target is None:
         return None
+    # Anchor variant selection: prefer the 0.23.0 split-body anchor, fall
+    # back to the 0.20.x monolithic anchor. When neither matches (already
+    # patched or true drift) keep V023 — apply() resolves idempotency via
+    # the marker before the anchor pre-check.
+    anchor, replacement = P6869_OLD_V023, P6869_NEW_V023
+    try:
+        with open(target) as f:
+            _content = f.read()
+        if P6869_OLD_V023 not in _content and P6869_OLD in _content:
+            anchor, replacement = P6869_OLD, P6869_NEW
+    except OSError:
+        pass
     return TextPatcher(
         patch_name="P68/P69 serving.py — long-ctx tool-call hook injection",
         target_file=str(target),
@@ -131,8 +191,8 @@ def _make_patcher() -> TextPatcher | None:
         sub_patches=[
             TextPatch(
                 name="p6869_hook_insert",
-                anchor=P6869_OLD,
-                replacement=P6869_NEW,
+                anchor=anchor,
+                replacement=replacement,
                 required=True,
             ),
         ],

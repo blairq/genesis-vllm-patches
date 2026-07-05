@@ -113,13 +113,20 @@ PN66_FIELD_NEW = (
     "    previous_text: str = \"\"\n"
 )
 
-# Anchor 2: the buggy short-circuit block in parse_delta
+# Anchor 2: the buggy short-circuit block in parse_delta.
+# 2026-05-09 update: dev93 added defensive `self._reasoning_parser is None or`
+# and wrapped the call to `is_reasoning_end(...)` across two lines. Bug
+# fundamentally unchanged — `prompt_token_ids` walk still incorrectly
+# sets `reasoning_ended` from PRIOR turn's `</think>`. Updated anchor to
+# match dev93+ wrapped form.
 PN66_BLOCK_OLD = (
     "        state = self._stream_state\n"
     "\n"
     "        if not state.prompt_reasoning_checked and prompt_token_ids is not None:\n"
     "            state.prompt_reasoning_checked = True\n"
-    "            if self.is_reasoning_end(prompt_token_ids):\n"
+    "            if self._reasoning_parser is None or self.is_reasoning_end(\n"
+    "                prompt_token_ids\n"
+    "            ):\n"
     "                state.reasoning_ended = True\n"
     "\n"
     "        current_text = state.previous_text + delta_text\n"

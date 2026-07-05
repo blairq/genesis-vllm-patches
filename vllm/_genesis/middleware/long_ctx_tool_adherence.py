@@ -265,6 +265,36 @@ def _build_p69_reminder(tool_names: list[str]) -> str:
     - Visible at END of prompt (attention-strong region for decoder LLMs)
     """
     names_str = ", ".join(tool_names) if tool_names else "the provided tools"
+    # Reminder style must match the engine's --tool-call-parser. The default
+    # ("json") targets the standard qwen3/hermes JSON-in-tool_call format.
+    # "qwen3_coder" targets the XML <function=...><parameter=...> format
+    # (validated 2026-07-04 vs OpenCode: baseline 0/8 → 8/8 with this text).
+    # Select via GENESIS_P69_REMINDER_STYLE=qwen3_coder on engines that use
+    # --tool-call-parser qwen3_coder — the JSON text there teaches a format
+    # that parser cannot parse and makes adherence WORSE.
+    style = os.environ.get("GENESIS_P69_REMINDER_STYLE", "json").strip().lower()
+    if style in ("qwen3_coder", "xml"):
+        return (
+            "\n\n---\n"
+            "[SYSTEM REMINDER — FORMAT REQUIREMENT]\n"
+            "To use a tool you MUST emit the exact XML format:\n"
+            "<tool_call>\n"
+            "<function=tool_name>\n"
+            "<parameter=param_name>\n"
+            "value\n"
+            "</parameter>\n"
+            "</function>\n"
+            "</tool_call>\n"
+            f"Available tools: {names_str}.\n"
+            "NEVER describe a command in plain text, markdown code blocks, "
+            "or invented tags. Output the <tool_call> block immediately "
+            "after closing </think>. Include EVERY required parameter with "
+            "a complete, non-empty value — a tool call with missing or "
+            "empty parameters is a wasted turn. If the task is not "
+            "finished you MUST call a tool; only reply with plain text "
+            "when the whole task is complete.\n"
+            "---"
+        )
     return (
         "\n\n---\n"
         "[SYSTEM REMINDER — FORMAT REQUIREMENT]\n"
@@ -400,28 +430,62 @@ def apply_hook(serving_chat: Any, request: Any) -> dict[str, Any]:
                     "[Genesis P68] failed to upgrade tool_choice: %s", e
                 )
 
-    # P69 — append reminder to last user message
+    # P69 — append reminder to the LAST message (user O tool result).
+    #
+    # Extensión 2026-07-04 (validada vía proxy A/B contra OpenCode): a mitad
+    # de sesión agéntica el último mensaje es un tool result (rol "tool") y
+    # el reminder solo sirve si queda pegado al punto de generación — un
+    # reminder en el último mensaje user quedó N turnos atrás y el modelo
+    # pierde adherencia igual. Inyectar en la cola del tool result cerró las
+    # muertes silenciosas mid-session (bench 2026-07-04: 8/10 → objetivo 10/10).
+    # Opt-out: GENESIS_P69_TOOL_TAIL=0 restaura el comportamiento user-only.
     if p69_enabled:
         try:
+            tail_roles = ("user", "tool")
+            if os.environ.get(
+                "GENESIS_P69_TOOL_TAIL", "1"
+            ).strip().lower() in ("0", "false", "no", "off"):
+                tail_roles = ("user",)
             last = messages[-1] if isinstance(messages, list) else None
             if last is not None and isinstance(last, dict):
                 role = last.get("role")
                 content = last.get("content")
-                if role == "user" and isinstance(content, str):
-                    tool_names = _extract_tool_names(tools)
-                    reminder = _build_p69_reminder(tool_names)
-                    last["content"] = content + reminder
-                    result["applied_p69"] = True
+                tool_names = _extract_tool_names(tools)
+                reminder = _build_p69_reminder(tool_names)
+                marker = "[SYSTEM REMINDER — FORMAT REQUIREMENT]"
+                if role not in tail_roles:
+                    result["reason"] = (
+                        f"last message role={role!r} not in {tail_roles}; "
+                        "P69 skipped"
+                    )
+                elif isinstance(content, str):
+                    if marker in content:
+                        result["reason"] = "reminder ya presente; P69 no-op"
+                    else:
+                        last["content"] = content + reminder
+                        result["applied_p69"] = True
+                elif isinstance(content, list):
+                    # contenido multimodal/por partes: agregar parte de texto
+                    already = any(
+                        isinstance(p, dict) and marker in str(p.get("text", ""))
+                        for p in content
+                    )
+                    if already:
+                        result["reason"] = "reminder ya presente; P69 no-op"
+                    else:
+                        content.append({"type": "text", "text": reminder})
+                        result["applied_p69"] = True
+                else:
+                    result["reason"] = (
+                        f"last message role={role!r} content type "
+                        f"{type(content).__name__} no soportado; P69 skipped"
+                    )
+                if result.get("applied_p69"):
                     log.info(
                         "[Genesis P69] long-ctx prompt (%d chars >= %d): "
                         "appended tool-format reminder (+%d chars) to last "
-                        "user message",
-                        chars, threshold, len(reminder),
-                    )
-                else:
-                    result["reason"] = (
-                        f"last message role={role!r} content not string; "
-                        "P69 skipped"
+                        "%s message",
+                        chars, threshold, len(reminder), role,
                     )
             else:
                 result["reason"] = "last message not a dict; P69 skipped"
