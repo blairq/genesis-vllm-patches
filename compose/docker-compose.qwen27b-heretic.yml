@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   vllm-server:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.23.0
     container_name: genesis-27b-heretic
     restart: unless-stopped
     ports:
@@ -40,14 +40,17 @@ services:
       # Pendientes de activar tras benchmark: PN77 (lm_head FP8), P100 (FULL cudagraph spec-decode)
       - GENESIS_ENABLE_PN66=1
       - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1
-      # P100 (FULL cudagraph spec-decode): neutro en TPS bajo carga saturada pero
-      # activado por decisión del operador 2026-07-04 (gana en latencia single-stream).
-      # Nota: +416MiB VRAM por los cudagraphs FULL — margen libre ~457MiB por GPU.
-      - GENESIS_ENABLE_P100=1
+      # P100 apagado 2026-07-04 (decisión operador): neutro bajo carga y sus
+      # ~416MiB de cudagraphs van al KV/prefix cache (~+30K tokens, prioridad
+      # declarada: cache hits). Re-activable para A/B de latencia single-stream.
+      # - GENESIS_ENABLE_P100=1
       - GENESIS_ENABLE_P69_LONG_CTX_TOOL_REMINDER=1
-      # Umbral 8000: el middleware cuenta solo chars de mensajes (sin schemas de
-      # tools) y el primer turno de opencode mide ~9.9K — con 10000 no disparaba.
-      - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=8000
+      # Umbral 1000 (antes 8000): el middleware cuenta solo chars de mensajes
+      # (sin schemas de tools). Con 8000 no disparaba en los prompts custom de
+      # opencode (~2-3K chars) y el modelo anunciaba la delegación por texto
+      # sin emitir el <tool_call> (reproducido 2026-07-14, test RPG). Con 1000
+      # el reminder de formato aplica en la práctica a todo turno con tools.
+      - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
       # Estilo XML <function=...> para el parser qwen3_coder de este engine
       # (el default "json" enseña un formato que este parser no parsea)
       - GENESIS_P69_REMINDER_STYLE=qwen3_coder
@@ -91,7 +94,7 @@ services:
       - --chat-template
       - /etc/qwen-froggeric-chat-template.jinja
       - --default-chat-template-kwargs
-      - '{"enable_thinking": true, "auto_disable_thinking_with_tools": false}'
+      - '{"enable_thinking": true, "auto_disable_thinking_with_tools": true}'
       - --dtype
       - float16
       - --quantization
@@ -99,7 +102,7 @@ services:
       - --kv-cache-dtype
       - "fp8"
       - --max-num-seqs
-      - "10"
+      - "20"
       - --disable-custom-all-reduce
       - --tensor-parallel-size
       - "2"
