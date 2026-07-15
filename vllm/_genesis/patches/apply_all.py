@@ -4650,6 +4650,17 @@ def apply_patch_1_2_fp8_dispatcher() -> PatchResult:
     )
 
 
+@register_patch("PN71 OpenWebUI reasoning_content compatibility")
+def apply_patch_PN71_reasoning_content_compat() -> PatchResult:
+    """PN71: Adds reasoning_content field support to ChatMessage and DeltaMessage
+    for compatibility with standard clients like OpenWebUI.
+    """
+    return _wiring_text_patch(
+        "PN71 OpenWebUI reasoning_content compatibility",
+        "patch_N71_reasoning_content_compat",
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR
 # ═══════════════════════════════════════════════════════════════════════════
