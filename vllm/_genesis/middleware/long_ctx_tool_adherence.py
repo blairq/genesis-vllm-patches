@@ -272,6 +272,21 @@ def _build_p69_reminder(tool_names: list[str]) -> str:
     # Select via GENESIS_P69_REMINDER_STYLE=qwen3_coder on engines that use
     # --tool-call-parser qwen3_coder — the JSON text there teaches a format
     # that parser cannot parse and makes adherence WORSE.
+    #
+    # Reescrito 2026-07-14 (párrafo PARALLELISM + QUITAR "Available tools"):
+    # el síntoma era "anuncia el fan-out de subagentes por texto pero los
+    # larga en serie / muere sin llamar". A/B de 4 variantes por replay del
+    # payload real de opencode (turno mid-session, tail = tool result,
+    # n=6 c/u, muertes = finish=stop sin tool_calls):
+    #   V0 sin reminder ................. 5/6 muertes
+    #   V1 texto anterior (con lista) ... 4/6 muertes
+    #   V2 texto nuevo CON "Available
+    #      tools: <names>" ............. 6/6 muertes  ← la lista es VENENO:
+    #      invita a hablar de los tools en vez de llamarlos
+    #   V3 este texto (sin lista) ....... 0/6 muertes, 2/6 multi-call
+    # NO reintroducir la lista de tools en este estilo. names_str solo se
+    # usa en el estilo "json". Ver opencode-debug/results/capture y
+    # scratchpad ab4_reminder.py.
     style = os.environ.get("GENESIS_P69_REMINDER_STYLE", "json").strip().lower()
     if style in ("qwen3_coder", "xml"):
         return (
@@ -285,14 +300,18 @@ def _build_p69_reminder(tool_names: list[str]) -> str:
             "</parameter>\n"
             "</function>\n"
             "</tool_call>\n"
-            f"Available tools: {names_str}.\n"
             "NEVER describe a command in plain text, markdown code blocks, "
-            "or invented tags. Output the <tool_call> block immediately "
-            "after closing </think>. Include EVERY required parameter with "
-            "a complete, non-empty value — a tool call with missing or "
-            "empty parameters is a wasted turn. If the task is not "
-            "finished you MUST call a tool; only reply with plain text "
-            "when the whole task is complete.\n"
+            "or invented tags. Output the first <tool_call> block "
+            "immediately after closing </think>. Include EVERY required "
+            "parameter with a complete, non-empty value.\n"
+            "PARALLELISM: when several INDEPENDENT operations are needed "
+            "(e.g. delegating multiple task subagents, or reading several "
+            "files), you MUST emit MULTIPLE <tool_call> blocks back-to-back "
+            "in THIS SAME response — one complete, closed block per call. "
+            "They will run in parallel. Do NOT emit one call and wait when "
+            "the operations are independent.\n"
+            "If the task is not finished you MUST call a tool; only reply "
+            "with plain text when the whole task is complete.\n"
             "---"
         )
     return (
