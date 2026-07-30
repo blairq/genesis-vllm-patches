@@ -84,6 +84,8 @@ services:
       - lued/Qwen3.6-27B-Fable-Fusion-711-INT8-W8A16-MTP
       - --served-model-name
       - qwen3.6-27b
+      - --disable-access-log-for-endpoints
+      - "/metrics,/health"
       - --attention-backend
       - FLASHINFER
       - --moe-backend

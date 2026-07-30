@@ -84,6 +84,8 @@ services:
       - cyankiwi/KAT-Coder-V2.5-Dev-AWQ-INT4
       - --served-model-name
       - qwen3.6-35b
+      - --disable-access-log-for-endpoints
+      - "/metrics,/health"
       - --attention-backend
       - FLASHINFER
       - --moe-backend

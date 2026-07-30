@@ -101,6 +101,8 @@ services:
       - /model
       - --served-model-name
       - qwen3.6-27b
+      - --disable-access-log-for-endpoints
+      - "/metrics,/health"
       - --attention-backend
       - FLASHINFER
       - --moe-backend
