@@ -49,7 +49,6 @@ services:
 
       # ── OPTIMIZACIÓN DE KERNELS GEMM / TENSOR CORES ───────────────────────────
       - VLLM_FLOAT32_MATMUL_PRECISION=high
-      - VLLM_FLASHINFER_MOE_BACKEND=throughput
       - VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD=1024
       - VLLM_MARLIN_USE_ATOMIC_ADD=1
       - VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
@@ -87,6 +86,8 @@ services:
       - qwen3.6-35b
       - --attention-backend
       - FLASHINFER
+      - --moe-backend
+      - flashinfer_trtllm
       - --generation-config
       - vllm
       - --language-model-only
