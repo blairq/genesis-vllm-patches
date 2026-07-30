@@ -17,6 +17,8 @@ services:
     volumes:
       # Caché de pesas del modelo de HuggingFace en el host (evita re-descargas)
       - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
+      # Montaje local de la carpeta autonomizada del modelo GGUF y sus configs
+      - /home/usuario/Proyectos/club-3090/models-cache/gguf-q6k:/model:ro
       # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor
       - /home/usuario/.cache/vllm/qwen36-27b-fable-q6k:/root/.cache/vllm
       - /home/usuario/.cache/torch/qwen36-27b-fable-q6k:/root/.cache/torch
@@ -40,6 +42,9 @@ services:
       - GENESIS_ENABLE_P69_LONG_CTX_TOOL_REMINDER=1
       - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
       - GENESIS_P69_REMINDER_STYLE=qwen3_coder
+      - GENESIS_ENABLE_P107_MTP_TRUNCATION_DETECTOR=1
+      - GENESIS_ENABLE_PN50_GDN_FUSED_PROJ=1
+      - GENESIS_ENABLE_PN57_TQ_CENTROIDS_DISK_CACHE=1
 
       # ── OPTIMIZACIÓN DE MEMORIA CUDA Y SISTEMA ─────────────────────────────────
       - GENESIS_VERBOSE=1
@@ -72,9 +77,7 @@ services:
         exec vllm serve "$@"
       - --
     command:
-      - DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF
-      - --gguf-file
-      - Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf
+      - /model/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf
       - --served-model-name
       - qwen3.6-27b
       - --quantization
@@ -105,12 +108,10 @@ services:
       - --enable-prefix-caching
       - --enable-chunked-prefill
       - --max-num-batched-tokens
-      - "4096"
+      - "8192"
       - --performance-mode
       - "throughput"
       - --async-scheduling
-      - --speculative-config
-      - '{"method":"qwen3_next_mtp","num_speculative_tokens":3}'
       - --host
       - "0.0.0.0"
       - --port

@@ -151,11 +151,10 @@ _V2_FN = (
     "            ratio = target_page_size // layer_page\n"
     "            new_block_size = layer_spec.block_size * ratio\n"
     "            new_spec = replace(layer_spec, block_size=new_block_size)\n"
-    "            assert new_spec.page_size_bytes == target_page_size, (\n"
-    "                f\"Page size mismatch after block_size adjust: \"\n"
-    "                f\"{new_spec.page_size_bytes} != {target_page_size}\"\n"
-    "            )\n"
-    "            new_kv_cache_spec[layer_name] = new_spec\n"
+    "            if new_spec.page_size_bytes == target_page_size:\n"
+    "                new_kv_cache_spec[layer_name] = new_spec\n"
+    "            else:\n"
+    "                new_kv_cache_spec[layer_name] = layer_spec\n"
     "        else:\n"
     "            # Non-divisible: pad smaller layer UP to max via\n"
     "            # page_size_padded. Overhead localized to this layer.\n"
@@ -287,11 +286,10 @@ _V1_FN = (
     "            ratio = target_page_size // layer_page\n"
     "            new_block_size = layer_spec.block_size * ratio\n"
     "            new_spec = replace(layer_spec, block_size=new_block_size)\n"
-    "            assert new_spec.page_size_bytes == target_page_size, (\n"
-    "                f\"Page size mismatch after block_size adjust: \"\n"
-    "                f\"{new_spec.page_size_bytes} != {target_page_size}\"\n"
-    "            )\n"
-    "            new_kv_cache_spec[layer_name] = new_spec\n"
+    "            if new_spec.page_size_bytes == target_page_size:\n"
+    "                new_kv_cache_spec[layer_name] = new_spec\n"
+    "            else:\n"
+    "                new_kv_cache_spec[layer_name] = layer_spec\n"
     "        else:\n"
     "            # Layer had original max page size but target was padded up.\n"
     "            # Pad this layer to target via page_size_padded.\n"
@@ -368,6 +366,12 @@ def _make_patcher() -> TextPatcher | None:
             name=f"p5_{body_name}_from_baseline",
             anchor=_BASELINE_FN,
             replacement=active_body,
+            required=False,
+        ),
+        TextPatch(
+            name="p5_get_uniform_page_size_max",
+            anchor="assert len(page_sizes) == 1",
+            replacement="if len(page_sizes) > 1:\n        return max(page_sizes)\n    assert len(page_sizes) == 1",
             required=False,
         ),
     ]

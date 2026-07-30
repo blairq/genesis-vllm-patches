@@ -5,7 +5,7 @@ services:
     # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.5 MoE
     image: vllm/vllm-openai:v0.23.0
     container_name: genesis-kat-coder
-    restart: unless-stopped
+    restart: "no"
     ports:
       # Puerto API HTTP OpenAI expuesto localmente
       - "8320:8320"
@@ -36,9 +36,16 @@ services:
       - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1
       - GENESIS_ENABLE_P100=1
       - GENESIS_ENABLE_P5B=1
+      - GENESIS_DISABLE_P5_AUTORETIRE=1
       - GENESIS_ENABLE_P69_LONG_CTX_TOOL_REMINDER=1
       - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
       - GENESIS_P69_REMINDER_STYLE=qwen3_coder
+      - GENESIS_ENABLE_P107_MTP_TRUNCATION_DETECTOR=1
+      - GENESIS_ENABLE_PN50_GDN_FUSED_PROJ=1
+      - GENESIS_ENABLE_P103=1
+      - GENESIS_ENABLE_PN59_STREAMING_GDN=1
+      - GENESIS_ENABLE_PN54_GDN_CONTIGUOUS_DEDUP=1
+      - GENESIS_ENABLE_PN57_TQ_CENTROIDS_DISK_CACHE=1
 
       # ── OPTIMIZACIÓN DE MEMORIA CUDA Y SISTEMA ─────────────────────────────────
       - GENESIS_VERBOSE=1
@@ -51,7 +58,6 @@ services:
       - VLLM_API_KEY=${VLLM_API_KEY:-}
       - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
       - TRITON_CACHE_DIR=/root/.cache/triton
-      - VLLM_ATTENTION_BACKEND=FLASHINFER
       - VLLM_USE_FLASHINFER_SAMPLER=1
     shm_size: "16gb"
     ipc: host
@@ -73,7 +79,12 @@ services:
     command:
       - cyankiwi/KAT-Coder-V2.5-Dev-AWQ-INT4
       - --served-model-name
-      - kat-coder-v2.5
+      - qwen3.6-35b
+      - --attention-backend
+      - FLASHINFER
+      - --generation-config
+      - vllm
+      - --language-model-only
       - --quantization
       - compressed-tensors
       - --chat-template
@@ -83,7 +94,7 @@ services:
       - --dtype
       - float16
       - --kv-cache-dtype
-      - "fp8_e4m3"
+      - "fp8"
       - --max-num-seqs
       - "20"
       - --disable-custom-all-reduce
@@ -92,7 +103,7 @@ services:
       - --max-model-len
       - "262144"
       - --gpu-memory-utilization
-      - "0.96"
+      - "0.91"
       - --enable-flashinfer-autotune
       - --reasoning-parser
       - qwen3
@@ -102,19 +113,11 @@ services:
       - --enable-prefix-caching
       - --enable-chunked-prefill
       - --max-num-batched-tokens
-      - "4096"
+      - "16384"
+      - --long-prefill-token-threshold
+      - "8192"
       - --performance-mode
       - "throughput"
-      - --async-scheduling
-      # Modelo borrador especulativo compatible (Qwen2.5-Coder-1.5B) + Ngram Prompt Lookup
-      - --speculative-model
-      - Qwen/Qwen2.5-Coder-1.5B-Instruct
-      - --num-speculative-tokens
-      - "3"
-      - --prompt-lookup-max-tokens
-      - "3"
-      - --prompt-lookup-min-tokens
-      - "1"
       - --host
       - "0.0.0.0"
       - --port

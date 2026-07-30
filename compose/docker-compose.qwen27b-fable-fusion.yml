@@ -41,6 +41,11 @@ services:
       # Umbral 1000 chars: garantiza que el reminder de herramientas se aplique a los prompts de OpenCode
       - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
       - GENESIS_P69_REMINDER_STYLE=qwen3_coder
+      - GENESIS_ENABLE_P107_MTP_TRUNCATION_DETECTOR=1
+      - GENESIS_ENABLE_PN50_GDN_FUSED_PROJ=1
+      - GENESIS_ENABLE_PN59_STREAMING_GDN=1
+      - GENESIS_ENABLE_PN54_GDN_CONTIGUOUS_DEDUP=1
+      - GENESIS_ENABLE_PN57_TQ_CENTROIDS_DISK_CACHE=1
 
       # ── OPTIMIZACIÓN DE MEMORIA CUDA Y SISTEMA ─────────────────────────────────
       - GENESIS_VERBOSE=1
@@ -53,7 +58,6 @@ services:
       - VLLM_API_KEY=${VLLM_API_KEY:-}
       - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
       - TRITON_CACHE_DIR=/root/.cache/triton
-      - VLLM_ATTENTION_BACKEND=FLASHINFER
       - VLLM_USE_FLASHINFER_SAMPLER=1
     shm_size: "16gb"
     ipc: host
@@ -76,6 +80,10 @@ services:
       - lued/Qwen3.6-27B-Fable-Fusion-711-INT8-W8A16-MTP
       - --served-model-name
       - qwen3.6-27b
+      - --attention-backend
+      - FLASHINFER
+      - --generation-config
+      - vllm
       - --chat-template
       - /etc/qwen-froggeric-chat-template.jinja
       - --default-chat-template-kwargs
@@ -101,13 +109,13 @@ services:
       - qwen3_coder
       - --enable-prefix-caching
       - --enable-chunked-prefill
-      # Incrementado a 8192 para evitar truncamiento de respuestas largas de código (write tool)
       - --max-num-batched-tokens
+      - "16384"
+      - --long-prefill-token-threshold
       - "8192"
       - --performance-mode
       - "throughput"
       - --async-scheduling
-      # MTP especulativo optimizado a 2 tokens borrador para evitar desincronización de JSON en streaming
       - --speculative-config
       - '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
       - --host

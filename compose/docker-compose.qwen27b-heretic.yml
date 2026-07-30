@@ -54,6 +54,11 @@ services:
       - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
       # Formato XML <function=...> para el parser qwen3_coder
       - GENESIS_P69_REMINDER_STYLE=qwen3_coder
+      - GENESIS_ENABLE_P107_MTP_TRUNCATION_DETECTOR=1
+      - GENESIS_ENABLE_PN50_GDN_FUSED_PROJ=1
+      - GENESIS_ENABLE_PN59_STREAMING_GDN=1
+      - GENESIS_ENABLE_PN54_GDN_CONTIGUOUS_DEDUP=1
+      - GENESIS_ENABLE_PN57_TQ_CENTROIDS_DISK_CACHE=1
 
       # ── OPTIMIZACIÓN DE MEMORIA CUDA Y SISTEMA ─────────────────────────────────
       - GENESIS_VERBOSE=1
@@ -67,8 +72,6 @@ services:
       - VLLM_API_KEY=${VLLM_API_KEY:-}
       - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
       - TRITON_CACHE_DIR=/root/.cache/triton
-      # Backend de atención FlashInfer de alto rendimiento para GPUs Ampere (RTX 3090)
-      - VLLM_ATTENTION_BACKEND=FLASHINFER
       - VLLM_USE_FLASHINFER_SAMPLER=1
       # W4A8 Marlin: Activaciones int8 sobre pesos int4 GPTQ -> +57% velocidad en prefill
       - VLLM_MARLIN_INPUT_DTYPE=int8
@@ -94,6 +97,10 @@ services:
       - /model
       - --served-model-name
       - qwen3.6-27b
+      - --attention-backend
+      - FLASHINFER
+      - --generation-config
+      - vllm
       - --chat-template
       - /etc/qwen-froggeric-chat-template.jinja
       - --default-chat-template-kwargs
@@ -105,7 +112,7 @@ services:
       - gptq_marlin
       # fp8_e4m3: Duplica la capacidad de almacenamiento de la KV cache vs fp16 (~618K tokens)
       - --kv-cache-dtype
-      - "fp8_e4m3"
+      - "fp8"
       - --max-num-seqs
       - "20"
       - --disable-custom-all-reduce
@@ -126,10 +133,12 @@ services:
       - qwen3_coder
       # Prefix caching desactivado para prevenir contaminación de bloques KV en estados GDN de MTP
       - --enable-prefix-caching
-      # Prefill fragmentado en bloques de 4096 tokens (evita picos de VRAM en prompts largos)
+      # Prefill fragmentado en bloques de 16384 tokens
       - --enable-chunked-prefill
       - --max-num-batched-tokens
-      - "4096"
+      - "16384"
+      - --long-prefill-token-threshold
+      - "8192"
       - --performance-mode
       - "throughput"
       - --async-scheduling
