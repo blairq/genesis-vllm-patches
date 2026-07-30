@@ -4,7 +4,7 @@ services:
   vllm-server:
     # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.6
     image: vllm/vllm-openai:v0.23.0
-    container_name: genesis-27b-heretic
+    container_name: genesis-27b-fable-fusion
     restart: unless-stopped
     ports:
       # Puerto API HTTP OpenAI expuesto localmente
@@ -17,42 +17,29 @@ services:
     volumes:
       # Caché de pesas del modelo de HuggingFace en el host (evita re-descargas)
       - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
-      # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor (acelera el arranque de ~3min a ~20s)
-      - /home/usuario/.cache/vllm/qwen36-27b-heretic:/root/.cache/vllm
-      - /home/usuario/.cache/torch/qwen36-27b-heretic:/root/.cache/torch
-      - /home/usuario/.cache/triton/qwen36-27b-heretic:/root/.cache/triton
-      - /home/usuario/.cache/torchinductor/qwen36-27b-heretic:/root/.cache/torchinductor
+      # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor
+      - /home/usuario/.cache/vllm/qwen36-27b-fable-fusion:/root/.cache/vllm
+      - /home/usuario/.cache/torch/qwen36-27b-fable-fusion:/root/.cache/torch
+      - /home/usuario/.cache/triton/qwen36-27b-fable-fusion:/root/.cache/triton
+      - /home/usuario/.cache/torchinductor/qwen36-27b-fable-fusion:/root/.cache/torchinductor
       # Montaje de la suite de parches Genesis en modo lectura
       - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro
-      # Template de chat Froggeric v21 (soluciona stallings agenticos, empty think y estabilidad de KV cache)
+      # Template de chat Froggeric v21
       - ../templates/qwen-froggeric-chat-template.jinja:/etc/qwen-froggeric-chat-template.jinja:ro
-      # Overlay del GPTQ oficial con MTP fix: mantiene capas MTP en bf16 sin cuantizar
-      - ./overlays/gptq-heretic-mtpfix:/model:ro
     environment:
       # ── PARCHES GENESIS (ESTABILIDAD Y NAVEGACIÓN AGÉNTICA) ──────────────────────
-      # PN56: Fallback de parseo XML para qwen3_coder cuando el modelo emite llamadas en formato XML
       - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
-      # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
       - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
-      # P62: Corrige el timing de finalización del bloque de pensamiento en decodificación especulativa
       - GENESIS_ENABLE_P62_STRUCT_OUT_SPEC_TIMING=1
-      # PN51: Desactiva bloques de pensamiento en streaming al ejecutar llamadas a herramientas
       - GENESIS_ENABLE_PN51_QWEN3_STREAMING_THINKING_DISABLED=1
-      # PN66: Corrige la fuga del token </think> en conversaciones multiturno
       - GENESIS_ENABLE_PN66=1
-      # PN77: Cuantización FP8 del LM head -> Ahorra ~1.2 GiB de VRAM por GPU
       - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1
-      # P100: CUDAGraphs FULL para spec-decode -> Mejora la latencia single-stream en +5-10%
       - GENESIS_ENABLE_P100=1
-      # PN8: Cuantización online del borrador MTP -> Ahorra ~1-2 GiB de VRAM por GPU
       - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=1
-      # P5b: Estrategia de tamaño de página KV para Qwen3.6 -> Ahorra ~34% de VRAM por bloque KV
       - GENESIS_ENABLE_P5B=1
-      # P69: Inyecta recordatorio de formato <tool_call> al final del último mensaje si supera el umbral
       - GENESIS_ENABLE_P69_LONG_CTX_TOOL_REMINDER=1
-      # Umbral en caracteres (1000) para activar el recordatorio P69 en turnos con herramientas
+      # Umbral 1000 chars: garantiza que el reminder de herramientas se aplique a los prompts de OpenCode
       - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
-      # Formato XML <function=...> para el parser qwen3_coder
       - GENESIS_P69_REMINDER_STYLE=qwen3_coder
 
       # ── OPTIMIZACIÓN DE MEMORIA CUDA Y SISTEMA ─────────────────────────────────
@@ -61,17 +48,13 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - VLLM_NO_USAGE_STATS=0
-      # Evita la fragmentación de memoria en CUDA dividiendo en segmentos expandibles
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
       - OMP_NUM_THREADS=1
       - VLLM_API_KEY=${VLLM_API_KEY:-}
       - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
       - TRITON_CACHE_DIR=/root/.cache/triton
-      # Backend de atención FlashInfer de alto rendimiento para GPUs Ampere (RTX 3090)
       - VLLM_ATTENTION_BACKEND=FLASHINFER
       - VLLM_USE_FLASHINFER_SAMPLER=1
-      # W4A8 Marlin: Activaciones int8 sobre pesos int4 GPTQ -> +57% velocidad en prefill
-      - VLLM_MARLIN_INPUT_DTYPE=int8
     shm_size: "16gb"
     ipc: host
     deploy:
@@ -90,8 +73,7 @@ services:
         exec vllm serve "$@"
       - --
     command:
-      # Modelo montado desde el overlay con fix de MTP
-      - /model
+      - lued/Qwen3.6-27B-Fable-Fusion-711-INT8-W8A16-MTP
       - --served-model-name
       - qwen3.6-27b
       - --chat-template
@@ -100,22 +82,15 @@ services:
       - '{"enable_thinking": true, "auto_disable_thinking_with_tools": true}'
       - --dtype
       - float16
-      - --quantization
-      # Marlin kernel de aceleración de inferencia GPTQ
-      - gptq_marlin
-      # fp8_e4m3: Duplica la capacidad de almacenamiento de la KV cache vs fp16 (~618K tokens)
       - --kv-cache-dtype
       - "fp8_e4m3"
       - --max-num-seqs
       - "20"
       - --disable-custom-all-reduce
-      # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
       - --tensor-parallel-size
       - "2"
-      # Contexto máximo soportado de 262K tokens
       - --max-model-len
       - "262144"
-      # Asignación del 96% de la VRAM por GPU para pesas + pool de KV Cache
       - --gpu-memory-utilization
       - "0.96"
       - --enable-flashinfer-autotune
@@ -124,18 +99,17 @@ services:
       - --enable-auto-tool-choice
       - --tool-call-parser
       - qwen3_coder
-      # Prefix caching desactivado para prevenir contaminación de bloques KV en estados GDN de MTP
       - --enable-prefix-caching
-      # Prefill fragmentado en bloques de 4096 tokens (evita picos de VRAM en prompts largos)
       - --enable-chunked-prefill
+      # Incrementado a 8192 para evitar truncamiento de respuestas largas de código (write tool)
       - --max-num-batched-tokens
-      - "4096"
+      - "8192"
       - --performance-mode
       - "throughput"
       - --async-scheduling
-      # Decodificación especulativa MTP nativa con 3 tokens borrador por paso
+      # MTP especulativo optimizado a 2 tokens borrador para evitar desincronización de JSON en streaming
       - --speculative-config
-      - '{"method":"qwen3_next_mtp","num_speculative_tokens":3}'
+      - '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
       - --host
       - "0.0.0.0"
       - --port
