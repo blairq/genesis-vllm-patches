@@ -69,6 +69,7 @@ services:
           --tool-call-parser hermes \
           --api-key genesis-local \
           --served-model-name gemma4-26b-moe \
+          --served-model-name qwen3.6 \
           --host 0.0.0.0 \
           --port 8000
     healthcheck:

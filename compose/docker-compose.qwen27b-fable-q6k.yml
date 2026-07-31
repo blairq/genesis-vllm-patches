@@ -80,6 +80,8 @@ services:
       - /model/Qwen3.6-27B-Fable-Fus-711-UnHeretic-NM-DAU-NEO-MAX-NEO-MTP-Q6_K.gguf
       - --served-model-name
       - qwen3.6-27b
+      - --served-model-name
+      - qwen3.6
       - --quantization
       - gguf
       - --chat-template

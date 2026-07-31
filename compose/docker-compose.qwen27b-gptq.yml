@@ -49,6 +49,8 @@ services:
       - groxaxo/Qwen3.6-27B-GPTQ-Pro-4Bit
       - --served-model-name
       - qwen3.6-27b
+      - --served-model-name
+      - qwen3.6
       - --dtype
       - float16
       - --quantization

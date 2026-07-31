@@ -59,6 +59,8 @@ services:
       - "/root/.cache/huggingface/qwen3.6-27b-gguf/unsloth-q4km/Qwen3.6-27B-Q4_K_M.gguf"
       - --served-model-name
       - qwen3.6-27b
+      - --served-model-name
+      - qwen3.6
       - --quantization
       - gguf
       - --dtype

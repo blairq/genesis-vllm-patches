@@ -45,6 +45,8 @@ services:
       - "YuYu1015/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-int4-AutoRound"
       - --served-model-name
       - qwen3.6-35b-a3b-autoround
+      - --served-model-name
+      - qwen3.6
       - --quantization
       - auto_round
       - --dtype

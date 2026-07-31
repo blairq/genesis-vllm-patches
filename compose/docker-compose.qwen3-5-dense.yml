@@ -67,6 +67,7 @@ services:
           --trust-remote-code \
           --api-key genesis-local \
           --served-model-name qwen3-5-dense \
+          --served-model-name qwen3.6 \
           --host 0.0.0.0 \
           --port 8000
     healthcheck:

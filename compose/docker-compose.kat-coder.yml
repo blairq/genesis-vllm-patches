@@ -84,6 +84,8 @@ services:
       - cyankiwi/KAT-Coder-V2.5-Dev-AWQ-INT4
       - --served-model-name
       - qwen3.6-35b
+      - --served-model-name
+      - qwen3.6
       - --disable-access-log-for-endpoints
       - "/metrics,/health"
       - --attention-backend
@@ -119,13 +121,43 @@ services:
       - --tool-call-parser
       - qwen3_coder
       - --enable-prefix-caching
+      # Prefill fragmentado en bloques de 8192 tokens.
+      # 16384 -> 8192 halva el pico transitorio de los buffers FLA del GDN
+      # (544 -> 272 MiB por capa) sin coste en ancho de banda: el trafico total
+      # de dos chunks de 8192 es identico al de uno de 16384.
       - --enable-chunked-prefill
       - --max-num-batched-tokens
-      - "16384"
-      - --long-prefill-token-threshold
       - "8192"
+      # Mitad de max-num-batched-tokens: evita que un prefill largo consuma el
+      # presupuesto entero y deje sin sitio a los decodes en el mismo lote.
+      - --long-prefill-token-threshold
+      - "4096"
       - --performance-mode
       - "throughput"
+      # Tallas de CUDA Graph explicitas, con el mismo techo que el default
+      # (40 = 20 seqs x 1 x 2), para no perder cobertura de grafos mixtos.
+      # Sin spec decode M = numero de secuencias, pero el default sólo tiene
+      # [1,2,4,8,16,24,32,40]: 5 seqs se rellena hasta 8 (+60%) y 9 seqs hasta
+      # 16 (+78%). Es el peor de los tres contenedores en este aspecto.
+      # Esta lista es exacta para 1-8 seqs: relleno medio 27.9% -> 1.1%.
+      # (list[int] con nargs="+": un entero por entrada, NO separados por comas)
+      - --cudagraph-capture-sizes
+      - "1"
+      - "2"
+      - "3"
+      - "4"
+      - "5"
+      - "6"
+      - "7"
+      - "8"
+      - "10"
+      - "12"
+      - "14"
+      - "16"
+      - "20"
+      - "24"
+      - "32"
+      - "40"
       - --host
       - "0.0.0.0"
       - --port

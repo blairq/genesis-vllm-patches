@@ -57,6 +57,8 @@ services:
       - webhie/Qwen3.6-27B-int4-AutoRound-Code
       - --served-model-name
       - qwen3.6-27b
+      - --served-model-name
+      - qwen3.6
       - --dtype
       - auto
       - --trust-remote-code

@@ -101,6 +101,8 @@ services:
       - /model
       - --served-model-name
       - qwen3.6-27b
+      - --served-model-name
+      - qwen3.6
       - --disable-access-log-for-endpoints
       - "/metrics,/health"
       - --attention-backend
@@ -141,14 +143,51 @@ services:
       - qwen3_coder
       # Prefix caching desactivado para prevenir contaminación de bloques KV en estados GDN de MTP
       - --enable-prefix-caching
-      # Prefill fragmentado en bloques de 16384 tokens
+      # Prefill fragmentado en bloques de 8192 tokens.
+      # 16384 -> 8192 halva el pico transitorio de los buffers FLA del GDN
+      # (816 -> 408 MiB por capa) sin coste en ancho de banda: el trafico total
+      # de dos chunks de 8192 es identico al de uno de 16384. Los ~400 MiB
+      # liberados van al pool de KV cache.
       - --enable-chunked-prefill
       - --max-num-batched-tokens
-      - "16384"
-      - --long-prefill-token-threshold
       - "8192"
+      # Se mantiene en la mitad de max-num-batched-tokens para que un prefill
+      # largo no consuma el presupuesto entero y los decodes puedan seguir
+      # viajando en el mismo lote.
+      - --long-prefill-token-threshold
+      - "4096"
       - --performance-mode
       - "throughput"
+      # Tallas de CUDA Graph explicitas, todas multiplos de 4 (= num_spec+1) y
+      # con el mismo techo que el default (160 = 20 seqs x 4 x 2), para no
+      # perder cobertura de grafos mixtos.
+      # El default salta de 8 a 16 a 24 (paso 8) mientras M avanza de 4 en 4,
+      # asi que toda concurrencia impar se rellena: 3 seqs (M=12) sube a 16
+      # (+33%), 5 seqs (M=20) a 24 (+20%). Se paga en las partes
+      # proporcionales a M (GEMM + all-reduce).
+      # Esta lista es exacta para 1-10 seqs: relleno medio 7.9% -> 0%.
+      # (list[int] con nargs="+": un entero por entrada, NO separados por comas)
+      - --cudagraph-capture-sizes
+      - "4"
+      - "8"
+      - "12"
+      - "16"
+      - "20"
+      - "24"
+      - "28"
+      - "32"
+      - "36"
+      - "40"
+      - "48"
+      - "56"
+      - "64"
+      - "72"
+      - "80"
+      - "96"
+      - "112"
+      - "128"
+      - "144"
+      - "160"
       - --async-scheduling
       # Decodificación especulativa MTP nativa con 3 tokens borrador por paso
       - --speculative-config
