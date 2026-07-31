@@ -265,6 +265,15 @@ def _wiring_text_patch(name: str, wiring_module_name: str) -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("P110 Qwen3 MTP GPTQ/AWQ loader fix (vllm#47828 backport)")
+def apply_patch_110_mtp_gptq() -> PatchResult:
+    from vllm._genesis.wiring.models import patch_P110_qwen3_mtp_gptq
+    status, reason = patch_P110_qwen3_mtp_gptq.apply()
+    if status == "applied":
+        return _applied("P110", reason)
+    return _skipped("P110", reason)
+
+
 @register_patch("P8 KV hybrid reporting (per-token capacity)")
 def apply_patch_8_kv_hybrid_reporting() -> PatchResult:
     """Patch 8: RETIRED 2026-05-04 — upstream refactored the API.
