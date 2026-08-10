@@ -287,6 +287,33 @@ def _build_p69_reminder(tool_names: list[str]) -> str:
     # NO reintroducir la lista de tools en este estilo. names_str solo se
     # usa en el estilo "json". Ver opencode-debug/results/capture y
     # scratchpad ab4_reminder.py.
+    #
+    # Extensión 2026-08-10 (párrafo STOP CONDITION): el V3 de arriba cerró las
+    # muertes silenciosas (finish=stop sin tool_calls) pero abrió el síntoma
+    # espejo — NO-TERMINACIÓN. Caso testigo: sesión opencode
+    # ses_01445d8d4 (agente agi_test_loop, "Implementar contract tests"):
+    # 178 tool calls, solo 40 inputs distintos, 56 step-finish TODOS con
+    # reason="tool-calls", CERO partes de texto — el mismo trío de comandos
+    # (make test-contract / contract_test_runner / make validate-permissions)
+    # repetido ~20 veces hasta agotar el cap de steps del agente. El reasoning
+    # del modelo decía literalmente "The tests are all passing. Let me now
+    # provide the final report" en 20 turnos consecutivos, y en cada uno
+    # emitía otra tool call en vez del texto.
+    #
+    # Causa: este reminder queda pegado a la cola de CADA tool result (ver
+    # tail_roles más abajo) con un umbral de 1000 chars — o sea, siempre — y
+    # su única cláusula de salida ("only reply with plain text when the whole
+    # task is complete") depende de un juicio subjetivo que el modelo resuelve
+    # re-verificando. Para un agente cuyo ENTREGABLE es texto (un reporte de
+    # tests, un veredicto), eso es un sesgo permanente hacia llamar tools.
+    #
+    # El fix es simétrico al párrafo PARALLELISM: así como ese autoriza
+    # explícitamente a emitir VARIAS calls, STOP CONDITION autoriza
+    # explícitamente a emitir NINGUNA. Mismo patrón de contrapeso que el
+    # prompt de agi_vision_inspector ("⚖️ COUNTERWEIGHT, EQUALLY IMPORTANT").
+    # Si algún A/B futuro muestra que reabre muertes silenciosas, la palanca
+    # a tocar es el texto de STOP CONDITION — NO borrar PARALLELISM ni
+    # reintroducir la lista de tools.
     style = os.environ.get("GENESIS_P69_REMINDER_STYLE", "json").strip().lower()
     if style in ("qwen3_coder", "xml"):
         return (
@@ -310,8 +337,15 @@ def _build_p69_reminder(tool_names: list[str]) -> str:
             "in THIS SAME response — one complete, closed block per call. "
             "They will run in parallel. Do NOT emit one call and wait when "
             "the operations are independent.\n"
-            "If the task is not finished you MUST call a tool; only reply "
-            "with plain text when the whole task is complete.\n"
+            "If the task is not finished you MUST call a tool.\n"
+            "STOP CONDITION — equally mandatory, this is not optional: if "
+            "the results already in this conversation answer the task, reply "
+            "with PLAIN TEXT NOW and emit NO tool_call at all. Re-running a "
+            "command whose output is already above is FORBIDDEN — a passing "
+            "test does not become more passing by running it again, and a "
+            "file you already read has not changed unless you edited it. "
+            "The moment you think 'let me give the final report', that report "
+            "IS this response: write it, do not verify one more time.\n"
             "---"
         )
     return (
