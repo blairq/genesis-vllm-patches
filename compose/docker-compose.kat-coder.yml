@@ -60,6 +60,8 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
       - OMP_NUM_THREADS=1
       - VLLM_API_KEY=${VLLM_API_KEY:-}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
       - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
       - TRITON_CACHE_DIR=/root/.cache/triton
       - VLLM_USE_FLASHINFER_SAMPLER=1
@@ -81,7 +83,7 @@ services:
         exec vllm serve "$@"
       - --
     command:
-      - cyankiwi/KAT-Coder-V2.5-Dev-AWQ-INT4
+      - BlairQ/KAT-Coder-V2.5-Dev-AWQ-INT4-Vision-MTP
       - --served-model-name
       - qwen3.6-35b
       - --served-model-name
@@ -91,12 +93,15 @@ services:
       - --attention-backend
       - FLASHINFER
       - --moe-backend
-      - flashinfer_trtllm
+      - triton
       - --generation-config
       - vllm
-      - --language-model-only
+      - --limit-mm-per-prompt
+      - '{"image": 4, "video": 0}'
       - --quantization
       - compressed-tensors
+      - --speculative-config
+      - '{"method":"qwen3_5_mtp","num_speculative_tokens":3}'
       - --chat-template
       - /etc/qwen-froggeric-chat-template.jinja
       - --default-chat-template-kwargs
@@ -134,30 +139,33 @@ services:
       - "4096"
       - --performance-mode
       - "throughput"
-      # Tallas de CUDA Graph explicitas, con el mismo techo que el default
-      # (40 = 20 seqs x 1 x 2), para no perder cobertura de grafos mixtos.
-      # Sin spec decode M = numero de secuencias, pero el default sólo tiene
-      # [1,2,4,8,16,24,32,40]: 5 seqs se rellena hasta 8 (+60%) y 9 seqs hasta
-      # 16 (+78%). Es el peor de los tres contenedores en este aspecto.
-      # Esta lista es exacta para 1-8 seqs: relleno medio 27.9% -> 1.1%.
-      # (list[int] con nargs="+": un entero por entrada, NO separados por comas)
+      # Tallas de CUDA Graph recalibradas para spec-decode (K=3 ->
+      # uniform_decode_query_len = num_speculative_tokens + 1 = 4).
+      # vLLM fuerza los grafos FULL (decode puro) a ser múltiplos exactos
+      # de ese 4 (ver adjust_cudagraph_sizes_for_spec_decode en
+      # vllm/config/compilation.py): cada secuencia activa mueve 4 tokens
+      # de verificación por ronda, no 1. La lista vieja (pensada para
+      # "M = num secuencias" sin spec decode) se redondearía hacia arriba
+      # perdiendo granularidad (1,2,3,4 secuencias colapsan al mismo
+      # tamaño). Esta lista multiplica cada punto de secuencias real
+      # (1,2,3,4,5,6,7,8,10,12,14,16,20 -- mismo criterio que antes,
+      # cobertura exacta 1-8 seqs y más espaciado arriba) por 4, quedando
+      # ya en unidades de tokens y sin colisiones. Techo real 80 = 20
+      # secuencias x 4, no 40.
       - --cudagraph-capture-sizes
-      - "1"
-      - "2"
-      - "3"
       - "4"
-      - "5"
-      - "6"
-      - "7"
       - "8"
-      - "10"
       - "12"
-      - "14"
       - "16"
       - "20"
       - "24"
+      - "28"
       - "32"
       - "40"
+      - "48"
+      - "56"
+      - "64"
+      - "80"
       - --host
       - "0.0.0.0"
       - --port
