@@ -108,7 +108,7 @@ services:
       - --max-model-len
       - "262144"
       - --gpu-memory-utilization
-      - "0.97"
+      - "0.93"
       - --enable-flashinfer-autotune
       - --reasoning-parser
       - qwen3
