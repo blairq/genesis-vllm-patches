@@ -26,6 +26,9 @@ services:
     volumes:
       # Caché de pesas del modelo de HuggingFace en el host (evita re-descargas)
       - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface
+      # Tier 2 del cache de KV: NVMe. Los bloques que no entran en el tier de
+      # RAM bajan acá en vez de perderse y tener que re-prefillear.
+      - /home/usuario/Proyectos/kv-offload:/kv-offload
       # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor (acelera el arranque)
       - /home/usuario/.cache/vllm/qwen38-27b-w8a16-mtp:/root/.cache/vllm
       - /home/usuario/.cache/torch/qwen38-27b-w8a16-mtp:/root/.cache/torch
@@ -36,6 +39,17 @@ services:
     environment:
       # ── PARCHES GENESIS (ESTABILIDAD Y NAVEGACIÓN AGÉNTICA) ──────────────────────
       # PN56: Fallback de parseo XML para qwen3_coder cuando el modelo emite llamadas en formato XML
+      # PN81: el tier de disco de vLLM no tiene cuota NI limpieza (root_dir
+      # crece sin techo: 38 GB en una sola sesión de pruebas). PN81 implementa
+      # on_schedule_end() —hook que vLLM documenta para 'per-step cleanup' y
+      # deja vacío— para podar por antigüedad, y purga al arrancar los mmap
+      # huérfanos de /dev/shm que deja un cierre abrupto (llenarlo mata el
+      # arranque siguiente con 'madvise: Bad address').
+      # La cuota es POR RANK: con TP=2 el disco total es 2 x MAX_GB.
+      - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1
+      - GENESIS_KV_DISK_MAX_GB=30
+      - GENESIS_KV_DISK_CHECK_EVERY=2000
+      - GENESIS_KV_DISK_TARGET_RATIO=0.85
       - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
       # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
       - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
@@ -186,8 +200,12 @@ services:
       - --max-model-len
       - "262144"
       # Asignación de VRAM por GPU para pesas + pool de KV Cache (97.5% de 24GB)
+      # 0.965 -> 0.82 al activar el offloading. --enable-cumem-allocator (que
+      # OffloadingConnector exige) hace que el profiler SOBREESTIME el KV
+      # disponible: con 0.965 moria en _allocate_kv_cache_tensors pidiendo
+      # 610 MiB con 191 libres. Bajar el util compensa ese error.
       - --gpu-memory-utilization
-      - "0.965"
+      - "0.82"
       # Visión: 1 imagen por request (el contrato de agi_vision_inspector es de
       # UNA imagen) y video en 0 — nunca se usa. El budget del encoder cache se
       # dimensiona por el ítem multimodal MÁS GRANDE, y un video pesa mucho más
@@ -201,6 +219,23 @@ services:
       - --tool-call-parser
       - qwen3_coder
       # Prefix caching
+      # ── Cache de KV en dos capas: RAM (5 GiB, ARC) + NVMe ───────────────
+      # Evita re-prefillear un prefijo largo cuando los subagentes lo desalojan
+      # de la VRAM. Medido: 51.5s de prefill en frío vs 2.8s recuperándolo.
+      # ARC separa lo accedido UNA vez (subagentes efímeros -> se desalojan
+      # primero) de lo accedido VARIAS (el hilo largo -> queda protegido).
+      #
+      # Va por --kv-transfer-config y NO por --kv-offloading-size: ese flag solo
+      # setea cpu_bytes_to_use y deja el spec por defecto (RAM sola, LRU).
+      #
+      # --enable-cumem-allocator es OBLIGATORIO: sin él, la captura de CUDA
+      # graphs falla con 'CUDA invalid argument' en _dummy_run/sm.fill_(-1).
+      # ⚠️ Efecto lateral: cumem hace que el profiler SOBREESTIME el KV
+      # disponible. Si el engine empieza a OOMear en
+      # _allocate_kv_cache_tensors, hay que BAJARLE --gpu-memory-utilization.
+      - --enable-cumem-allocator
+      - --kv-transfer-config
+      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 5368709120, "eviction_policy": "arc", "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload"}]}}'
       - --enable-prefix-caching
       # Prefill fragmentado en bloques de 8192 tokens
       - --enable-chunked-prefill

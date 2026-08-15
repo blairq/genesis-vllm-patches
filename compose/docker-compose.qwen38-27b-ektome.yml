@@ -4,7 +4,7 @@ services:
   vllm-server:
     # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.8
     image: vllm/vllm-openai:v0.23.0
-    container_name: genesis-27b-qwen38-autoround
+    container_name: genesis-27b-qwen38-ektome
     # SIN restart automatico a proposito: con `restart: unless-stopped` un crash
     # por OOM se relevanta solo y el contenedor aparece "Up" a los segundos,
     # indistinguible de no haber muerto. Para detectar un reinicio del proceso:
@@ -21,6 +21,9 @@ services:
     volumes:
       # Caché de pesas del modelo de HuggingFace en el host (evita re-descargas)
       - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface
+      # Tier 2 del cache de KV: NVMe. Aca bajan los bloques que no entran en el
+      # tier de RAM, en vez de perderse y tener que re-prefillear.
+      - /home/usuario/Proyectos/kv-offload:/kv-offload
       # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor (acelera el arranque)
       - /home/usuario/.cache/vllm/qwen38-27b-autoround:/root/.cache/vllm
       - /home/usuario/.cache/torch/qwen38-27b-autoround:/root/.cache/torch
@@ -38,6 +41,13 @@ services:
       - GENESIS_PN80_EVERY=40
       - GENESIS_PN80_MIN_T=256
       - GENESIS_PN80_WARN_RATIO=1.5
+      # PN81: cuota y poda del tier de disco del cache de KV. vLLM no trae
+      # ninguna: root_dir crece sin techo. Poda por antiguedad (mtime) al
+      # superar el limite, bajando hasta TARGET_RATIO para no podar seguido.
+      - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1
+      - GENESIS_KV_DISK_MAX_GB=1
+      - GENESIS_KV_DISK_CHECK_EVERY=20
+      - GENESIS_KV_DISK_TARGET_RATIO=0.85
       # Ancho del buffer gate_up del FFN, en elementos: 2 * intermediate_size / TP
       # = 2 * 17408 / 2 = 17408. Se pone a mano porque get_current_vllm_config()
       # no esta disponible dentro del worker en el punto donde corre la sonda.
@@ -105,12 +115,14 @@ services:
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - VLLM_NO_USAGE_STATS=0
       # Evita la fragmentación de memoria en CUDA permitiendo segmentos expandibles virtuales
-      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
       - OMP_NUM_THREADS=1
       - VLLM_API_KEY=${VLLM_API_KEY:-}
       - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
       - TRITON_CACHE_DIR=/root/.cache/triton
-      - VLLM_USE_FLASHINFER_SAMPLER=1
+      # El README del modelo lo exige en 0 (con py3.11 ademas hay que desinstalar
+      # flashinfer-python). Dejarlo en 1 es un fallo de arranque conocido.
+      - VLLM_USE_FLASHINFER_SAMPLER=0
     shm_size: "16gb"
     ipc: host
     deploy:
@@ -129,8 +141,11 @@ services:
         exec vllm serve "$@"
       - --
     command:
-      # Modelo de Hugging Face Qwen3.8 27B INT4 W4A16 AutoRound (Sin censura)
-      - goldhub/Qwen3.8-27B-INT4-W4A16-AutoRound
+      # Ektome: Qwen3.8-27B GPTQ 4-bit (Marlin, group 128, desc_act=false).
+      # 407 de 503 Linears en 4 bits; 96 proyecciones DeltaNet quedan en bf16
+      # por alineacion de Marlin (config 'dynamic' por modulo).
+      # ⚠️ transformers NO puede cargarlo: solo vLLM o SGLang.
+      - Zynerji/Ektome-Qwen3.8-27B-PristinelyUncensored-GPTQ-MTP
       # Alias comun a los tres engines de qwen3.8 (w8a16-mtp, w4a16, autoround)
       # para que sean INTERCAMBIABLES: los clientes piden "qwen3.6" y se puede
       # cambiar de cuantizacion sin tocar el opencode.jsonc ni ningun cliente.
@@ -144,7 +159,7 @@ services:
       - --served-model-name
       - qwen3.6
       - qwen3.8
-      - goldhub/Qwen3.8-27B-INT4-W4A16-AutoRound
+      - Zynerji/Ektome-Qwen3.8-27B-PristinelyUncensored-GPTQ-MTP
       - --disable-access-log-for-endpoints
       - "/metrics,/health"
       - --trust-remote-code
@@ -178,8 +193,17 @@ services:
       # Vision: 1 imagen por request y video en 0 — nunca se usa.
       - --limit-mm-per-prompt
       - '{"image":1,"video":0}'
+      # 0.94 -> 0.90 para ESTE modelo. Sus pesos son 8.8 GiB (vs 13.2 del
+      # autoround), asi que a 0.94 vLLM se auto-asignaba un KV de 885.297
+      # tokens que despues NO entraba: OOM en _allocate_kv_cache_tensors
+      # pidiendo 916 MiB con 341 libres. Con 0.90 el presupuesto es realista
+      # y el KV sigue siendo MUY superior al de los otros engines.
+            # 0.78 y no 0.94: cumem hace que el profiler SOBREESTIME el KV
+      # disponible en ~3.1 GiB (declaraba 14.24 cuando entraban 11.16) y
+      # moria en _allocate_kv_cache_tensors. Bajar util compensa ese error.
+      # Aun asi el KV queda enorme: este modelo pesa 8.8 GiB, no 13.2.
       - --gpu-memory-utilization
-      - "0.94"
+      - "0.78"
       - --enable-flashinfer-autotune
       - --reasoning-parser
       - qwen3
@@ -187,6 +211,34 @@ services:
       - --tool-call-parser
       - qwen3_coder
       # Prefix caching
+      # ── Cache de KV en dos capas ────────────────────────────────────────
+      # Objetivo: que el prefijo de un hilo largo (200k+) NO se recalcule
+      # cuando los subagentes llenan la VRAM. En vez de tirarse, baja a RAM y
+      # de ahi al NVMe, y vuelve en segundos en lugar de 5-10 min de prefill.
+      #
+      # Va por --kv-transfer-config y NO por --kv-offloading-size: ese flag
+      # solo setea cpu_bytes_to_use y deja el spec por defecto
+      # (CPUOffloadingSpec = RAM sola, LRU). El tiering y ARC necesitan este JSON.
+      #
+      # eviction_policy=arc: separa lo accedido UNA vez (subagentes efimeros,
+      # quedan en T1 y se desalojan primero) de lo accedido VARIAS (el hilo
+      # principal, sube a T2 y queda protegido de los barridos). LRU no
+      # distingue y 4 coders seguidos te empujan el prefijo.
+      #
+      # cpu_bytes_to_use sale de /dev/shm (shm_size del compose = 16 GB), no de
+      # RAM anonima. 5 GiB deja aire para el resto del stack del host.
+      # ⚠️ El tier fs NO tiene limite ni limpieza propia: root_dir crece sin
+      # techo. Hay que podarlo por fuera (cron por antiguedad).
+      # Requerido por OffloadingConnector cuando PYTORCH_CUDA_ALLOC_CONF usa
+      # expandable_segments:True. vLLM rechaza el arranque si falta.
+      # Cache de KV en dos capas: RAM (5 GiB en /dev/shm, politica ARC) + NVMe.
+      # Evita re-prefillear un prefijo largo cuando los subagentes lo desalojan.
+      # Requerido por OffloadingConnector con expandable_segments. Ademas es
+      # NECESARIO para que la captura de CUDA graphs conviva con el offloading:
+      # sin cumem, _dummy_run falla en sm.fill_(-1) con 'CUDA invalid argument'.
+      - --enable-cumem-allocator
+      - --kv-transfer-config
+      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 5368709120, "eviction_policy": "arc", "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload"}]}}'
       - --enable-prefix-caching
       # Prefill fragmentado en bloques de 8192 tokens
       - --enable-chunked-prefill
@@ -217,9 +269,11 @@ services:
       - "36"
       - "40"
       - --async-scheduling
-      # Decodificación especulativa MTP nativa con 3 tokens borrador por paso
+      # MTP segun el README del modelo: method qwen3_5_mtp y K=1 (NO 'mtp' con K=3).
+      # Su cabeza MTP son 15 tensores en bf16 SIN cuantizar (~849 MB), al reves
+      # del autoround. Ganancia medida por el autor: +35%% prompts cortos, +63%% codigo.
       - --speculative-config
-      - '{"method":"qwen3_next_mtp","num_speculative_tokens":3}'
+      - '{"method":"qwen3_5_mtp","num_speculative_tokens":1}'
       - --host
       - "0.0.0.0"
       - --port

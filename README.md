@@ -74,6 +74,24 @@ Sustained TPS — visualised
 
 ---
 
+## 🧠 KV cache offloading (RAM + NVMe)
+
+Long prefixes get evicted from VRAM when subagents fill it, and vLLM
+**discards** them — so the next turn re-prefills from scratch. With the
+two-tier cache they go to RAM and NVMe instead, and come back over PCIe.
+
+Measured here: a 92k-token prefix costs **51.5 s** to prefill cold and
+**2.8 s** to recover after 8 agents swept the VRAM.
+
+Enabling it is not just a flag — three non-obvious rules apply (lower
+`--gpu-memory-utilization` by ~0.135, keep `max_split_size_mb`, drop the
+restart policy), and vLLM's disk tier ships with **no quota and no cleanup**
+(38 GB written in a single test session — patch **PN81** fixes that).
+
+📖 Full guide, measurements and troubleshooting: **[`docs/KV-OFFLOADING.md`](docs/KV-OFFLOADING.md)**
+
+---
+
 ## 🔑 Credentials setup (`.env`) — read this before running any compose
 
 The composes in `compose/` need a `compose/.env` that is **not** in the repo.

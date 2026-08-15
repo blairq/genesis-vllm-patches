@@ -779,6 +779,29 @@ def apply_patch_61b_streaming_overlap() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN81 KV disk tier quota (poda del cache de KV en disco)")
+def apply_patch_N81_kv_disk_tier_quota() -> PatchResult:
+    """PN81: cuota y poda por antiguedad del tier de disco del cache de KV.
+
+    Status: opt-in via GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1.
+    Tunables: GENESIS_KV_DISK_MAX_GB=30, GENESIS_KV_DISK_CHECK_EVERY=2000,
+              GENESIS_KV_DISK_TARGET_RATIO=0.85.
+    """
+    name = "PN81 KV disk tier quota"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N81_kv_disk_tier_quota
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N81_kv_disk_tier_quota.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.

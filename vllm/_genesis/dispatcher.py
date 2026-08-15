@@ -593,6 +593,27 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
             "model_class": ["qwen3_5", "qwen3_6"],
         },
     },
+    "PN81": {
+        "title": "KV disk tier quota + poda por antiguedad (el tier fs de vLLM no tiene ninguna)",
+        "env_flag": "GENESIS_ENABLE_PN81_KV_DISK_QUOTA",
+        "default_on": False,
+        "category": "memory_savings",
+        "credit": (
+            "Genesis-original 2026-08-15. TieringOffloadingSpec permite un tier "
+            "de disco para el cache de KV (evita re-prefillear un prefijo largo "
+            "cuando los subagentes lo desalojan de VRAM: medido 51.5s en frio vs "
+            "2.8s recuperado). Pero FileSystemTierManager NO tiene cuota ni "
+            "limpieza: sus unicos os.remove son manejo de errores, y la interfaz "
+            "de secondary tier no declara desalojo. root_dir crece sin techo y "
+            "sobrevive reinicios (3.4 GB en una sola sesion de pruebas). PN81 "
+            "implementa on_schedule_end() —hook que vLLM documenta para "
+            "'per-step cleanup' y deja como no-op— para podar por mtime al "
+            "superar la cuota. Alternativa descartada: un cron en el host queda "
+            "fuera del contenedor y se desincroniza de la config."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN80": {
         "title": "GDN h budget probe + headroom projection (observabilidad de VRAM)",
         "env_flag": "GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE",
