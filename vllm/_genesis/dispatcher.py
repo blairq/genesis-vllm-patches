@@ -593,6 +593,25 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
             "model_class": ["qwen3_5", "qwen3_6"],
         },
     },
+    "PN83": {
+        "title": "Informe de arranque en lenguaje humano (VRAM, capacidad, riesgos, flags)",
+        "env_flag": "GENESIS_ENABLE_PN83_ANALISIS_ARRANQUE",
+        "default_on": True,
+        "category": "observability",
+        "credit": (
+            "Genesis-original 2026-08-15. El engine loguea todo lo necesario "
+            "para entender un arranque pero repartido en ~700 lineas, en dos "
+            "procesos y sin traducir al uso real. Y hay riesgos que no se "
+            "loguean en NINGUN lado: el crash intermitente por cudaHostRegister "
+            "(PN82), los 394 MiB que FlashInfer aloca recien en el primer "
+            "request, y el tier de disco sin cuota si PN81 esta apagado. PN83 "
+            "junta el desglose de memoria del worker con el total de tokens del "
+            "engine core y emite un informe con veredictos y recomendaciones "
+            "medidas. Observacion pura, corre una sola vez por arranque."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN82": {
         "title": "Limpia el error pegajoso de CUDA que deja un cudaHostRegister fallido",
         "env_flag": "GENESIS_ENABLE_PN82_HOST_REGISTER_STICKY",

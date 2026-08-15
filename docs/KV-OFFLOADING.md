@@ -181,7 +181,7 @@ GPU 1 ... 89.00 MiB is free
 ```
 
 Este sí es un problema de memoria real. Cualquier flag que libere VRAM y se
-la ceda al KV (§8) tiene que dejar ese margen.
+la ceda al KV (§9) tiene que dejar ese margen.
 
 ### 3.5 Sacar `restart: unless-stopped`
 
@@ -277,7 +277,39 @@ contra 789 del AutoRound (borrado), que dejaba 936 en bf16 al excluir todo
 
 ---
 
-## 8. Flags que liberan VRAM para el KV (medido en w8a16-mtp)
+## 8. PN83: el engine se explica solo al arrancar
+
+Todo lo de este documento lo emite el propio engine al final del arranque, en
+castellano, con los números de ESA corrida:
+
+```
+docker logs <contenedor> | sed -n '/GENESIS · ANALISIS DE ARRANQUE/,/Re-ejecutar/p'
+```
+
+o sin reiniciar nada:
+
+```
+docker exec <contenedor> python3 -m vllm._genesis.analisis_arranque
+```
+
+Secciones: desglose de VRAM, cuántos hilos y agentes entran en la cache,
+estado de los tiers, MTP, **riesgos con veredicto ✔/✖** (PN82, el workspace
+lazy de FlashInfer, la cuota de disco) y qué flags darían más KV con su costo.
+
+Default ON, kill switch `GENESIS_DISABLE_PN83=1`. El patrón de uso con el que
+traduce la capacidad se ajusta con `GENESIS_ANALISIS_HILO_PRINCIPAL` (220000)
+y `GENESIS_ANALISIS_AGENTE` (40000).
+
+⚠️ Sobre el desglose de VRAM: vLLM reporta `non_kv_cache_memory` medido
+**dentro** del presupuesto pedido (`total × util`), no sobre la VRAM entera,
+y sale *menor* que los pesos. Su cuenta es
+`requested − non_kv_cache − cudagraphs = KV`. PN83 no la mezcla con la VRAM
+total: desglosa solo lo que está medido en términos absolutos (pesos, KV,
+graphs) y llama al resto "libre / activaciones".
+
+---
+
+## 9. Flags que liberan VRAM para el KV (medido en w8a16-mtp)
 
 Medido 2026-08-15, TP=2, `util 0.82`. Los tres números salen del profiler y
 son reproducibles; los crashes que aparecieron durante el barrido eran PN82

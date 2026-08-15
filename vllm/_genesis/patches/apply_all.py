@@ -779,6 +779,32 @@ def apply_patch_61b_streaming_overlap() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN83 analisis de arranque (informe en lenguaje humano)")
+def apply_patch_N83_analisis_arranque() -> PatchResult:
+    """PN83: emite al final del arranque un informe explicando la config.
+
+    Desglose de VRAM, cuanto contexto entra traducido al patron de uso real,
+    estado de la cache en dos capas, MTP, riesgos conocidos y que flags darian
+    mas KV. Observacion pura: no altera ninguna asignacion.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN83=1.
+    Tunables: GENESIS_ANALISIS_HILO_PRINCIPAL=220000, GENESIS_ANALISIS_AGENTE=40000.
+    """
+    name = "PN83 analisis arranque"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N83_analisis_arranque
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N83_analisis_arranque.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN82 host register sticky error (crash de arranque con offloading)")
 def apply_patch_N82_host_register_sticky_error() -> PatchResult:
     """PN82: limpia el error de CUDA que deja un cudaHostRegister fallido.
