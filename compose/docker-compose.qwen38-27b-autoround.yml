@@ -38,6 +38,13 @@ services:
       - GENESIS_PN80_EVERY=40
       - GENESIS_PN80_MIN_T=256
       - GENESIS_PN80_WARN_RATIO=1.5
+      # Ancho del buffer gate_up del FFN, en elementos: 2 * intermediate_size / TP
+      # = 2 * 17408 / 2 = 17408. Se pone a mano porque get_current_vllm_config()
+      # no esta disponible dentro del worker en el punto donde corre la sonda.
+      # Verificado contra un OOM real: fallo pidiendo 268 MiB con T~8072 tokens,
+      # y 268 MiB / 8072 / 2 bytes = 17408. Sin esto PN80 avisa que no puede
+      # medir el FFN y que el margen real es menor que el que reporta.
+      - GENESIS_PN80_FFN_WIDTH=17408
       # PN25 + PN12: pools de buffers intermedios del FFN ("Cliff 1"). Atacan el
       # sitio de OOM confirmado por traceback: el grafo compilado por inductor
       # pidiendo (T x intermediate_size 17408) fp16.
