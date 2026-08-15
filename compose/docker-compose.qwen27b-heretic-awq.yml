@@ -12,13 +12,13 @@ services:
         ipv4_address: 172.20.0.228
         ipv6_address: fd00:172:20::13
     volumes:
-      - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
+      - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface
       - /home/usuario/.cache/vllm/qwen36-27b-heretic:/root/.cache/vllm
       - /home/usuario/.cache/torch/qwen36-27b-heretic:/root/.cache/torch
       - /home/usuario/.cache/triton/qwen36-27b-heretic:/root/.cache/triton
       - /home/usuario/.cache/torchinductor/qwen36-27b-heretic:/root/.cache/torchinductor
       - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro
-      - /home/usuario/Proyectos/club-3090/models/qwen3.6-27b/vllm/patches/froggeric-chat-template/chat_template.jinja:/etc/qwen-froggeric-chat-template.jinja:ro
+      - ../templates/qwen-froggeric-chat-template.jinja:/etc/qwen-froggeric-chat-template.jinja:ro
       - /home/usuario/Proyectos/requant/models/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-AWQ-W4A16:/models/Qwen3.6-27B-uncensored-heretic-v2-Native-MTP-Preserved-AWQ-W4A16:ro
     environment:
       # Fixes tool-call/streaming validados en vLLM 0.23.0 (dry-run 2026-07-04,

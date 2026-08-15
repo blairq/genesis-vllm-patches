@@ -16,7 +16,7 @@ services:
         ipv6_address: fd00:172:20::13
     volumes:
       # Caché de pesas del modelo de HuggingFace en el host (evita re-descargas)
-      - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
+      - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface
       # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor
       - /home/usuario/.cache/vllm/kat-coder-v25:/root/.cache/vllm
       - /home/usuario/.cache/torch/kat-coder-v25:/root/.cache/torch

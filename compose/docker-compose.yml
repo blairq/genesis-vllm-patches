@@ -12,7 +12,7 @@ services:
         ipv4_address: 172.20.0.224
         ipv6_address: fd00:172:20::8
     volumes:
-      - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
+      - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface
       - ./cache/triton:/root/.triton/cache
       - ./cache/compile:/root/.cache/vllm/torch_compile_cache
       - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro

@@ -16,9 +16,9 @@ services:
         ipv6_address: fd00:172:20::13
     volumes:
       # Caché de pesas del modelo de HuggingFace en el host (evita re-descargas)
-      - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
+      - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface
       # Montaje local de la carpeta autonomizada del modelo GGUF y sus configs
-      - /home/usuario/Proyectos/club-3090/models-cache/gguf-q6k:/model:ro
+      - /home/usuario/Proyectos/models-cache/gguf-q6k:/model:ro
       # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor
       - /home/usuario/.cache/vllm/qwen36-27b-fable-q6k:/root/.cache/vllm
       - /home/usuario/.cache/torch/qwen36-27b-fable-q6k:/root/.cache/torch
