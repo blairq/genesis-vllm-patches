@@ -1,0 +1,242 @@
+version: '3.8'
+
+services:
+  vllm-server:
+    # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.8
+    image: vllm/vllm-openai:v0.23.0
+    container_name: genesis-27b-qwen38-mtp
+    # SIN restart automático a propósito (2026-08-14): con `restart:
+    # unless-stopped`, un crash por OOM se relevantaba solo y el contenedor
+    # aparecía "Up" a los pocos segundos — indistinguible de no haber muerto.
+    # Eso hizo imposible saber si un barrido de --max-num-seqs había roto o no.
+    # Sin la política, un crash queda caído y visible.
+    # Para detectar un reinicio del proceso sin mirar el estado del contenedor:
+    #   curl -s :8320/metrics -H "Authorization: Bearer $VLLM_API_KEY" \
+    #     | grep process_start_time_seconds
+    # Si ese valor cambió, el proceso se reinició (y los acumulativos vllm:* se
+    # resetearon a cero).
+    ports:
+      # Puerto API HTTP OpenAI expuesto localmente
+      - "8320:8320"
+    networks:
+      lanbridge:
+        # IPs estáticas interna IPv4 e IPv6
+        ipv4_address: 172.20.0.228
+        ipv6_address: fd00:172:20::13
+    volumes:
+      # Caché de pesas del modelo de HuggingFace en el host (evita re-descargas)
+      - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
+      # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor (acelera el arranque)
+      - /home/usuario/.cache/vllm/qwen38-27b-w8a16-mtp:/root/.cache/vllm
+      - /home/usuario/.cache/torch/qwen38-27b-w8a16-mtp:/root/.cache/torch
+      - /home/usuario/.cache/triton/qwen38-27b-w8a16-mtp:/root/.cache/triton
+      - /home/usuario/.cache/torchinductor/qwen38-27b-w8a16-mtp:/root/.cache/torchinductor
+      # Montaje de la suite de parches Genesis en modo lectura
+      - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro
+    environment:
+      # ── PARCHES GENESIS (ESTABILIDAD Y NAVEGACIÓN AGÉNTICA) ──────────────────────
+      # PN56: Fallback de parseo XML para qwen3_coder cuando el modelo emite llamadas en formato XML
+      - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
+      # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
+      - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
+      # P62: Corrige el timing de finalización del bloque de pensamiento en decodificación especulativa
+      - GENESIS_ENABLE_P62_STRUCT_OUT_SPEC_TIMING=1
+      # PN51: Desactiva bloques de pensamiento en streaming al ejecutar llamadas a herramientas
+      - GENESIS_ENABLE_PN51_QWEN3_STREAMING_THINKING_DISABLED=1
+      # PN66: Corrige la fuga del token </think> en conversaciones multiturno
+      - GENESIS_ENABLE_PN66=1
+      # PN77: Cuantización FP8 del LM head -> Ahorra ~1.2 GiB de VRAM por GPU
+      - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1
+      # P100: CUDAGraphs FULL para spec-decode -> Mejora la latencia single-stream en +5-10%
+      - GENESIS_ENABLE_P100=1
+      # PN8: Cuantización online del borrador MTP -> Ahorra ~1-2 GiB de VRAM por GPU
+      - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=1
+      # P112: Sistema de cuantización y caché en disco de MTP con fingerprint SHA256 (0% CPU en arranques posteriores)
+      - GENESIS_ENABLE_MTP_QUANT_CACHE=1
+      - GENESIS_MTP_QUANT_FORMAT=int8
+      # P5b: Estrategia de tamaño de página KV para Qwen -> Ahorra ~34% de VRAM por bloque KV
+      - GENESIS_ENABLE_P5B=1
+      # P69: Inyecta recordatorio de formato <tool_call> al final del último mensaje si supera el umbral
+      - GENESIS_ENABLE_P69_LONG_CTX_TOOL_REMINDER=1
+      # Umbral en caracteres (1000) para activar el recordatorio P69 en turnos con herramientas
+      - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
+      # Formato XML <function=...> para el parser qwen3_coder
+      - GENESIS_P69_REMINDER_STYLE=qwen3_coder
+      - GENESIS_ENABLE_P107_MTP_TRUNCATION_DETECTOR=1
+      - GENESIS_ENABLE_PN50_GDN_FUSED_PROJ=1
+      - GENESIS_ENABLE_PN59_STREAMING_GDN=1
+      - GENESIS_ENABLE_PN54_GDN_CONTIGUOUS_DEDUP=1
+      - GENESIS_ENABLE_PN57_TQ_CENTROIDS_DISK_CACHE=1
+      # PN80: sonda de presupuesto de VRAM. Loguea el cálculo real de `h` (el
+      # tensor de la atención lineal) y proyecta cuántos tokens/forward más
+      # entran con la VRAM libre. Observación pura: no cambia ninguna
+      # asignación. Sirve para dimensionar --max-num-seqs con números en vez
+      # de a ciegas. Aviso automático cuando el margen baja de 1.5x.
+      - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=1
+      # PN25 + PN12: pools de buffers intermedios del FFN ("Cliff 1"). Atacan el
+      # sitio de OOM confirmado por traceback el 2026-08-15: el fallo NO es GDN
+      # sino el grafo compilado por inductor pidiendo 108 MiB =
+      # (T=3253 x intermediate_size 17408) fp16. PN25 documenta reducir
+      # ~4,7-18 GiB de transitorios a un buffer pooleado de ~73-285 MiB.
+      - GENESIS_ENABLE_PN25_SILU_INDUCTOR_SAFE=1
+      - GENESIS_ENABLE_PN12_FFN_INTERMEDIATE_POOL=1
+      # PN19: durante la CARGA del modelo fija max_split_size_mb=20 (el mínimo de
+      # PyTorch) y lo restaura al terminar. Ataca la fragmentación de la carga,
+      # que segun vllm#41268 deja 200-500 MiB inutilizables. Reemplaza al
+      # max_split_size_mb:512 global del PYTORCH_CUDA_ALLOC_CONF, que es
+      # redundante con expandable_segments:True.
+      - GENESIS_ENABLE_PN19_SCOPED_MAX_SPLIT=1
+      - GENESIS_PN80_EVERY=40
+      - GENESIS_PN80_MIN_T=256
+      - GENESIS_PN80_WARN_RATIO=1.5
+
+      # ── OPTIMIZACIÓN DE KERNELS GEMM / TENSOR CORES ───────────────────────────
+      - VLLM_FLOAT32_MATMUL_PRECISION=high
+      - VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD=1024
+      - VLLM_MARLIN_USE_ATOMIC_ADD=1
+      - VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
+      - GENESIS_VERBOSE=0
+      - GENESIS_LOG_LEVEL=INFO
+      - NVIDIA_VISIBLE_DEVICES=all
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_NO_USAGE_STATS=0
+      # Evita la fragmentación de memoria en CUDA dividiendo en segmentos expandibles
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
+      - OMP_NUM_THREADS=1
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
+      - TRITON_CACHE_DIR=/root/.cache/triton
+      - VLLM_USE_FLASHINFER_SAMPLER=1
+    shm_size: "16gb"
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        pip install pandas scipy xxhash -q
+        python3 -m vllm._genesis.patches.apply_all
+        exec vllm serve "$@"
+      - --
+    command:
+      # Modelo de Hugging Face W8A16 + MTP
+      - lued/Qwen3.8-27B-INT8-W8A16-MTP
+      - --served-model-name
+      - qwen3.6
+      - --disable-access-log-for-endpoints
+      - "/metrics,/health"
+      - --trust-remote-code
+      - --attention-backend
+      - FLASHINFER
+      - --moe-backend
+      - flashinfer_trtllm
+      - --generation-config
+      - vllm
+      - --dtype
+      - float16
+      # fp8_e4m3: Duplica la capacidad de almacenamiento de la KV cache vs fp16
+      - --kv-cache-dtype
+      - "fp8_e4m3"
+      # ⚠️ NO SUBIR. Diagnóstico completo 2026-08-14/15 (sonda en el código).
+      #
+      # Hay DOS sitios de OOM distintos, no uno:
+      #   (a) max-num-seqs 12 -> OOM en chunk_gated_delta_rule_fwd_h (GDN,
+      #       atención lineal). h = k.new_empty(B, NT, H, V, K).
+      #   (b) max-num-seqs 5 con prompts grandes -> OOM en el GRAFO COMPILADO
+      #       por inductor (torch/_inductor/output_code.py), pidiendo 108 MiB.
+      #       108 MiB / (intermediate_size 17408 x 2 bytes) = 3253 tokens, o sea
+      #       un buffer intermedio del FFN de shape (T, 17408) fp16.
+      #       Esto es "Cliff 1" (transitorios de FFN/SiluAndMul), NO "Cliff 2"
+      #       (GDN). El primer diagnóstico culpaba a GDN y estaba equivocado
+      #       para este caso.
+      #
+      # FÓRMULA MEDIDA de h (GDN), verificada con sonda sobre 200 llamadas
+      # reales — sirve para calcular en vez de tantear:
+      #   h_bytes_por_GPU = tokens_en_el_forward x 12,05 KiB
+      #   (= NT x H x V x K x 2, con NT=T/64, H=24 -> los 48 heads GDN SÍ se
+      #    reparten entre las 2 GPUs, V=K=128, fp16)
+      # `h` se asigna por BATCH COMPLETO, no por secuencia: medido T=1650 con
+      # nseq=2 -> un solo h de 19,5 MiB. Constante 12,0-12,1 KiB/token en todos
+      # los tamaños probados.
+      #
+      # El KV cache NO es el límite (345k tokens libres, contextos de 4-16k).
+      # Lo que falta es margen para transitorios, que viven FUERA del pool que
+      # vLLM perfila con --gpu-memory-utilization y por eso no aparecen en
+      # "Available KV cache memory".
+      #
+      # Throughput medido: 1 seq -> 88 tok/s | 5 seqs -> 308 tok/s (3,5x).
+      # Con 5 seqs y prompts de ~1,4k anda bien; con ~12k OOMea.
+      #
+      # SIGUIENTE PASO (no aplicado aún): PN12 (FFN intermediate scratch pool) y
+      # PN25 (SiluAndMul opaque-op pool) atacan exactamente el sitio (b). Ambos
+      # son categoría memory_savings, sin gate de modelo y opt-in.
+      - --max-num-seqs
+      - "4"
+      - --disable-custom-all-reduce
+      # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
+      - --tensor-parallel-size
+      - "2"
+      # Contexto máximo soportado de 262K tokens
+      - --max-model-len
+      - "262144"
+      # Asignación de VRAM por GPU para pesas + pool de KV Cache (97.5% de 24GB)
+      - --gpu-memory-utilization
+      - "0.965"
+      # Visión: 1 imagen por request (el contrato de agi_vision_inspector es de
+      # UNA imagen) y video en 0 — nunca se usa. El budget del encoder cache se
+      # dimensiona por el ítem multimodal MÁS GRANDE, y un video pesa mucho más
+      # que una imagen: acotarlo achica esa reserva.
+      - --limit-mm-per-prompt
+      - '{"image":1,"video":0}'
+      - --enable-flashinfer-autotune
+      - --reasoning-parser
+      - qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+      # Prefix caching
+      - --enable-prefix-caching
+      # Prefill fragmentado en bloques de 8192 tokens
+      - --enable-chunked-prefill
+      - --max-num-batched-tokens
+      - "8192"
+      - --long-prefill-token-threshold
+      - "4096"
+      - --performance-mode
+      - "throughput"
+      # Tallas de CUDA Graph. Con MTP num_speculative_tokens=3 cada secuencia
+      # aporta 4 tokens por paso, así que 40 cubre hasta 10 seqs.
+      # Se probó extender a 48 (para 12 seqs) el 2026-08-14 y se revirtió junto
+      # con max-num-seqs: capturar 2 tallas más costaba +0,26 GiB de memoria de
+      # grafos (0,79 -> 1,05 GiB), que es justo la que faltó al OOMear.
+      - --cudagraph-capture-sizes
+      - "4"
+      - "8"
+      - "12"
+      - "16"
+      - "20"
+      - "24"
+      - "28"
+      - "32"
+      - "36"
+      - "40"
+      - --async-scheduling
+      # Decodificación especulativa MTP nativa con 3 tokens borrador por paso
+      - --speculative-config
+      - '{"method":"qwen3_next_mtp","num_speculative_tokens":3}'
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8320"
+      - --api-key
+      - "${VLLM_API_KEY:-}"
+
+networks:
+  lanbridge:
+    external: true

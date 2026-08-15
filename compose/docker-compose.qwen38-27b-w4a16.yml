@@ -1,0 +1,168 @@
+version: '3.8'
+
+services:
+  vllm-server:
+    # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.8
+    image: vllm/vllm-openai:v0.23.0
+    container_name: genesis-27b-qwen38-w4a16
+    restart: unless-stopped
+    ports:
+      # Puerto API HTTP OpenAI expuesto localmente
+      - "8320:8320"
+    networks:
+      lanbridge:
+        # IPs estáticas interna IPv4 e IPv6
+        ipv4_address: 172.20.0.228
+        ipv6_address: fd00:172:20::13
+    volumes:
+      # Caché de pesas del modelo de HuggingFace en el host (evita re-descargas)
+      - /home/usuario/Proyectos/club-3090/models-cache:/root/.cache/huggingface
+      # Persistencia de cachés JIT vLLM, PyTorch, Triton y Inductor (acelera el arranque)
+      - /home/usuario/.cache/vllm/qwen38-27b-w4a16:/root/.cache/vllm
+      - /home/usuario/.cache/torch/qwen38-27b-w4a16:/root/.cache/torch
+      - /home/usuario/.cache/triton/qwen38-27b-w4a16:/root/.cache/triton
+      - /home/usuario/.cache/torchinductor/qwen38-27b-w4a16:/root/.cache/torchinductor
+      # Montaje de la suite de parches Genesis en modo lectura
+      - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro
+    environment:
+      # ── PARCHES GENESIS (ESTABILIDAD Y NAVEGACIÓN AGÉNTICA) ──────────────────────
+      # PN56: Fallback de parseo XML para qwen3_coder cuando el modelo emite llamadas en formato XML
+      - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
+      # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
+      - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
+      # P62: Corrige el timing de finalización del bloque de pensamiento en decodificación especulativa
+      - GENESIS_ENABLE_P62_STRUCT_OUT_SPEC_TIMING=1
+      # PN51: Desactiva bloques de pensamiento en streaming al ejecutar llamadas a herramientas
+      - GENESIS_ENABLE_PN51_QWEN3_STREAMING_THINKING_DISABLED=1
+      # PN66: Corrige la fuga del token </think> en conversaciones multiturno
+      - GENESIS_ENABLE_PN66=1
+      # PN77: Cuantización FP8 del LM head -> Ahorra ~1.2 GiB de VRAM por GPU
+      - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1
+      # P100: CUDAGraphs FULL para spec-decode -> Mejora la latencia single-stream en +5-10%
+      - GENESIS_ENABLE_P100=1
+      # PN8: Cuantización online del borrador MTP -> Ahorra ~1-2 GiB de VRAM por GPU
+      - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=1
+      # P112: Sistema de cuantización y caché en disco de MTP con fingerprint SHA256 (0% CPU en arranques posteriores)
+      - GENESIS_ENABLE_MTP_QUANT_CACHE=1
+      - GENESIS_MTP_QUANT_FORMAT=int8
+      # P5b: Estrategia de tamaño de página KV para Qwen -> Ahorra ~34% de VRAM por bloque KV
+      - GENESIS_ENABLE_P5B=1
+      # P69: Inyecta recordatorio de formato <tool_call> al final del último mensaje si supera el umbral
+      - GENESIS_ENABLE_P69_LONG_CTX_TOOL_REMINDER=1
+      # Umbral en caracteres (1000) para activar el recordatorio P69 en turnos con herramientas
+      - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
+      # Formato XML <function=...> para el parser qwen3_coder
+      - GENESIS_P69_REMINDER_STYLE=qwen3_coder
+      - GENESIS_ENABLE_P107_MTP_TRUNCATION_DETECTOR=1
+      - GENESIS_ENABLE_PN50_GDN_FUSED_PROJ=1
+      - GENESIS_ENABLE_PN59_STREAMING_GDN=1
+      - GENESIS_ENABLE_PN54_GDN_CONTIGUOUS_DEDUP=1
+      - GENESIS_ENABLE_PN57_TQ_CENTROIDS_DISK_CACHE=1
+
+      # ── OPTIMIZACIÓN DE KERNELS GEMM / TENSOR CORES ───────────────────────────
+      - VLLM_FLOAT32_MATMUL_PRECISION=high
+      - VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD=1024
+      - VLLM_MARLIN_USE_ATOMIC_ADD=1
+      - VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
+      - GENESIS_VERBOSE=0
+      - GENESIS_LOG_LEVEL=INFO
+      - NVIDIA_VISIBLE_DEVICES=all
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      - VLLM_NO_USAGE_STATS=0
+      # Evita la fragmentación de memoria en CUDA permitiendo segmentos expandibles virtuales
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - OMP_NUM_THREADS=1
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
+      - TRITON_CACHE_DIR=/root/.cache/triton
+      - VLLM_USE_FLASHINFER_SAMPLER=1
+    shm_size: "16gb"
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        pip install pandas scipy xxhash -q
+        python3 -m vllm._genesis.patches.apply_all
+        exec vllm serve "$@"
+      - --
+    command:
+      # Modelo de Hugging Face W4A16 AWQ-GPTQ + MTP
+      - soyrsoyr/Qwen3.8-27B-W4A16-AWQ-GPTQ
+      - --served-model-name
+      - qwen3.6
+      - --disable-access-log-for-endpoints
+      - "/metrics,/health"
+      - --trust-remote-code
+      - --attention-backend
+      - FLASHINFER
+      - --moe-backend
+      - flashinfer_trtllm
+      - --generation-config
+      - vllm
+      - --dtype
+      - float16
+      # fp8_e4m3: Duplica la capacidad de almacenamiento de la KV cache vs fp16
+      - --kv-cache-dtype
+      - "fp8_e4m3"
+      - --max-num-seqs
+      - "5"
+      - --disable-custom-all-reduce
+      # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
+      - --tensor-parallel-size
+      - "2"
+      # Contexto máximo soportado de 262K tokens
+      - --max-model-len
+      - "262144"
+      # Asignación de VRAM por GPU para pesas + pool de KV Cache (94% de 24GB)
+      - --gpu-memory-utilization
+      - "0.94"
+      - --enable-flashinfer-autotune
+      - --reasoning-parser
+      - qwen3
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+      # Prefix caching
+      - --enable-prefix-caching
+      # Prefill fragmentado en bloques de 8192 tokens
+      - --enable-chunked-prefill
+      - --max-num-batched-tokens
+      - "8192"
+      - --long-prefill-token-threshold
+      - "4096"
+      - --performance-mode
+      - "throughput"
+      # Tallas de CUDA Graph para max 5 seqs (5 seqs * 4 tokens = max 20)
+      - --cudagraph-capture-sizes
+      - "4"
+      - "8"
+      - "12"
+      - "16"
+      - "20"
+      - "24"
+      - "28"
+      - "32"
+      - "36"
+      - "40"
+      - --async-scheduling
+      # Decodificación especulativa MTP nativa con 3 tokens borrador por paso
+      - --speculative-config
+      - '{"method":"qwen3_next_mtp","num_speculative_tokens":3}'
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8320"
+      - --api-key
+      - "${VLLM_API_KEY:-}"
+
+networks:
+  lanbridge:
+    external: true

@@ -265,13 +265,22 @@ def _wiring_text_patch(name: str, wiring_module_name: str) -> PatchResult:
     return _failed(name, reason)
 
 
-@register_patch("P110 Qwen3 MTP GPTQ/AWQ loader fix (vllm#47828 backport)")
+@register_patch("P110 Qwen3 MTP compressed-tensors unquantized bypass (vllm#47828 backport)")
 def apply_patch_110_mtp_gptq() -> PatchResult:
     from vllm._genesis.wiring.models import patch_P110_qwen3_mtp_gptq
     status, reason = patch_P110_qwen3_mtp_gptq.apply()
     if status == "applied":
         return _applied("P110", reason)
     return _skipped("P110", reason)
+
+
+@register_patch("P112 Qwen3 MTP Quant Disk Cache (fingerprinted INT8 atomic storage)")
+def apply_patch_112_mtp_disk_quant_cache() -> PatchResult:
+    from vllm._genesis.wiring.models import patch_P112_mtp_disk_quant_cache
+    status, reason = patch_P112_mtp_disk_quant_cache.apply()
+    if status == "applied":
+        return _applied("P112", reason)
+    return _skipped("P112", reason)
 
 
 @register_patch("P8 KV hybrid reporting (per-token capacity)")
@@ -763,6 +772,30 @@ def apply_patch_61b_streaming_overlap() -> PatchResult:
     except Exception as e:
         return _failed(name, f"wiring import failed: {e}")
     status, reason = patch_61b_qwen3_streaming_overlap_guard.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
+def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
+    """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.
+
+    Status: opt-in via GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=1.
+    Tunables: GENESIS_PN80_EVERY=200, GENESIS_PN80_MIN_T=256,
+              GENESIS_PN80_WARN_RATIO=1.5.
+    Observación pura: no altera ninguna asignación ni resultado numérico.
+    """
+    name = "PN80 GDN h budget probe"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N80_gdn_h_budget_probe
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N80_gdn_h_budget_probe.apply()
     if status == "applied":
         return _applied(name, reason)
     if status == "skipped":

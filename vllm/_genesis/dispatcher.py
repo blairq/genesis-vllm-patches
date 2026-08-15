@@ -593,6 +593,34 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
             "model_class": ["qwen3_5", "qwen3_6"],
         },
     },
+    "PN80": {
+        "title": "GDN h budget probe + headroom projection (observabilidad de VRAM)",
+        "env_flag": "GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE",
+        "default_on": False,
+        "category": "memory_savings",
+        "credit": (
+            "Genesis-original 2026-08-15. Observabilidad pura: emite desde el "
+            "punto exacto de la asignacion el calculo de h = B*ceil(T/64)*H*V*K"
+            "*itemsize y proyecta cuantos tokens/forward entran con la VRAM "
+            "libre. Formula verificada sobre 200 llamadas reales en Qwen3.8-27B "
+            "W8A16 TP=2 sobre 2x RTX 3090: 12.05 KiB/token constante (T=1650 -> "
+            "19.5 MiB, T=3760 -> 44.2 MiB). Confirma dos invariantes: h se "
+            "asigna por BATCH COMPLETO (T=1650 con nseq=2 da UN solo h) y los 48 "
+            "heads GDN si se reparten por TP (H=24 observado). Motivacion: "
+            "dimensionar --max-num-seqs era a ciegas porque 'Available KV cache "
+            "memory' no es la memoria que falta al OOMear. Ver "
+            "DIAGNOSTICO-OOM-qwen38-27b.md."
+        ),
+        "upstream_pr": None,
+        "applies_to": {
+            # Cualquier modelo que use el path GDN de FLA.
+            "model_arch": [
+                "Qwen3MoeForCausalLM",
+                "Qwen3_5ForConditionalGeneration",
+                "Qwen3NextForCausalLM",
+            ],
+        },
+    },
     "PN59": {
         "title": "Streaming-GDN orchestrator (Variant D Phase 2) — true Cliff 2b OOM fix",
         "env_flag": "GENESIS_ENABLE_PN59_STREAMING_GDN",
@@ -666,6 +694,30 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
             "tool-call sweep на 27B PROD."
         ),
         "upstream_pr": 41467,
+        "applies_to": {},
+    },
+    "P110": {
+        "title": "Qwen3 MTP compressed-tensors unquantized bypass (vllm#47828 backport)",
+        "env_flag": "GENESIS_ENABLE_P110_MTP_GPTQ_FIX",
+        "default_on": True,
+        "category": "spec_decode",
+        "credit": (
+            "Allows unquantized FP16 MTP draft layers to bypass compressed-tensors "
+            "marlin weight loaders when main model is W4A16/W8A16 AWQ/GPTQ."
+        ),
+        "upstream_pr": 47828,
+        "applies_to": {},
+    },
+    "P112": {
+        "title": "Qwen3 MTP Quant Disk Cache (fingerprinted INT8 atomic storage)",
+        "env_flag": "GENESIS_ENABLE_MTP_QUANT_CACHE",
+        "default_on": True,
+        "category": "spec_decode",
+        "credit": (
+            "Cryptographic SHA256 disk caching for quantized MTP draft layers, "
+            "enabling 0% CPU startup and instant memory mapping."
+        ),
+        "upstream_pr": None,
         "applies_to": {},
     },
     "PN56": {
