@@ -64,10 +64,22 @@ services:
       # P100: CUDAGraphs FULL para spec-decode -> Mejora la latencia single-stream en +5-10%
       - GENESIS_ENABLE_P100=1
       # PN8: Cuantización online del borrador MTP -> Ahorra ~1-2 GiB de VRAM por GPU
-      - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=1
+      # ⛔ PN8 (cuantizacion online del draft MTP) APAGADO A PROPOSITO.
+      # Este checkpoint YA trae el MTP cuantizado (block_name_to_quantize incluye
+      # mtp.layers; 21 de 29 tensores con qweight/qzeros/scales, int4 auto-round).
+      # PN8 lo re-cuantizaba encima y el drafter quedaba inservible:
+      #     con PN8:  acceptance_length 1.00, aceptacion 0.0%  (rechazo total)
+      #     sin PN8:  acceptance_length 2.84, aceptacion 61.4%
+      # PN8 sirve cuando el draft viene SIN cuantizar y se lo quiere achicar
+      # online (~1 GiB/GPU); aca es destructivo. Repro: opencode-debug/mtp_hunt.py
+      # - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=1
       # P112: Sistema de cuantización y caché en disco de MTP con fingerprint SHA256 (0% CPU en arranques posteriores)
-      - GENESIS_ENABLE_MTP_QUANT_CACHE=1
-      - GENESIS_MTP_QUANT_FORMAT=int8
+      # ⛔ P112 (cache en disco de la cuantizacion MTP) APAGADO: sin PN8 no hay
+      # nada que cachear, y con PN8 cacheaba el resultado corrupto.
+      # - GENESIS_ENABLE_MTP_QUANT_CACHE=1
+      # Inerte mientras PN8 este apagado (solo lo lee ese parche). Ademas decia
+      # int8 heredado del engine W8A16, y este modelo es int4.
+      # - GENESIS_MTP_QUANT_FORMAT=int8
       # P5b: Estrategia de tamaño de página KV para Qwen -> Ahorra ~34% de VRAM por bloque KV
       - GENESIS_ENABLE_P5B=1
       # P69: Inyecta recordatorio de formato <tool_call> al final del último mensaje si supera el umbral
