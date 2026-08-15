@@ -779,6 +779,31 @@ def apply_patch_61b_streaming_overlap() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN82 host register sticky error (crash de arranque con offloading)")
+def apply_patch_N82_host_register_sticky_error() -> PatchResult:
+    """PN82: limpia el error de CUDA que deja un cudaHostRegister fallido.
+
+    Sin esto, con OffloadingConnector + TP>1 el engine muere en la captura de
+    CUDA graphs (`sm.fill_(-1)` -> "CUDA error: invalid argument"), de forma
+    intermitente y apuntando a un lugar que no tiene que ver con la causa.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN82=1.
+    """
+    name = "PN82 host register sticky error"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N82_host_register_sticky_error
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N82_host_register_sticky_error.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN81 KV disk tier quota (poda del cache de KV en disco)")
 def apply_patch_N81_kv_disk_tier_quota() -> PatchResult:
     """PN81: cuota y poda por antiguedad del tier de disco del cache de KV.

@@ -115,7 +115,75 @@ y el engine queda colgado repitiendo *"No available shared memory broadcast
 block found in 60 seconds"*. Fue la única variable que diferenciaba al engine
 que fallaba de los dos que andaban.
 
-### 3.3 Sacar `restart: unless-stopped`
+### 3.3 PN82 es obligatorio con TP>1 (bug de vLLM)
+
+⚠️ **Si el engine muere en `sm.fill_(-1)` de forma intermitente, NO es la
+VRAM.** Es un bug de vLLM y bajar `--gpu-memory-utilization` no lo arregla.
+
+`pin_mmap_region()` (`v1/kv_offload/cpu/gpu_worker.py`) pinea el mmap del
+tier de RAM con `cudaHostRegister`. Chequea el retorno, loguea un warning y
+sigue — **sin consumir el error del contexto de CUDA**. El runtime lo deja
+latcheado; PyTorch consulta ese estado en cada op, así que la primera op del
+rank afectado explota lejos de la causa:
+
+```
+20:13:49  TP1  Created mmap file /dev/shm/vllm_offload_... (5.35 GB)
+20:13:49  TP0  Opened existing mmap file (el mismo)
+20:13:51  TP1  WARNING cudaHostRegister failed for rank=1 (code=1)
+20:13:53  TP1  ERROR   sm.fill_(-1) -> CUDA error: invalid argument
+```
+
+Muere **el mismo rank** que falló el registro, y solo ese.
+
+Con TP>1 el registro fallido es el caso *normal*, no una rareza: los dos
+ranks mapean el mismo archivo de `/dev/shm` y ambos lo registran, así que el
+segundo falla sobre las mismas páginas físicas. Que a veces arranque depende
+de qué llamada consuma el error latcheado — de ahí la intermitencia que hace
+imposible tunear el engine.
+
+Medido, mismo compose sin tocar un solo parámetro (KV idéntico, 379.303, en
+las tres corridas):
+
+| corrida | `cudaHostRegister` | arranque | chat |
+|---|---|---|---|
+| 1 | falló | **FALLO** | — |
+| 2 | OK | OK | HTTP 200 |
+| 3 | falló | **FALLO** | — |
+
+Repro determinístico (sin esperar al azar):
+
+```python
+torch.cuda.cudart().cudaHostRegister(0xdeadbeef, 4096, 0)  # -> code 1
+torch.zeros(8, device="cuda").fill_(-1)
+# AcceleratorError: CUDA error: invalid argument
+```
+
+Con `cudaGetLastError()` en el medio, el `fill_` funciona. **PN82 hace
+exactamente eso** y es default ON (kill switch `GENESIS_DISABLE_PN82=1`).
+
+⚠️ `torch.cuda.cudart()` **no expone** `cudaGetLastError` (torch 2.11.0+cu130
+solo trae `cudaError` y `cudaGetErrorString`), así que PN82 lo llama por
+`ctypes` sobre `libcudart`. Verificado post-fix: corrida con
+`cudaHostRegister failed` → PN82 limpia → arranca y responde HTTP 200.
+
+### 3.4 Dejar ~400 MiB para el workspace lazy de FlashInfer
+
+Con MTP, `flashinfer.py:_get_workspace_buffer()` aloca **394 MiB** para el
+wrapper de spec-decode prefill, y lo hace **lazy: en el primer request**, no
+en el arranque. El profiler ya repartió toda la memoria al KV para entonces.
+
+Síntoma: el engine arranca perfecto y muere en el primer request con
+
+```
+torch.OutOfMemoryError: Tried to allocate 394.00 MiB.
+GPU 1 ... 89.00 MiB is free
+  File flashinfer.py, line 781, in _get_workspace_buffer
+```
+
+Este sí es un problema de memoria real. Cualquier flag que libere VRAM y se
+la ceda al KV (§8) tiene que dejar ese margen.
+
+### 3.5 Sacar `restart: unless-stopped`
 
 Un fallo de arranque reintenta en loop (medido: 9 reinicios) y parece que
 "tarda en levantar" en vez de mostrarse como roto. Para detectar un reinicio
@@ -184,6 +252,8 @@ T2.
 | Síntoma | Causa | Fix |
 |---|---|---|
 | OOM en `_allocate_kv_cache_tensors` | cumem sobreestima el KV | bajar `util` (§3.1) |
+| `sm.fill_(-1)` CUDA invalid argument, **intermitente** con TP>1 | `cudaHostRegister` fallido deja el error latcheado (bug de vLLM) — NO es la VRAM | PN82, §3.3 |
+| OOM de 394 MiB en el **primer request**, `_get_workspace_buffer` | workspace de FlashInfer alocado lazy tras el profiling | dejar margen, §3.4 |
 | Colgado en *"No available shared memory broadcast block"* + `sm.fill_(-1)` CUDA invalid argument | falta `max_split_size_mb` | §3.2 |
 | Colgado en lo mismo **sin** error CUDA | está compilando; puede tardar >10 min | esperar; mirar CPU/GPU |
 | `madvise: Bad address` al arrancar | `/dev/shm` lleno de mmaps huérfanos | PN81 los purga; si no, borrarlos |
@@ -204,3 +274,37 @@ T2.
 Ektome rinde mucho más KV porque **cuantiza el doble de tensores**: 1600
 contra 789 del AutoRound (borrado), que dejaba 936 en bf16 al excluir todo
 `linear_attn` (las 48 capas DeltaNet).
+
+---
+
+## 8. Flags que liberan VRAM para el KV (medido en w8a16-mtp)
+
+Medido 2026-08-15, TP=2, `util 0.82`. Los tres números salen del profiler y
+son reproducibles; los crashes que aparecieron durante el barrido eran PN82
+(§3.3), **no** los flags.
+
+| config | KV en GPU | delta |
+|---|---|---|
+| baseline | 379.303 | — |
+| `+ --mm-processor-kwargs` | 399.806 | **+20.503** (+5,4%) |
+| `+ --max-num-batched-tokens 4096` | 430.560 | **+51.257** (+13,5%) |
+
+### `--mm-processor-kwargs '{"max_pixels":2000000,"min_pixels":65536}'`
+
+El profiler corre un dummy multimodal con el ítem **más grande permitido**.
+Sin este flag usa el `max_pixels` del `preprocessor_config.json` del modelo y
+reserva activaciones para una imagen enorme que nunca se manda. 2.000.000 px
+≈ 1414×1414, de sobra para el contrato de una imagen por request.
+
+Complementa a `--limit-mm-per-prompt '{"image":1,"video":0}'`: ese acota
+*cuántos* ítems, este acota *qué tan grande* es cada uno.
+
+### `--max-num-batched-tokens 4096`
+
+Achica el pico transitorio de las capas GDN, que escala lineal con los
+tokens del batch (12,05 KiB/token/GPU, ver PN80). **Costo**: parte el
+prefill en chunks la mitad de grandes, así que un prompt de 200k tarda más
+en procesarse. Es un cambio de KV por throughput de prefill, no gratis.
+
+⚠️ Al subir el KV hay que verificar el margen de §3.4: el workspace de
+FlashInfer (394 MiB) se aloca en el **primer request**, no en el arranque.

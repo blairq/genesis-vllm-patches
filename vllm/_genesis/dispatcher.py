@@ -593,6 +593,31 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
             "model_class": ["qwen3_5", "qwen3_6"],
         },
     },
+    "PN82": {
+        "title": "Limpia el error pegajoso de CUDA que deja un cudaHostRegister fallido",
+        "env_flag": "GENESIS_ENABLE_PN82_HOST_REGISTER_STICKY",
+        "default_on": True,
+        "category": "correctness",
+        "credit": (
+            "Genesis-original 2026-08-15. Bug de vLLM: pin_mmap_region() "
+            "(v1/kv_offload/cpu/gpu_worker.py) chequea el retorno de "
+            "cudaHostRegister, loguea un warning y sigue SIN consumir el error "
+            "con cudaGetLastError. El runtime de CUDA lo deja latcheado en el "
+            "contexto y PyTorch lo consulta en cada op, asi que la primera op "
+            "de ese rank explota lejos de la causa: _dummy_run -> sm.fill_(-1) "
+            "-> 'CUDA error: invalid argument' durante la captura de CUDA "
+            "graphs. Con TP>1 el registro fallido es el caso NORMAL: los dos "
+            "ranks mapean el mismo archivo de /dev/shm y ambos lo registran, "
+            "asi que el segundo falla sobre las mismas paginas fisicas. Medido "
+            "en w8a16-mtp TP=2: cudaHostRegister failed rank=1 a las 20:13:51, "
+            "sm.fill_ muere en rank=1 —y solo en rank=1— a las 20:13:53. El "
+            "sintoma parece falta de VRAM y no lo es: bajar "
+            "--gpu-memory-utilization no ayuda, y la intermitencia hace "
+            "imposible tunear el engine."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN81": {
         "title": "KV disk tier quota + poda por antiguedad (el tier fs de vLLM no tiene ninguna)",
         "env_flag": "GENESIS_ENABLE_PN81_KV_DISK_QUOTA",
