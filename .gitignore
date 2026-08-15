@@ -67,3 +67,7 @@ todos-log-*.md
 .README_*backup*.md
 .README_v*_backup*.md
 compose/cache/
+
+# ...pero la PLANTILLA sí se versiona: no tiene valores reales y es lo que
+# permite que un checkout nuevo sepa qué credenciales configurar.
+!compose/.env.example
