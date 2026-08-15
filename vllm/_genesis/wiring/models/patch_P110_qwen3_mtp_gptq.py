@@ -50,13 +50,13 @@ from vllm._genesis.wiring.text_patch import (
 )
 
 log = logging.getLogger("genesis.wiring.p110_qwen3_mtp_gptq")
-GENESIS_P110_MARKER = "Genesis P110 Qwen3 MTP GPTQ/AWQ fix v7.62.x guard-v3"
+GENESIS_P110_MARKER = "Genesis P110 Qwen3 MTP GPTQ/AWQ fix v7.63.x guard-v4"
 P110_ANCHOR = (
     "        self.quant_config = vllm_config.quant_config\n"
 )
 
 P110_REPLACEMENT = (
-    "        # [Genesis P110 backport of vllm#47828]\n"
+    "        # [Genesis P110 Qwen3 MTP GPTQ/AWQ fix v7.63.x guard-v4]\n"
     "        # GPTQ/AWQ: MTP decoder layers use unquantized bf16 weights.\n"
     "        bypass_mtp_quant = False\n"
     "        if vllm_config.quant_config and vllm_config.quant_config.get_name() not in (\"modelopt_fp4\",):\n"
@@ -67,6 +67,7 @@ P110_REPLACEMENT = (
     "                    bypass_mtp_quant = True\n"
     "            if not bypass_mtp_quant and vllm_config.quant_config.get_name() in (\n"
     "                \"gptq\", \"auto_gptq\", \"gptq_marlin\", \"awq\", \"awq_marlin\",\n"
+    "                \"compressed-tensors\", \"compressed_tensors\", \"marlin\", \"compressed_tensors_wNa16\",\n"
     "            ):\n"
     "                bypass_mtp_quant = True\n"
     "        self.quant_config = None if bypass_mtp_quant else vllm_config.quant_config\n"
@@ -121,7 +122,7 @@ P110_PREDICTOR_ANCHOR = (
 )
 
 P110_PREDICTOR_REPLACEMENT = (
-    "        # [Genesis P110 backport of vllm#47828, extended 2026-07-31]\n"
+    "        # [Genesis P110 Qwen3 MTP GPTQ/AWQ fix v7.63.x guard-v4]\n"
     "        # GPTQ/AWQ checkpoints store the WHOLE MTP predictor block (fc +\n"
     "        # attention + MoE experts) as plain unquantized BF16 tensors, not\n"
     "        # just `fc` (which upstream already special-cases for modelopt_fp4\n"
@@ -144,6 +145,7 @@ P110_PREDICTOR_REPLACEMENT = (
     "                    _genesis_p110_bypass_mtp_quant = True\n"
     "            if not _genesis_p110_bypass_mtp_quant and quant_config.get_name() in (\n"
     "                \"gptq\", \"auto_gptq\", \"gptq_marlin\", \"awq\", \"awq_marlin\",\n"
+    "                \"compressed-tensors\", \"compressed_tensors\", \"marlin\", \"compressed_tensors_wNa16\",\n"
     "            ):\n"
     "                _genesis_p110_bypass_mtp_quant = True\n"
     "\n"
@@ -221,9 +223,7 @@ def _make_patcher() -> TextPatcher | None:
                 required=True,
             ),
         ],
-        upstream_drift_markers=[
-            "[Genesis P110",
-        ],
+        upstream_drift_markers=[],
     )
 
 
