@@ -5,7 +5,11 @@ services:
     # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.8
     image: vllm/vllm-openai:v0.23.0
     container_name: genesis-27b-qwen38-autoround
-    restart: unless-stopped
+    # SIN restart automatico a proposito: con `restart: unless-stopped` un crash
+    # por OOM se relevanta solo y el contenedor aparece "Up" a los segundos,
+    # indistinguible de no haber muerto. Para detectar un reinicio del proceso:
+    #   curl -s :PORT/metrics -H "Authorization: Bearer $VLLM_API_KEY" \
+    #     | grep process_start_time_seconds
     ports:
       # Puerto API HTTP OpenAI expuesto localmente
       - "8320:8320"
@@ -27,6 +31,18 @@ services:
     environment:
       # ── PARCHES GENESIS (ESTABILIDAD Y NAVEGACIÓN AGÉNTICA) ──────────────────────
       # PN56: Fallback de parseo XML para qwen3_coder cuando el modelo emite llamadas en formato XML
+      # PN80: sonda de presupuesto de VRAM. Loguea el calculo real del tensor `h`
+      # de la atencion lineal y proyecta cuantos tokens/forward mas entran con la
+      # VRAM libre, con veredicto de si hay que bajar --gpu-memory-utilization.
+      - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=1
+      - GENESIS_PN80_EVERY=40
+      - GENESIS_PN80_MIN_T=256
+      - GENESIS_PN80_WARN_RATIO=1.5
+      # PN25 + PN12: pools de buffers intermedios del FFN ("Cliff 1"). Atacan el
+      # sitio de OOM confirmado por traceback: el grafo compilado por inductor
+      # pidiendo (T x intermediate_size 17408) fp16.
+      - GENESIS_ENABLE_PN25_SILU_INDUCTOR_SAFE=1
+      - GENESIS_ENABLE_PN12_FFN_INTERMEDIATE_POOL=1
       - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
       # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
       - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
@@ -96,11 +112,19 @@ services:
     command:
       # Modelo de Hugging Face Qwen3.8 27B INT4 W4A16 AutoRound (Sin censura)
       - goldhub/Qwen3.8-27B-INT4-W4A16-AutoRound
+      # Alias comun a los tres engines de qwen3.8 (w8a16-mtp, w4a16, autoround)
+      # para que sean INTERCAMBIABLES: los clientes piden "qwen3.6" y se puede
+      # cambiar de cuantizacion sin tocar el opencode.jsonc ni ningun cliente.
+      # (El nombre quedo heredado de qwen3.6; renombrarlo es deuda pendiente y
+      #  hay que hacerlo en los 3 composes + los 7 canales a la vez.)
+      # --served-model-name acepta VARIOS valores en UN solo flag. Repetir el
+      # flag no suma alias: argparse se queda con el ULTIMO, y por eso el
+      # engine solo respondia a 'goldhub/...' aunque el compose listaba 4.
+      # Asi los tres alias funcionan de verdad; 'qwen3.6' es el que usan los
+      # clientes (opencode.jsonc) y hace a los engines intercambiables.
       - --served-model-name
       - qwen3.6
-      - --served-model-name
       - qwen3.8
-      - --served-model-name
       - goldhub/Qwen3.8-27B-INT4-W4A16-AutoRound
       - --disable-access-log-for-endpoints
       - "/metrics,/health"
@@ -116,8 +140,14 @@ services:
       # fp8_e4m3: Duplica la capacidad de almacenamiento de la KV cache vs fp16
       - --kv-cache-dtype
       - "fp8_e4m3"
+      # 4 y no mas: MEDIDO 2026-08-15 con el payload real de un subagente
+      # (5.390 tok, 8 tools) sobre el W8A16 -> 4 concurrentes 4/4 OK,
+      # 5 concurrentes 0/5 HTTP 500 por OOM. Con el cap en 4 el exceso
+      # se ENCOLA en vez de reventar (verificado 5/5, 6/6, 8/8).
+      # Este modelo es INT4 (pesos ~mitad que W8A16) asi que quiza
+      # tolere mas: subir SOLO si PN80 reporta margen >= 1.5x sostenido.
       - --max-num-seqs
-      - "5"
+      - "4"
       - --disable-custom-all-reduce
       # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
       - --tensor-parallel-size
@@ -126,6 +156,9 @@ services:
       - --max-model-len
       - "262144"
       # Asignación de VRAM por GPU para pesas + pool de KV Cache (94% de 24GB)
+      # Vision: 1 imagen por request y video en 0 — nunca se usa.
+      - --limit-mm-per-prompt
+      - '{"image":1,"video":0}'
       - --gpu-memory-utilization
       - "0.94"
       - --enable-flashinfer-autotune
@@ -138,8 +171,16 @@ services:
       - --enable-prefix-caching
       # Prefill fragmentado en bloques de 8192 tokens
       - --enable-chunked-prefill
+      # 8192 -> 4096 (2026-08-15). Este flag fija el tamano del MAYOR forward, y
+      # con el, el pico de los buffers transitorios del FFN. Medido: con 8192 el
+      # engine OOMeaba pidiendo 268 MiB = (8072 tok x intermediate_size 17408 x
+      # 2 bytes), teniendo solo 275 MiB libres. A 4096 ese buffer se parte al
+      # medio (~134 MiB).
+      # Es mejor palanca que --gpu-memory-utilization: acota el pico SIN sacarle
+      # un solo token al KV cache. El prefill ya venia fragmentado, asi que el
+      # costo es solo un poco mas de latencia en el primer chunk.
       - --max-num-batched-tokens
-      - "8192"
+      - "4096"
       - --long-prefill-token-threshold
       - "4096"
       - --performance-mode
