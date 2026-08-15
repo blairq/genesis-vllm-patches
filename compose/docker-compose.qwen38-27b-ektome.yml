@@ -38,9 +38,17 @@ services:
       # de la atencion lineal y proyecta cuantos tokens/forward mas entran con la
       # VRAM libre, con veredicto de si hay que bajar --gpu-memory-utilization.
       - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=1
-      - GENESIS_PN80_EVERY=40
+      # 1 caja cada N llamadas a la sonda. Hay 48 capas GDN por forward, asi
+      # que un valor bajo emite mas de una caja POR FORWARD: con 40 salian
+      # 1488 lineas en un test de 2 minutos. El camino de 'riesgo de OOM'
+      # ademas tiene cooldown propio (GENESIS_PN80_TIGHT_COOLDOWN, 30s).
+      - GENESIS_PN80_EVERY=2000
       - GENESIS_PN80_MIN_T=256
-      - GENESIS_PN80_WARN_RATIO=1.5
+      # Objetivo: MiB libres despues del transitorio de cada paso. Reemplaza
+      # al viejo ratio 'margen sano 1.5x', que no decia cuanta VRAM sobra --
+      # que es justo lo que se tunea. 100 MiB es el minimo con el que los 3
+      # engines pasaron 5 prompts de 30k en paralelo sin OOMear.
+      - GENESIS_PN80_TARGET_FREE_MIB=100
       # PN81: cuota y poda del tier de disco del cache de KV. vLLM no trae
       # ninguna: root_dir crece sin techo. Poda por antiguedad (mtime) al
       # superar el limite, bajando hasta TARGET_RATIO para no podar seguido.
@@ -54,7 +62,6 @@ services:
       # Verificado contra un OOM real: fallo pidiendo 268 MiB con T~8072 tokens,
       # y 268 MiB / 8072 / 2 bytes = 17408. Sin esto PN80 avisa que no puede
       # medir el FFN y que el margen real es menor que el que reporta.
-      - GENESIS_PN80_FFN_WIDTH=17408
       # PN25 + PN12: pools de buffers intermedios del FFN ("Cliff 1"). Atacan el
       # sitio de OOM confirmado por traceback: el grafo compilado por inductor
       # pidiendo (T x intermediate_size 17408) fp16.
@@ -192,7 +199,15 @@ services:
       # Asignación de VRAM por GPU para pesas + pool de KV Cache (94% de 24GB)
       # Vision: 1 imagen por request y video en 0 — nunca se usa.
       - --limit-mm-per-prompt
-      - '{"image":1,"video":0}'
+      - '{"image":2,"video":0}'
+      # Techo de resolucion del preprocesador de vision. El profiler de memoria
+      # corre un dummy multimodal con el item MAS GRANDE permitido; sin este flag
+      # usa el max_pixels del preprocessor_config.json del modelo y reserva
+      # activaciones para una imagen enorme que nunca vamos a mandar.
+      # 2.000.000 px ~ 1414x1414, de sobra para el contrato de una imagen/request.
+      # Medido en w8a16-mtp: +5,4% de KV. Ver docs/KV-OFFLOADING.md §9.
+      - --mm-processor-kwargs
+      - '{"max_pixels":2000000,"min_pixels":65536}'
       # 0.94 -> 0.90 para ESTE modelo. Sus pesos son 8.8 GiB (vs 13.2 del
       # autoround), asi que a 0.94 vLLM se auto-asignaba un KV de 885.297
       # tokens que despues NO entraba: OOM en _allocate_kv_cache_tensors
@@ -203,7 +218,7 @@ services:
       # moria en _allocate_kv_cache_tensors. Bajar util compensa ese error.
       # Aun asi el KV queda enorme: este modelo pesa 8.8 GiB, no 13.2.
       - --gpu-memory-utilization
-      - "0.78"
+      - "0.761"
       - --enable-flashinfer-autotune
       - --reasoning-parser
       - qwen3

@@ -58,7 +58,7 @@ QUÉ IMPRIME
     [PN80]  VRAM      libre AHORA en esta GPU: 67.0 MiB (de 24576 MiB totales)
     [PN80]  PROYECC.  67.0 MiB libres / 12.05 KiB por token = 5,693 tokens mas por forward
     [PN80]  MARGEN    5,693 tok proyectados / 6820 tok actuales = 0.8x
-    [PN80]  *** AVISO: margen 0.8x < umbral 1.5x (GENESIS_PN80_WARN_RATIO). Riesgo de OOM. ***
+    [PN80]  *** AVISO: quedarian 12 MiB libres, objetivo 100 (GENESIS_PN80_TARGET_FREE_MIB). ***
     [PN80]  OJO       esta cuenta acota SOLO `h`. En el mismo forward tambien se piden
                       v_new (~6.03 KiB/tok) y los intermedios del FFN. Tomar como COTA SUPERIOR.
 
@@ -137,7 +137,13 @@ ANCHOR_NEW = (
     "            _g80_min_t = int(_g80_os.environ.get('GENESIS_PN80_MIN_T', '256'))\n"
     "            if T > _g80_min_t:\n"
     "                _g80_every = max(int(_g80_os.environ.get('GENESIS_PN80_EVERY', '200')), 1)\n"
-    "                _g80_warn_at = float(_g80_os.environ.get('GENESIS_PN80_WARN_RATIO', '1.5'))\n"
+    "                # El objetivo es MiB libres DESPUES de servir el transitorio de\n"
+    "                # este paso, no un ratio: 'margen 1.5x' no dice cuanta VRAM\n"
+    "                # sobra, y lo que se tunea es exactamente eso. El default de 100\n"
+    "                # MiB es el minimo con el que este rig paso 5 prompts de 30k en\n"
+    "                # paralelo sin OOMear (medido en los 3 engines qwen38).\n"
+    "                _g80_obj = float(_g80_os.environ.get('GENESIS_PN80_TARGET_FREE_MIB', '100'))\n"
+    "                _g80_warn_at = float(_g80_os.environ.get('GENESIS_PN80_WARN_RATIO', '0'))\n"
     "                _g80_item = k.element_size()\n"
     "                _g80_bytes = B * NT * H * V * K * _g80_item\n"
     "                _g80_per_tok = _g80_bytes / float(T)\n"
@@ -162,8 +168,19 @@ ANCHOR_NEW = (
     "                            _GENESIS_PN80_FFNW = 0\n"
     "                    else:\n"
     "                        try:\n"
-    "                            from vllm.config import get_current_vllm_config as _g80_cf\n"
-    "                            _g80_c = _g80_cf()\n"
+    "                            # get_current_vllm_config() LANZA en el forward: vLLM\n"
+    "                            # solo lo deja seteado durante la construccion del\n"
+    "                            # modelo (su propio error lo dice: '...or at model\n"
+    "                            # forward time when config is not set'). Por eso este\n"
+    "                            # bloque caia SIEMPRE al except y el FFN quedaba en 0,\n"
+    "                            # subestimando el transitorio ~2.6x. El sub-patch\n"
+    "                            # pn80_config_capture guarda una referencia que\n"
+    "                            # sobrevive al contexto.\n"
+    "                            import vllm._genesis as _g80_ns\n"
+    "                            _g80_c = getattr(_g80_ns, 'VLLM_CONFIG_CAPTURADO', None)\n"
+    "                            if _g80_c is None:\n"
+    "                                from vllm.config import get_current_vllm_config as _g80_cf\n"
+    "                                _g80_c = _g80_cf()\n"
     "                            _g80_mc = _g80_c.model_config\n"
     "                            _g80_i = 0\n"
     "                            # el config puede estar plano, anidado en text_config, o\n"
@@ -187,7 +204,8 @@ ANCHOR_NEW = (
     "                _g80_tr_tok = _g80_total_tr / float(T)\n"
     "                _g80_proj = int(_g80_free / _g80_tr_tok) if _g80_tr_tok > 0 else -1\n"
     "                _g80_ratio = (_g80_proj / float(T)) if T > 0 else 0.0\n"
-    "                _g80_tight = _g80_ratio < _g80_warn_at\n"
+    "                _g80_sobra_mib = (_g80_free - _g80_total_tr) / 1048576.0\n"
+    "                _g80_tight = _g80_sobra_mib < _g80_obj\n"
     "                # Solo el rank 0 imprime: con tensor-parallel cada worker\n"
     "                # reporta SU GPU y el bloque salia duplicado. Las GPUs de un\n"
     "                # mismo TP group llevan la misma carga, asi que una alcanza.\n"
@@ -200,7 +218,22 @@ ANCHOR_NEW = (
     "                            _g80_rank0 = _g80_dist.get_rank() == 0\n"
     "                    except Exception:\n"
     "                        pass\n"
-    "                if _g80_rank0 and (_g80_tight or (_GENESIS_PN80_CALLS % _g80_every) == 0):\n"
+    "                # El camino 'tight' imprimia en CADA llamada, y hay 48 capas\n"
+    "                # GDN por forward: bajo presion de memoria eso inunda el log con\n"
+    "                # cientos de cajas identicas por segundo, justo cuando hay que\n"
+    "                # leerlo. Se le pone un cooldown por tiempo.\n"
+    "                global _GENESIS_PN80_LAST_EMIT\n"
+    "                try:\n"
+    "                    _GENESIS_PN80_LAST_EMIT\n"
+    "                except NameError:\n"
+    "                    _GENESIS_PN80_LAST_EMIT = 0.0\n"
+    "                _g80_cool = float(_g80_os.environ.get('GENESIS_PN80_TIGHT_COOLDOWN', '30'))\n"
+    "                import time as _g80_time\n"
+    "                _g80_now = _g80_time.monotonic()\n"
+    "                _g80_emitir = (_g80_tight and (_g80_now - _GENESIS_PN80_LAST_EMIT) >= _g80_cool) \\\n"
+    "                              or (_GENESIS_PN80_CALLS % _g80_every) == 0\n"
+    "                if _g80_rank0 and _g80_emitir:\n"
+    "                    _GENESIS_PN80_LAST_EMIT = _g80_now\n"
     "                    _g80_nseq = (len(cu_seqlens) - 1) if cu_seqlens is not None else B\n"
     "                    _g80_dt = str(k.dtype).replace('torch.', '')\n"
     "                    _g80_elems = B * NT * H * V * K\n"
@@ -210,7 +243,7 @@ ANCHOR_NEW = (
     "                    _g80_ktok = _g80_per_tok / 1024.0\n"
     "                    # Cuanta VRAM haria falta para llegar al margen sano, y a\n"
     "                    # cuantos puntos de --gpu-memory-utilization equivale.\n"
-    "                    _g80_need = _g80_tr_tok * T * _g80_warn_at\n"
+    "                    _g80_need = _g80_total_tr + _g80_obj * 1048576.0\n"
     "                    _g80_falta = max(_g80_need - _g80_free, 0.0)\n"
     "                    _g80_pts = _g80_falta / float(_g80_total)\n"
     "                    _g80_util = None\n"
@@ -270,16 +303,17 @@ ANCHOR_NEW = (
     "                    _g80_e('|    Con eso entrarian %s tokens mas (contando TODOS los '\n"
     "                           'buffers de arriba); el lote actual pide %s.',\n"
     "                           format(_g80_proj, ','), format(T, ','))\n"
-    "                    _g80_e('|    Margen: %.1fx   (sano seria %.1fx o mas)',\n"
-    "                           _g80_ratio, _g80_warn_at)\n"
+    "                    _g80_e('|    Despues de servir este lote quedarian %.0f MiB '\n"
+    "                           'libres (objetivo: %.0f).',\n"
+    "                           _g80_sobra_mib, _g80_obj)\n"
     "                    _g80_e('|')\n"
     "                    if not _g80_tight:\n"
     "                        _g80_e('|  >>> QUE HACER: NADA. La VRAM alcanza, no hace falta '\n"
     "                               'bajar --gpu-memory-utilization.')\n"
     "                    else:\n"
     "                        _g80_e('|  >>> QUE HACER: SI, HAY QUE BAJAR LA VRAM RESERVADA.')\n"
-    "                        _g80_e('|      Faltan ~%.0f MiB por GPU para llegar al margen '\n"
-    "                               'sano de %.1fx.', _g80_falta / 1048576.0, _g80_warn_at)\n"
+    "                        _g80_e('|      Faltan ~%.0f MiB por GPU para el objetivo de '\n"
+    "                               '%.0f MiB libres.', _g80_falta / 1048576.0, _g80_obj)\n"
     "                        if _g80_util is not None:\n"
     "                            _g80_e('|      BAJA --gpu-memory-utilization de %.3f a %.3f '\n"
     "                                   '(son %.1f puntos porcentuales).',\n"
@@ -316,6 +350,55 @@ ANCHOR_NEW = (
     "        except Exception:\n"
     "            pass\n"
 ) + ANCHOR_OLD
+
+
+# ── captura del VllmConfig ──────────────────────────────────────────────────
+# `get_current_vllm_config()` LANZA fuera del contexto de construccion del
+# modelo; vLLM lo dice en su propio mensaje de error: "...or a CustomOp was
+# instantiated at module import time or model forward time when config is not
+# set". Cualquier sonda que corra en el forward —como esta— no puede leerlo.
+#
+# Este sub-patch guarda una referencia mientras el config SI esta seteado, para
+# que sobreviva al contexto. Sin esto PN80 no podia leer intermediate_size y el
+# buffer gate_up del FFN quedaba en 0: con lotes de 4096 tokens son 142 MiB por
+# GPU sin contar, o sea que el transitorio real es ~52 KiB/token y PN80
+# reportaba ~18. Todos sus veredictos venian subestimados ~2.6x.
+ANCHOR_CAPTURE_OLD = """        _current_vllm_config = vllm_config
+        _current_prefix = prefix
+"""
+
+ANCHOR_CAPTURE_NEW = """        _current_vllm_config = vllm_config
+        _current_prefix = prefix
+        # _GENESIS_PN80_CONFIG_CAPTURE
+        try:
+            import vllm._genesis as _g80_ns
+
+            _g80_ns.VLLM_CONFIG_CAPTURADO = vllm_config
+        except Exception:
+            pass
+"""
+
+
+def _patcher_capture() -> TextPatcher | None:
+    # OJO: set_current_vllm_config se importa desde vllm.config pero se DEFINE
+    # en config/vllm.py. Ademas es un @contextmanager, asi que
+    # inspect.getsourcefile() devuelve contextlib.py y hay que seguir __wrapped__.
+    target = resolve_vllm_file("config/vllm.py")
+    if target is None:
+        return None
+    return TextPatcher(
+        patch_name="PN80 config capture",
+        target_file=str(target),
+        marker="_GENESIS_PN80_CONFIG_CAPTURE",
+        sub_patches=[
+            TextPatch(
+                name="pn80_config_capture",
+                anchor=ANCHOR_CAPTURE_OLD,
+                replacement=ANCHOR_CAPTURE_NEW,
+                required=True,
+            ),
+        ],
+    )
 
 
 def _is_enabled() -> bool:
@@ -372,6 +455,15 @@ def apply() -> tuple[str, str]:
     p = _patcher()
     if p is None:
         return "skipped", "fla/ops/chunk_delta_h.py not found"
+    # captura del config: sin esto la sonda no puede leer intermediate_size y
+    # el FFN queda sin contar. Best-effort: si el ancla derivo, el resto de PN80
+    # sigue sirviendo (avisa en el reporte que el margen real es menor).
+    cp = _patcher_capture()
+    if cp is not None:
+        try:
+            cp.apply()
+        except Exception:
+            pass
     result, failure = p.apply()
     return result_to_wiring_status(
         result,
@@ -380,7 +472,7 @@ def apply() -> tuple[str, str]:
             "PN80 applied: sonda de presupuesto de h activa. Formula "
             "h_bytes = B*ceil(T/64)*H*V*K*itemsize, verificada sobre 200 "
             "llamadas reales (12.05 KiB/tok en Qwen3.8-27B W8A16 TP=2). "
-            "Tunear con GENESIS_PN80_EVERY / _MIN_T / _WARN_RATIO."
+            "Tunear con GENESIS_PN80_EVERY / _MIN_T / _TARGET_FREE_MIB / _TIGHT_COOLDOWN."
         ),
         patch_name="PN80 GDN h budget probe",
     )

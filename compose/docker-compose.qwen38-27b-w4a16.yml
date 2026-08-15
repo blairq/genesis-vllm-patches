@@ -80,6 +80,22 @@ services:
       - VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD=1024
       - VLLM_MARLIN_USE_ATOMIC_ADD=1
       - VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
+      # intermediate_size del modelo. Sin esto PN80 no puede medir el buffer
+      # gate_up del FFN. PN80 ahora lo deriva solo (sub-patch pn80_config_capture);
+      # esta env queda como override manual. Con 4096 tokens de lote el FFN son
+      # 142 MiB por GPU: el transitorio real es ~52 KiB/token, no ~18.
+      - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=1
+      # 1 caja cada N llamadas a la sonda. Hay 48 capas GDN por forward, asi
+      # que un valor bajo emite mas de una caja POR FORWARD: con 40 salian
+      # 1488 lineas en un test de 2 minutos. El camino de 'riesgo de OOM'
+      # ademas tiene cooldown propio (GENESIS_PN80_TIGHT_COOLDOWN, 30s).
+      - GENESIS_PN80_EVERY=2000
+      - GENESIS_PN80_MIN_T=256
+      # Objetivo: MiB libres despues del transitorio de cada paso. Reemplaza
+      # al viejo ratio 'margen sano 1.5x', que no decia cuanta VRAM sobra --
+      # que es justo lo que se tunea. 100 MiB es el minimo con el que los 3
+      # engines pasaron 5 prompts de 30k en paralelo sin OOMear.
+      - GENESIS_PN80_TARGET_FREE_MIB=100
       - GENESIS_VERBOSE=0
       - GENESIS_LOG_LEVEL=INFO
       - NVIDIA_VISIBLE_DEVICES=all
@@ -149,8 +165,22 @@ services:
       # moria en _allocate_kv_cache_tensors. La correccion es restar
       # 3.2/23.56 = 0.135 al valor que funcionaba sin offloading.
       - --gpu-memory-utilization
-      - "0.805"
+      - "0.764"
       - --enable-flashinfer-autotune
+      # Techo de resolucion del preprocesador de vision. El profiler de memoria
+      # corre un dummy multimodal con el item MAS GRANDE permitido; sin este flag
+      # usa el max_pixels del preprocessor_config.json del modelo y reserva
+      # activaciones para una imagen enorme que nunca vamos a mandar.
+      # 2.000.000 px ~ 1414x1414, de sobra para el contrato de una imagen/request.
+      # Medido en w8a16-mtp: +5,4% de KV. Ver docs/KV-OFFLOADING.md §9.
+      - --mm-processor-kwargs
+      - '{"max_pixels":2000000,"min_pixels":65536}'
+      # 2 imagenes por request, video en 0 (nunca se usa). El budget del encoder
+      # cache se dimensiona por el item multimodal MAS GRANDE y por cuantos entran,
+      # asi que subir de 1 a 2 CUESTA algo de VRAM. Va acotado por
+      # --mm-processor-kwargs, que le pone techo al tamaño de cada imagen.
+      - --limit-mm-per-prompt
+      - '{"image":2,"video":0}'
       - --reasoning-parser
       - qwen3
       - --enable-auto-tool-choice
@@ -177,8 +207,12 @@ services:
       - --enable-prefix-caching
       # Prefill fragmentado en bloques de 8192 tokens
       - --enable-chunked-prefill
+      # 4096 y no 8192: achica el pico transitorio de las capas GDN, que escala
+      # lineal con los tokens del batch (~12 KiB por token, por GPU -> PN80).
+      # Medido en w8a16-mtp: +13,5% de KV. COSTO REAL: parte el prefill en chunks
+      # la mitad de grandes, o sea que un prompt de 200k tarda mas en procesarse.
       - --max-num-batched-tokens
-      - "8192"
+      - "4096"
       - --long-prefill-token-threshold
       - "4096"
       - --performance-mode

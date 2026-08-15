@@ -100,9 +100,21 @@ services:
       # max_split_size_mb:512 global del PYTORCH_CUDA_ALLOC_CONF, que es
       # redundante con expandable_segments:True.
       - GENESIS_ENABLE_PN19_SCOPED_MAX_SPLIT=1
-      - GENESIS_PN80_EVERY=40
+      # intermediate_size del modelo. Sin esto PN80 no puede medir el buffer
+      # gate_up del FFN. PN80 ahora lo deriva solo (sub-patch pn80_config_capture);
+      # esta env queda como override manual. Con 4096 tokens de lote el FFN son
+      # 142 MiB por GPU: el transitorio real es ~52 KiB/token, no ~18.
+      # 1 caja cada N llamadas a la sonda. Hay 48 capas GDN por forward, asi
+      # que un valor bajo emite mas de una caja POR FORWARD: con 40 salian
+      # 1488 lineas en un test de 2 minutos. El camino de 'riesgo de OOM'
+      # ademas tiene cooldown propio (GENESIS_PN80_TIGHT_COOLDOWN, 30s).
+      - GENESIS_PN80_EVERY=2000
       - GENESIS_PN80_MIN_T=256
-      - GENESIS_PN80_WARN_RATIO=1.5
+      # Objetivo: MiB libres despues del transitorio de cada paso. Reemplaza
+      # al viejo ratio 'margen sano 1.5x', que no decia cuanta VRAM sobra --
+      # que es justo lo que se tunea. 100 MiB es el minimo con el que los 3
+      # engines pasaron 5 prompts de 30k en paralelo sin OOMear.
+      - GENESIS_PN80_TARGET_FREE_MIB=100
 
       # ── OPTIMIZACIÓN DE KERNELS GEMM / TENSOR CORES ───────────────────────────
       - VLLM_FLOAT32_MATMUL_PRECISION=high
@@ -205,13 +217,21 @@ services:
       # disponible: con 0.965 moria en _allocate_kv_cache_tensors pidiendo
       # 610 MiB con 191 libres. Bajar el util compensa ese error.
       - --gpu-memory-utilization
-      - "0.82"
+      - "0.76"
       # Visión: 1 imagen por request (el contrato de agi_vision_inspector es de
       # UNA imagen) y video en 0 — nunca se usa. El budget del encoder cache se
       # dimensiona por el ítem multimodal MÁS GRANDE, y un video pesa mucho más
       # que una imagen: acotarlo achica esa reserva.
       - --limit-mm-per-prompt
-      - '{"image":1,"video":0}'
+      - '{"image":2,"video":0}'
+      # Techo de resolucion del preprocesador de vision. El profiler de memoria
+      # corre un dummy multimodal con el item MAS GRANDE permitido; sin este flag
+      # usa el max_pixels del preprocessor_config.json del modelo y reserva
+      # activaciones para una imagen enorme que nunca vamos a mandar.
+      # 2.000.000 px ~ 1414x1414, de sobra para el contrato de una imagen/request.
+      # Medido en w8a16-mtp: +5,4% de KV. Ver docs/KV-OFFLOADING.md §9.
+      - --mm-processor-kwargs
+      - '{"max_pixels":2000000,"min_pixels":65536}'
       - --enable-flashinfer-autotune
       - --reasoning-parser
       - qwen3
@@ -239,8 +259,12 @@ services:
       - --enable-prefix-caching
       # Prefill fragmentado en bloques de 8192 tokens
       - --enable-chunked-prefill
+      # 4096 y no 8192: achica el pico transitorio de las capas GDN, que escala
+      # lineal con los tokens del batch (~12 KiB por token, por GPU -> PN80).
+      # Medido en w8a16-mtp: +13,5% de KV. COSTO REAL: parte el prefill en chunks
+      # la mitad de grandes, o sea que un prompt de 200k tarda mas en procesarse.
       - --max-num-batched-tokens
-      - "8192"
+      - "4096"
       - --long-prefill-token-threshold
       - "4096"
       - --performance-mode
