@@ -154,7 +154,7 @@ services:
       # Este modelo es INT4 (pesos ~mitad que W8A16) asi que quiza
       # tolere mas: subir SOLO si PN80 reporta margen >= 1.5x sostenido.
       - --max-num-seqs
-      - "4"
+      - "10"
       - --disable-custom-all-reduce
       # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
       - --tensor-parallel-size
