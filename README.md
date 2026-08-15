@@ -74,6 +74,34 @@ Sustained TPS — visualised
 
 ---
 
+## 🔑 Credentials setup (`.env`) — read this before running any compose
+
+The composes in `compose/` need a `compose/.env` that is **not** in the repo.
+Without it, vLLM starts with an empty API key and gated model downloads fail.
+
+```bash
+cp compose/.env.example compose/.env
+$EDITOR compose/.env          # at minimum: VLLM_API_KEY
+```
+
+Docker Compose picks that file up automatically because it sits next to the
+`docker-compose.*.yml` files — no `--env-file` needed.
+
+| Variable | Required | What it does |
+|---|---|---|
+| `VLLM_API_KEY` | **yes** | Bearer token for the OpenAI-compatible endpoint. If the engine is published through Traefik/Cloudflare, this is the only thing between the internet and your GPU. Generate one: `openssl rand -hex 32` |
+| `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN` | no | Only to download private/gated checkpoints. Same value in both — different versions read one or the other. |
+| `AI_DNS_SERVER` | no | Docker-network DNS resolver, if containers must resolve each other by name. |
+| `WEBUI_SECRET_KEY`, `OPEN_TERMINAL_API_KEY` | no | Used by the non-vLLM composes only. |
+
+Model weights are mounted from `/home/usuario/Proyectos/models-cache` — an
+**absolute** path; adjust it in the `.yml` files if your checkout lives
+elsewhere.
+
+📖 Full guide, verification steps and rotation: **[`docs/ENV-SETUP.md`](docs/ENV-SETUP.md)**
+
+---
+
 ## 🛟 Installation
 
 Genesis ships a single-paste installer that detects your hardware, clones the
