@@ -4,7 +4,7 @@ services:
   vllm-server:
     # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.8
     image: vllm/vllm-openai:v0.23.0
-    container_name: genesis-27b-qwen38-mtp
+    container_name: genesis-27b-qwen38-heretic
     # SIN restart automático a propósito (2026-08-14): con `restart:
     # unless-stopped`, un crash por OOM se relevantaba solo y el contenedor
     # aparecía "Up" a los pocos segundos — indistinguible de no haber muerto.
@@ -48,7 +48,18 @@ services:
       # La cuota es POR RANK: con TP=2 el disco total es 2 x MAX_GB.
       - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1
       - GENESIS_KV_DISK_MAX_GB=30
-      - GENESIS_KV_DISK_CHECK_EVERY=2000
+      # Chequeo por TIEMPO, no por pasos del scheduler. El gate viejo era
+      # CHECK_EVERY=2000 pasos, y on_schedule_end solo suma pasos cuando hay
+      # trafico: con el engine ocioso la cuota NUNCA corria. Medido: 22 min y
+      # 61 requests no llegaron a 2000 pasos, y el dir toco 31,4 GiB con
+      # limite de 30 sin una sola poda.
+      - GENESIS_KV_DISK_CHECK_SECS=60
+      # Borra al arrancar las caches de OTROS modelos sin usar hace N dias.
+      # La cuota solo mira el dir del modelo actual, asi que sin esto cada
+      # modelo que probas deja el suyo para siempre: se habian juntado 142 GiB,
+      # 54 de un modelo que ya ni estaba descargado. Por antiguedad y no por
+      # 'no es el mio', para no tirar la cache del engine que usaste ayer.
+      - GENESIS_KV_DISK_ORPHAN_DAYS=3
       - GENESIS_KV_DISK_TARGET_RATIO=0.85
       - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
       # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
@@ -221,7 +232,7 @@ services:
       # disponible: con 0.965 moria en _allocate_kv_cache_tensors pidiendo
       # 610 MiB con 191 libres. Bajar el util compensa ese error.
       - --gpu-memory-utilization
-      - "0.76"
+      - "0.755"
       # Visión: 1 imagen por request (el contrato de agi_vision_inspector es de
       # UNA imagen) y video en 0 — nunca se usa. El budget del encoder cache se
       # dimensiona por el ítem multimodal MÁS GRANDE, y un video pesa mucho más

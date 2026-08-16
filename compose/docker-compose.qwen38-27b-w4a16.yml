@@ -41,7 +41,18 @@ services:
       # La cuota es POR RANK: con TP=2 el disco total es 2 x MAX_GB.
       - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1
       - GENESIS_KV_DISK_MAX_GB=30
-      - GENESIS_KV_DISK_CHECK_EVERY=2000
+      # Chequeo por TIEMPO, no por pasos del scheduler. El gate viejo era
+      # CHECK_EVERY=2000 pasos, y on_schedule_end solo suma pasos cuando hay
+      # trafico: con el engine ocioso la cuota NUNCA corria. Medido: 22 min y
+      # 61 requests no llegaron a 2000 pasos, y el dir toco 31,4 GiB con
+      # limite de 30 sin una sola poda.
+      - GENESIS_KV_DISK_CHECK_SECS=60
+      # Borra al arrancar las caches de OTROS modelos sin usar hace N dias.
+      # La cuota solo mira el dir del modelo actual, asi que sin esto cada
+      # modelo que probas deja el suyo para siempre: se habian juntado 142 GiB,
+      # 54 de un modelo que ya ni estaba descargado. Por antiguedad y no por
+      # 'no es el mio', para no tirar la cache del engine que usaste ayer.
+      - GENESIS_KV_DISK_ORPHAN_DAYS=3
       - GENESIS_KV_DISK_TARGET_RATIO=0.85
       - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
       # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
@@ -169,7 +180,7 @@ services:
       # moria en _allocate_kv_cache_tensors. La correccion es restar
       # 3.2/23.56 = 0.135 al valor que funcionaba sin offloading.
       - --gpu-memory-utilization
-      - "0.764"
+      - "0.759"
       - --enable-flashinfer-autotune
       # Techo de resolucion del preprocesador de vision. El profiler de memoria
       # corre un dummy multimodal con el item MAS GRANDE permitido; sin este flag

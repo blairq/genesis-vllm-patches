@@ -58,7 +58,18 @@ services:
       # superar el limite, bajando hasta TARGET_RATIO para no podar seguido.
       - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1
       - GENESIS_KV_DISK_MAX_GB=1
-      - GENESIS_KV_DISK_CHECK_EVERY=20
+      # Chequeo por TIEMPO, no por pasos del scheduler. El gate viejo era
+      # CHECK_EVERY=2000 pasos, y on_schedule_end solo suma pasos cuando hay
+      # trafico: con el engine ocioso la cuota NUNCA corria. Medido: 22 min y
+      # 61 requests no llegaron a 2000 pasos, y el dir toco 31,4 GiB con
+      # limite de 30 sin una sola poda.
+      - GENESIS_KV_DISK_CHECK_SECS=60
+      # Borra al arrancar las caches de OTROS modelos sin usar hace N dias.
+      # La cuota solo mira el dir del modelo actual, asi que sin esto cada
+      # modelo que probas deja el suyo para siempre: se habian juntado 142 GiB,
+      # 54 de un modelo que ya ni estaba descargado. Por antiguedad y no por
+      # 'no es el mio', para no tirar la cache del engine que usaste ayer.
+      - GENESIS_KV_DISK_ORPHAN_DAYS=3
       - GENESIS_KV_DISK_TARGET_RATIO=0.85
       # Ancho del buffer gate_up del FFN, en elementos: 2 * intermediate_size / TP
       # = 2 * 17408 / 2 = 17408. Se pone a mano porque get_current_vllm_config()
@@ -222,7 +233,7 @@ services:
       # moria en _allocate_kv_cache_tensors. Bajar util compensa ese error.
       # Aun asi el KV queda enorme: este modelo pesa 8.8 GiB, no 13.2.
       - --gpu-memory-utilization
-      - "0.761"
+      - "0.756"
       - --enable-flashinfer-autotune
       - --reasoning-parser
       - qwen3
