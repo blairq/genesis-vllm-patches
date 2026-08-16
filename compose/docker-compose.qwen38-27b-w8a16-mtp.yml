@@ -86,7 +86,11 @@ services:
       # entran con la VRAM libre. Observación pura: no cambia ninguna
       # asignación. Sirve para dimensionar --max-num-seqs con números en vez
       # de a ciegas. Aviso automático cuando el margen baja de 1.5x.
-      - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=1
+      # PN80 (sonda de presupuesto de VRAM de GDN) DESACTIVADO. Se uso para
+      # tunear --gpu-memory-utilization: es lo unico que mide la VRAM libre en
+      # el punto exacto de la asignacion del transitorio. Para volver a
+      # tunear, poner en 1.
+      - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=0
       # PN25 + PN12: pools de buffers intermedios del FFN ("Cliff 1"). Atacan el
       # sitio de OOM confirmado por traceback el 2026-08-15: el fallo NO es GDN
       # sino el grafo compilado por inductor pidiendo 108 MiB =

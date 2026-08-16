@@ -37,7 +37,11 @@ services:
       # PN80: sonda de presupuesto de VRAM. Loguea el calculo real del tensor `h`
       # de la atencion lineal y proyecta cuantos tokens/forward mas entran con la
       # VRAM libre, con veredicto de si hay que bajar --gpu-memory-utilization.
-      - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=1
+      # PN80 (sonda de presupuesto de VRAM de GDN) DESACTIVADO. Se uso para
+      # tunear --gpu-memory-utilization: es lo unico que mide la VRAM libre en
+      # el punto exacto de la asignacion del transitorio. Para volver a
+      # tunear, poner en 1.
+      - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=0
       # 1 caja cada N llamadas a la sonda. Hay 48 capas GDN por forward, asi
       # que un valor bajo emite mas de una caja POR FORWARD: con 40 salian
       # 1488 lineas en un test de 2 minutos. El camino de 'riesgo de OOM'
