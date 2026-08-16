@@ -593,6 +593,33 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
             "model_class": ["qwen3_5", "qwen3_6"],
         },
     },
+    "PN84": {
+        "title": "Hit de prefijo inconsistente entre grupos en hibrido + MTP (mata el engine)",
+        "env_flag": "GENESIS_ENABLE_PN84_HYBRID_EAGLE_HIT",
+        "default_on": True,
+        "category": "correctness",
+        "credit": (
+            "Genesis-original 2026-08-16. Bug de vLLM: en "
+            "HybridKVCacheCoordinator.find_longest_cache_hit el grupo de "
+            "atencion, por ser grupo eagle con MTP, matchea 1 bloque y lo "
+            "descarta, dejando el candidato en 0. Despues el grupo GDN entra "
+            "con _max_length inflado en un bloque (la sonda de eagle) y "
+            "MambaManager.find_longest_cache_hit IGNORA drop_eagle_block: "
+            "devuelve 1 bloque y SUBE el candidato de 0 a 1600. El algoritmo "
+            "asume que un grupo solo puede bajarlo ('either accepts the current "
+            "candidate length or reduces it') y is_simple_hybrid corta el while "
+            "sin reconsultar al grupo de atencion. Sale un hit de 1600 tokens "
+            "con CERO bloques de atencion: el scheduler saltea ese prefill y "
+            "lee KV que no se escribio nunca. Con OffloadingConnector el assert "
+            "de offloading/scheduler.py:612 mata el EngineCore entero "
+            "(EngineDeadError, medido en 27b-qwen38-fp8 tras 14h); sin ese "
+            "connector no hay assert y contesta basura en silencio. Reproducido "
+            "y medido en tests/repro/offload_partial_hit_harness.py: hacen falta "
+            "hibrido Y spec decode, y hit local + externo simultaneos."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN83": {
         "title": "Informe de arranque en lenguaje humano (VRAM, capacidad, riesgos, flags)",
         "env_flag": "GENESIS_ENABLE_PN83_ANALISIS_ARRANQUE",

@@ -779,6 +779,34 @@ def apply_patch_61b_streaming_overlap() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN84 hit de prefijo consistente en hibrido + MTP")
+def apply_patch_N84_hybrid_eagle_hit_consistency() -> PatchResult:
+    """PN84: impide que el grupo GDN suba el largo del hit de prefijo.
+
+    En modelos hibridos con speculative decoding, find_longest_cache_hit puede
+    devolver "N tokens computados" con CERO bloques en el grupo de atencion.
+    Con OffloadingConnector eso mata el EngineCore (assert pelado en
+    offloading/scheduler.py:612); sin el, contesta con KV basura en silencio.
+
+    Reproducido en tests/repro/offload_partial_hit_harness.py.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN84=1.
+    """
+    name = "PN84 hybrid eagle hit consistency"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N84_hybrid_eagle_hit_consistency
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N84_hybrid_eagle_hit_consistency.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN83 analisis de arranque (informe en lenguaje humano)")
 def apply_patch_N83_analisis_arranque() -> PatchResult:
     """PN83: emite al final del arranque un informe explicando la config.

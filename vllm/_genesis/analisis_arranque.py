@@ -366,6 +366,43 @@ def _sec_riesgos(vc, mem: dict) -> list[str]:
                 )
             hay = True
 
+    # ── PN84: hit de prefijo inconsistente (hibrido + MTP) ───────────────
+    # Necesita las dos cosas: capas GDN/mamba Y speculative decoding. Es la
+    # config de los cuatro engines qwen38 de este rig.
+    if tiene_mtp and _hay_capas_mamba(vc):
+        if _pn84_activo():
+            out.append(
+                "  ✔ PN84 activo. Sin el, en hibrido + MTP el lookup del cache"
+            )
+            out.append(
+                "    de prefijos puede devolver 'N tokens computados' con CERO"
+            )
+            out.append(
+                "    bloques en el grupo de atencion. Con offloading eso mata el"
+            )
+            out.append(
+                "    EngineCore entero; sin offloading contesta con KV basura"
+            )
+            out.append("    en silencio. Ver §10.")
+        else:
+            out.append(
+                "  ✖ PN84 NO detectado, y estas en hibrido + MTP."
+            )
+            out.append(
+                "    find_longest_cache_hit puede reportar un hit de prefijo que"
+            )
+            out.append(
+                "    el grupo de atencion NO tiene. Sintoma: AssertionError sin"
+            )
+            out.append(
+                "    mensaje en offloading/scheduler.py:612 -> EngineDeadError,"
+            )
+            out.append(
+                "    tras horas de uso normal. Sin offloading no crashea: da"
+            )
+            out.append("    respuestas incorrectas sin avisar. Ver §10.")
+        hay = True
+
     # ── FlashInfer: los 394 MiB que se alocan en el PRIMER request ───────
     if tiene_mtp:
         total = _gib(mem.get("total_memory"))
@@ -434,6 +471,34 @@ def _pn82_activo() -> bool:
             return False
         with open(f) as fh:
             return "_GENESIS_PN82_HOST_REGISTER_STICKY" in fh.read()
+    except Exception:
+        return False
+
+
+def _pn84_activo() -> bool:
+    try:
+        from vllm._genesis.guards import resolve_vllm_file
+
+        f = resolve_vllm_file("v1/core/kv_cache_coordinator.py")
+        if f is None:
+            return False
+        with open(f) as fh:
+            return "Genesis PN84" in fh.read()
+    except Exception:
+        return False
+
+
+def _hay_capas_mamba(vc) -> bool:
+    """Detecta el hibrido por la config del modelo, no por el nombre."""
+    try:
+        hf = _g(vc, "model_config.hf_config")
+        for attr in ("linear_attn_config", "layer_types", "layers_block_type"):
+            val = getattr(hf, attr, None)
+            if isinstance(val, (list, tuple)):
+                return any("linear" in str(x) or "mamba" in str(x) for x in val)
+            if val:
+                return True
+        return "qwen3_5" in str(getattr(hf, "model_type", ""))
     except Exception:
         return False
 

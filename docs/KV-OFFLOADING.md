@@ -260,6 +260,8 @@ T2.
 | `Please specify kv_role` | falta en el JSON | `"kv_role":"kv_both"` |
 | `incompatible with PYTORCH_CUDA_ALLOC_CONF=expandable_segments` | falta cumem | `--enable-cumem-allocator` |
 | El disco crece sin parar | PN81 apagado | `GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1` |
+| `AssertionError` **sin mensaje** en `offloading/scheduler.py:612` → `EngineDeadError`, tras horas de uso normal | hit de prefijo inconsistente entre grupos (hibrido + MTP) — bug de vLLM | PN84, §10 |
+| `AssertionError` sin mensaje en `offloading/scheduler.py:771` (`_build_store_jobs`) | segundo assert pelado, distinto; reproducido en el banco, **sin arreglar** | §10.4 |
 
 ---
 
@@ -340,3 +342,131 @@ en procesarse. Es un cambio de KV por throughput de prefill, no gratis.
 
 ⚠️ Al subir el KV hay que verificar el margen de §3.4: el workspace de
 FlashInfer (394 MiB) se aloca en el **primer request**, no en el arranque.
+
+---
+
+## 10. PN84 — el engine se moría solo después de horas
+
+### 10.1 Qué se vio
+
+`genesis-27b-qwen38-fp8`, 2026-08-16 20:03:34. Catorce horas arriba, ~60
+requests servidas sin un solo error, 4 trabajos en paralelo y 5 en cola, KV
+al 65%. Y de golpe:
+
+```
+File ".../kv_connector/v1/offloading/scheduler.py", line 612,
+  in update_state_after_alloc
+    num_locally_computed_tokens
+AssertionError
+vllm.v1.engine.exceptions.EngineDeadError
+```
+
+Un `assert` pelado, sin mensaje. Nadie lo atrapa: se lleva puesto el
+EngineCore y todas las requests en vuelo salen con 500.
+
+### 10.2 La causa
+
+El assert dice: *"los tokens que vLLM marca como ya computados en la VRAM
+tienen que estar cubiertos por bloques con hash"*. El volcado del banco de
+pruebas en el instante del fallo:
+
+```
+--- r19: L=1600 E=6400 ---
+  get_computed_blocks devolvio: (1600, [[], [bloque 10]])
+  g0 (atencion) bs=1600 nblk=5 borde=0 patron=nnnnn   <<< ROMPE
+  g1 (GDN)      bs=1600 nblk=5 borde=4 patron=....n
+```
+
+`get_computed_blocks` reporta **1600 tokens ya computados** y devuelve **cero
+bloques** para el grupo de atención. Y no es que el bloque no existiera: la
+sonda confirma que el hash del bloque 0 estaba cacheado para los dos grupos.
+
+El camino, en `HybridKVCacheCoordinator.find_longest_cache_hit`:
+
+1. El grupo de atención es grupo *eagle* porque hay MTP, así que entra con
+   `drop_eagle_block=True`: matchea 1 bloque y **lo descarta** (eagle matchea
+   uno de más y tira el último). Queda `[]`, candidato = 0.
+2. El grupo GDN entra con `_max_length = min(0 + block_size, max)` = 1600. Y
+   acá está el bug: **`MambaManager.find_longest_cache_hit` ignora
+   `drop_eagle_block`** — no descarta nada. Busca de derecha a izquierda,
+   encuentra su bloque de estado, devuelve 1 bloque.
+3. `curr_hit_length` pasa de 0 a 1600: un grupo **subió** el candidato. El
+   algoritmo asume lo contrario; su propio comentario dice *"Each attention
+   type either accepts the current candidate length or reduces it"*.
+4. `is_simple_hybrid` corta el `while` ahí mismo, sin reconsultar al grupo de
+   atención, "porque una iteración alcanza" — cierto sólo mientras nadie suba.
+5. El truncado final recorta la lista del grupo de atención a 1 bloque… pero
+   esa lista está vacía, así que no recorta nada.
+
+Sale `(1600, ([], [estado_gdn]))`.
+
+### 10.3 Por qué importa más de lo que parece
+
+**El crash es la parte afortunada.** El assert del connector de offloading es
+lo único que se da cuenta. `num_computed_tokens = 1600` significa que el
+scheduler saltea el prefill de esos 1600 tokens, pero el grupo de atención no
+tiene esos bloques: `allocate_slots` le da bloques nuevos y sin escribir. En
+el volcado se ve directo — el grupo 0 termina con los ids `[39, 17, 46, 4,
+13]`, ni rastro del bloque 12 que estaba cacheado.
+
+**Sin el connector de offloading no hay assert y el engine no se cae:**
+contesta leyendo KV de atención basura para el primer bloque del prompt.
+
+### 10.4 Cómo se reprodujo
+
+`tests/repro/offload_partial_hit_harness.py` corre el **Scheduler real**, el
+**KVCacheManager real** y el **OffloadingConnector real** con la config real
+del modelo (sale del `config.json` cacheado), sin GPU y sin cargar un solo
+peso. Sólo simula el forward del modelo y el worker del connector.
+
+Reproducir el crash levantando el 27B cuesta ~6 minutos de arranque por
+intento y depende de que la lotería de desalojos caiga justo. Acá corren
+miles de escenarios por segundo y cada fallo queda con su semilla.
+
+Matriz medida, 60 semillas por celda:
+
+| | spec decode SÍ | spec decode NO |
+|---|---|---|
+| **híbrido SÍ** | **3 fallos** en `:612` | 1 fallo en `:771` |
+| **híbrido NO** | 0 | 5 fallos en `:771` |
+
+Hacen falta **las dos** cosas: modelo híbrido (atención + GDN) y speculative
+decoding, que es lo que hace que el grupo de atención sea grupo eagle. Es
+justo la config de los cuatro engines qwen38 de este rig. Y además que la
+request tenga hit **local** (VRAM) y hit **externo** (RAM/disco) al mismo
+tiempo — eso es lo raro, y por eso tardó 14 horas en aparecer. Cuando esa
+combinación se da, revienta en ~1 de cada 3.
+
+Los dos asserts siguen apareciendo con `--sin-async`, así que no son un
+efecto del scheduling asíncrono.
+
+⚠️ **`scheduler.py:771` es un bug distinto y sigue sin arreglar.** Es
+`assert len(offload_keys) == len(offload_block_ids)` en `_build_store_jobs`,
+no depende de híbrido ni de spec decode, y también mata el EngineCore. Lo
+encontró el mismo banco. No es el crash que se vio en producción y no está
+confirmado contra el engine real.
+
+### 10.5 El arreglo
+
+Un grupo no puede pedir más largo del que el candidato permite si su manager
+no implementa el descarte de eagle. `MambaManager` no lo implementa, así que
+para grupos `MambaSpec` PN84 no infla `_max_length` ni pide el descarte. Con
+eso el grupo GDN sólo puede **aceptar o bajar** el candidato, que es la
+invariante que el algoritmo ya asumía.
+
+No se pierden hits reales: en el caso normal el grupo de atención matchea N+1
+y descarta 1, el candidato queda en N bloques, y el grupo GDN encuentra su
+estado en el bloque N-1 buscando de derecha a izquierda. Lo único que se
+pierde es el "hit" de 1 bloque que hoy es directamente falso.
+
+Resultado con PN84 (misma matriz, mismas semillas):
+
+| | antes | después |
+|---|---|---|
+| fallos en `:612` (híbrido + spec) | 3 | **0** |
+| eventos hit local + externo ejercitados | 9 | **57** |
+
+Los eventos **subieron 6×**: el parche no tapó el camino, lo hizo consistente
+—así que ocurre mucho más seguido y sobrevive.
+
+Kill switch: `GENESIS_DISABLE_PN84=1`.
