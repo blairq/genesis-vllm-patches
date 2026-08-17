@@ -346,12 +346,47 @@ services:
       - --enable-chunked-prefill
       # 4096 y no 8192: achica el pico transitorio de las capas GDN, que escala
       # lineal con los tokens del batch (~12 KiB por token, por GPU -> PN80).
-      # Medido en w8a16-mtp: +13,5% de KV. COSTO REAL: parte el prefill en chunks
-      # la mitad de grandes, o sea que un prompt de 200k tarda mas en procesarse.
+      # Medido en w8a16-mtp: +13,5% de KV.
+      #
+      # OJO: el "COSTO REAL" que decia esta nota (que el prompt largo tarda mas)
+      # resulto FALSO. Medido con tres configs distintas, el hilo largo tarda
+      # 133,4 / 134,6 / 134,5s: identico. El prefill esta pegado al techo de
+      # computo de las placas (~770 tok/s = 41,6 TFLOPS de los 71 de pico fp16
+      # de dos 3090; la 3090 es Ampere y NO tiene tensor cores FP8, asi que los
+      # pesos se desempaquetan a fp16 y no hay speedup de computo). El tamaño
+      # del chunk no mueve el total, solo reparte.
+      #
+      # ALINEACION DE MAMBA: en mamba_cache_mode=align todo chunk de prefill de
+      # un prompt largo se redondea a multiplo de block_size (1600):
+      #   scheduler.py _mamba_block_aligned_split: n = n // 1600 * 1600
+      # Asi que con 4096 el chunk real del prefill largo es 3200 y sobran 896.
+      # Y hay un piso duro: max-num-batched-tokens < 1600 no arranca
+      #   "In Mamba cache align mode, block_size (1600) must be <=
+      #    max_num_batched_tokens (1024)"   (config/vllm.py validate_block_size)
+      # Con threshold < 1600 el engine ni assertea: 1024//1600*1600 = 0, el
+      # request no recibe tokens nunca y se cuelga.
       - --max-num-batched-tokens
       - "4096"
+      # THRESHOLD SEPARADO DEL PRESUPUESTO (2026-08-16). Antes los dos en 4096.
+      # Limita cuanto puede tomar UN prefill largo por paso, dejando el resto
+      # del presupuesto para que los agentes chicos prefileen en el MISMO paso.
+      # No cuesta KV: el profiler dimensiona el transitorio con
+      # max_num_batched_tokens (gpu_model_runner.py:467 -> profile_run ->
+      # _dummy_run(max_num_tokens)), y este flag no entra en esa cuenta.
+      #
+      # Medido con tests/repro/carga_mixta.py (hilo de 126k + 5 agentes):
+      #   config        KV        agentes (media)   1er agente   hilo largo
+      #   4096/4096     344.155   116,6s            80,5s        133,4s
+      #   4096/1600     344.155    50,6s            34,8s        134,6s  <- este
+      #   3200/1600     352.942    64,8s            54,2s        134,5s
+      # 2,3x mejor latencia de agentes, mismo KV, mismo tiempo del hilo largo.
+      # 3200 da +2,6% de KV pero empeora los agentes: lo que los hace agiles no
+      # es el chunk chico sino el presupuesto SOBRANTE para su propio prefill
+      # (4096-1600=2496 contra 3200-1600=1600).
+      # Una sola corrida por config y la dispersion es alta (34-80s en una,
+      # 54-91s en otra): repetir antes de mover esto por diferencias chicas.
       - --long-prefill-token-threshold
-      - "4096"
+      - "1600"
       - --performance-mode
       - "throughput"
       # Tallas de CUDA Graph. Con MTP num_speculative_tokens=3 cada secuencia
