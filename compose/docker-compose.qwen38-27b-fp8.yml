@@ -289,6 +289,15 @@ services:
       # Si vuelve a OOMear, el primer valor a bajar es este, no el util.
       - --max-num-seqs
       - "10"
+      # PROBADO SACARLO Y NO ANDA (2026-08-17), aun con P2P funcionando:
+      #   Using ['CUSTOM','PYNCCL'] all-reduce backends for group 'tp:0'
+      #   Failed: Cuda error csrc/custom_all_reduce.cuh:455 'invalid argument'
+      #   -> RuntimeError: Engine core initialization failed
+      # OJO: tests/repro/p2p_ipc_allreduce.py da OK (all-reduce de 15,6 MiB por
+      # IPC entre procesos, resultado correcto). El test NO ejercita la captura
+      # de CUDA graphs, y CustomAllreduce tiene un camino aparte para eso
+      # (capture() / register_graph_buffers). Ahi es donde rompe.
+      # NCCL con P2P ya da la ganancia grande, asi que esto queda pendiente.
       - --disable-custom-all-reduce
       # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
       # TP=2 NO ES UNA ELECCION, ES LO UNICO QUE HAY (probado 2026-08-17).
