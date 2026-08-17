@@ -235,13 +235,62 @@ igual. El test verificó hasta 32 MiB.
 
 ## 6. Pendiente
 
-- **ACS del switch PLX.** Los dos puertos (`0e:00.0`, `0e:10.0`) tienen
-  `ACSCtl: SrcValid+ ReqRedir+ CmpltRedir+ UpstreamFwd+`, que redirige el
-  tráfico GPU-GPU al root complex. La eficiencia medida es 10,87 de 15,75 GB/s
-  teóricos (**74%**), así que puede quedar margen. Se apaga con
-  `pcie_acs_override=downstream,multifunction`, pero **el kernel de Ubuntu no
-  trae ese parche**: haría falta kernel custom, o la opción en el BIOS.
+- ~~**ACS del switch PLX.**~~ **PROBADO Y DESCARTADO (2026-08-17). No era
+  el cuello de botella.** Ver §7.
 - **Re-perfilar con `torch.profiler`** para ver el nuevo reparto. El 31,8% del
   all-reduce se midió con el driver viejo y con `max-num-batched-tokens 4096`;
   hoy corre en 1600.
 - **`CustomAllreduce` bajo CUDA graphs** (ver §5).
+
+
+---
+
+## 7. ACS del switch PLX: probado y descartado
+
+La hipótesis era que el ACS de los puertos downstream (`ACSCtl: SrcValid+
+ReqRedir+ CmpltRedir+ UpstreamFwd+`) rebotaba el tráfico GPU-GPU al root complex
+y explicaba el 74% de eficiencia. **No es así.**
+
+**No hace falta kernel custom.** El `pcie_acs_override` del kernel no está en
+Ubuntu, pero los bits se escriben en caliente y es reversible:
+
+```bash
+# apagar
+for d in 0000:0e:00.0 0000:0e:10.0; do sudo setpci -s $d ECAP_ACS+6.w=0000; done
+# restaurar (valor original de este equipo)
+for d in 0000:0e:00.0 0000:0e:10.0; do sudo setpci -s $d ECAP_ACS+6.w=001d; done
+```
+
+Medido con 3 corridas por estado, integridad OK en las dos:
+
+| tamaño | ACS ON | ACS OFF | |
+|---|---|---|---|
+| 1 MiB | 8,57 / 8,42 / 8,44 | 8,83 / 8,76 / 8,74 | **+3,8%** (no se solapan) |
+| **15,6 MiB** (chunk de prefill) | 10,66 / 10,65 / 10,67 | 10,68 / 10,68 / 10,68 | +0,2%, ruido |
+| 64 MiB | 10,80 / 10,85 / 10,83 | 10,86 / 10,87 / 10,91 | +0,4%, ruido |
+
+El ACS cuesta **latencia fija por transacción**, no ancho de banda. Por eso se
+nota a 1 MiB y desaparece justo en los tamaños del prefill, que están limitados
+por ancho de banda.
+
+**Queda ENCENDIDO** (`0x001d`, el valor de fábrica). El único régimen donde
+ayuda es el all-reduce de decode (~400 KB), que son ~6 ms de un paso de 27 ms:
+un 3,8% ahí es **menos del 1% punta a punta**, por debajo del ruido. No paga
+sostener un servicio de arranque que reescriba registros PCI, ni debilitar el
+aislamiento del IOMMU, por eso.
+
+### Y el 74% tampoco es margen aprovechable
+
+Es una comparación contra un techo teórico que ignora el protocolo. Los
+`MaxPayload` del camino:
+
+| | DevCap | configurado |
+|---|---|---|
+| puertos del switch | 2048 B | 256 B |
+| **las dos 3090** | **256 B** | 256 B |
+
+Los 256 B no son una config conservadora: son el **techo del silicio de la
+GA102**. El switch bancaría 2048 pero la placa no, así que no hay nada que
+subir. Con payload de 256 B, headers de TLP y codificación 128b/130b, el techo
+práctico de un x8 Gen4 queda cerca de 12 GB/s, no de 15,75. Los 10,9 GB/s
+medidos son ~90% de eso.
