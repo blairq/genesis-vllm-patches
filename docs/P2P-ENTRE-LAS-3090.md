@@ -1,7 +1,13 @@
 # P2P entre las dos RTX 3090: cómo se logró y qué dio
 
-**El all-reduce de TP=2 era el 31,8% del tiempo de GPU. Con P2P funcionando el
-prefill de un hilo de 126k tokens bajó de 133,9 s a 103,6 s (−22,6%).**
+**El all-reduce de TP=2 era el 31,8% del tiempo de GPU. Con P2P la colectiva va
+1,67× más rápido, y el prefill de un hilo de 126k tokens baja un 8,1%.**
+
+> ⚠️ **Corrección (2026-08-17).** Este documento decía "−22,6%, de 133,9 s a
+> 103,6 s". Ese número comparaba *580 sin P2P* contra *610+fork con P2P*, o sea
+> que metía en la misma bolsa el P2P y el salto de driver. Con el A/B limpio
+> —mismo driver, misma config, sólo `NCCL_P2P_DISABLE`— el P2P aislado da
+> **−8,1%** (ver §1.1). El resto era el driver, la config, o las dos cosas.
 
 Hicieron falta **cuatro** cosas y ninguna alcanzaba sola. Este documento existe
 porque tres de ellas parecían suficientes y no lo eran.
@@ -20,15 +26,50 @@ Carga mixta (`tests/repro/carga_mixta.py`): un hilo de 126k tokens + 5 agentes.
 | inter-token en vacío | 31 ms | 28 ms |
 | KV en GPU | 361.729 tok | **374.909 tok** (+13.180) |
 
+## 1.1. El A/B limpio del P2P (2026-08-17)
+
+Mismo driver 610.57.04+fork, misma config (1×832), mismo día. Lo único que
+cambia entre las dos columnas es `NCCL_P2P_DISABLE`:
+
+| | **P2P ON** | P2P OFF (control) | ganancia |
+|---|---|---|---|
+| hilo largo (126k tok) | **104,1 s** | 113,3 s | **−8,1%** |
+| TTFT de los agentes | **98,4 s** | 107,6 s | **−8,5%** |
+| inter-token bajo carga (mediana) | **35 ms** | 38 ms | −7,9% |
+| inter-token en vacío | 27 ms | 28 ms | — |
+
+Así se mide el P2P y no otra cosa. La tabla de §1, que compara contra el driver
+580, sirve como historia pero no aísla nada.
+
+Y el presupuesto, con P2P encendido en las dos (`block_size` = 832 desde que el
+estado SSM va en fp16, así que 1 bloque = 832):
+
+| | **1×832** | 2×832 (1664) |
+|---|---|---|
+| hilo largo | 104,1 s | **102,6 s** (−1,4%) |
+| inter-token bajo carga (mediana) | **35 ms** | 41 ms (+17%) |
+| inter-token p90 | 42 ms | 42 ms |
+| KV en GPU | **392.028 tok** | 390.444 tok |
+
+El canje de siempre: quantum más grande rinde más en el prefill y castiga a los
+que van en el mismo batch. Para el patrón real de uso (un prompt grande + varios
+agentes chicos) manda la latencia del agente, así que **queda en 1×832**: se
+pagan 1,5 s en el hilo largo y se ganan 6 ms de mediana por token y 1.584 tokens
+de KV.
+
+---
+
 A nivel de la colectiva (`tests/repro/nccl_allreduce_bench.py`), con
 verificación numérica en cada tamaño:
 
 | tamaño | con P2P | sin P2P (`NCCL_P2P_DISABLE=1`) | ganancia |
 |---|---|---|---|
-| 4 KiB | 0,15 GiB/s | 0,14 GiB/s | — (manda la latencia) |
-| 1 MiB | 8,53 GiB/s | 5,32 GiB/s | 1,60× |
-| **15,6 MiB** (chunk de prefill) | **10,66 GiB/s** | **6,34 GiB/s** | **1,68×** |
-| 64 MiB | 10,87 GiB/s | 6,36 GiB/s | 1,71× |
+| 4 KiB | 0,15 GiB/s | 0,15 GiB/s | — (manda la latencia) |
+| 1 MiB | 8,48 GiB/s | 5,30 GiB/s | 1,60× |
+| **15,6 MiB** (chunk de prefill) | **10,63 GiB/s** | **6,35 GiB/s** | **1,67×** |
+| 64 MiB | 10,84 GiB/s | 6,39 GiB/s | 1,70× |
+
+(Revalidado el 2026-08-17; reproduce la medicion original dentro del ruido.)
 
 **Sin tocar una línea del compose**: el driver nuevo lo aprovecha solo.
 
