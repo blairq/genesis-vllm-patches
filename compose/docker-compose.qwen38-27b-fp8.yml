@@ -208,7 +208,7 @@ services:
       # Modelo de Hugging Face W8A16 + MTP
       - orcarouter/Qwen3.8-27B-Uncensored-FP8
       - --served-model-name
-      - qwen3.6
+      - qwen3.8
       - --disable-access-log-for-endpoints
       - "/metrics,/health"
       - --trust-remote-code
