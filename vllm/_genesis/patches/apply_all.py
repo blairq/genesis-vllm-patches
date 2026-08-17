@@ -807,6 +807,35 @@ def apply_patch_N84_hybrid_eagle_hit_consistency() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN85 mensaje al agotarse el presupuesto de thinking")
+def apply_patch_N85_thinking_budget_message() -> PatchResult:
+    """PN85: thinking_budget_message por request.
+
+    vLLM corta el razonamiento en seco al agotarse thinking_token_budget. PN85
+    permite inyectar un texto justo antes del cierre para que el modelo
+    responda sabiendo que lo cortaron, en vez de rehacer el analisis.
+
+    El trabajo real es separar la secuencia de FORZADO de la de DETECCION:
+    think_end_token_ids cumple los dos roles y contaminarla rompe la deteccion
+    del cierre natural.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN85=1.
+    """
+    name = "PN85 thinking budget message"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N85_thinking_budget_message
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N85_thinking_budget_message.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN87 OffloadingConnector boundary fix para grupos hibridos/Mamba")
 def apply_patch_N87_offload_hybrid_alloc_boundary() -> PatchResult:
     """PN87: alinea deterministamente la frontera de bloques en update_state_after_alloc.

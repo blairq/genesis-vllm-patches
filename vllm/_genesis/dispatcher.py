@@ -593,6 +593,25 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
             "model_class": ["qwen3_5", "qwen3_6"],
         },
     },
+    "PN85": {
+        "title": "Mensaje inyectado al agotarse el presupuesto de thinking",
+        "env_flag": "GENESIS_ENABLE_PN85_THINKING_BUDGET_MESSAGE",
+        "default_on": True,
+        "category": "capability",
+        "credit": (
+            "Genesis-original 2026-08-17. vLLM ya trae thinking_token_budget "
+            "pero corta el razonamiento EN SECO: no hay forma de decirle al "
+            "modelo que lo cortaron, asi que suele rehacer el analisis en el "
+            "content o arrancar la respuesta a mitad de frase. PN85 agrega "
+            "thinking_budget_message POR REQUEST (se configura desde el "
+            "cliente, no por engine). Lo dificil no es inyectar el texto sino "
+            "que think_end_token_ids cumple DOS roles a la vez, forzar y "
+            "detectar; contaminarla -que es lo que permitiria hacerlo con "
+            "--reasoning-config solo- rompe la deteccion del cierre natural y "
+            "termina forzando un </think> en medio de la respuesta. PN85 "
+            "separa las dos secuencias."
+        ),
+    },
     "PN84": {
         "title": "Hit de prefijo inconsistente entre grupos en hibrido + MTP (mata el engine)",
         "env_flag": "GENESIS_ENABLE_PN84_HYBRID_EAGLE_HIT",
