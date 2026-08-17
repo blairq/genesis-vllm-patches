@@ -294,3 +294,32 @@ GA102**. El switch bancaría 2048 pero la placa no, así que no hay nada que
 subir. Con payload de 256 B, headers de TLP y codificación 128b/130b, el techo
 práctico de un x8 Gen4 queda cerca de 12 GB/s, no de 15,75. Los 10,9 GB/s
 medidos son ~90% de eso.
+
+### MaxPayload y MaxReadReq: tampoco hay nada
+
+**`MaxPayload` no se puede subir.** El spec prohíbe programar un MPS mayor que
+el `DevCap` del dispositivo, y el de la GA102 es 256 B. Escribirlo igual no lo
+habilita: genera TLPs malformados. No hay knob en el driver de NVIDIA porque no
+es del driver. Y 256 B es lo normal en toda la industria, A100/H100 incluidas.
+
+**`MaxReadReq` sí es software** (no lo limita el `DevCap`) y llamaba la atención
+que los puertos del switch estén en 128 B, el mínimo. Probado igual:
+
+- los tres puertos del switch **rechazan la escritura**, quedan en 128 B
+- las GPUs sí aceptan 4096 B (`setpci -s <gpu> CAP_EXP+8.w=593f`, original
+  `293f`)
+- con las GPUs en 4096: **10,64 / 10,63 / 10,64 GiB/s** contra
+  10,65 / 10,65 / 10,67 de base. Cero.
+
+Lo cual es coherente y además informativo: **el camino P2P son escrituras**
+(GPU A escribe en la ventana BAR1 de GPU B), así que el tamaño de las peticiones
+de lectura no participa. No volver a probar esto.
+
+### Lo único que queda sin probar en el enlace
+
+`ecrc=on` está en la línea de comandos del kernel (se puso durante el debug de
+corrupción del P2P). Agrega 4 bytes de digest a **cada** TLP: con payload de
+256 B es ~1,5% de overhead, más la latencia de chequearlo. Sacarlo requiere
+reboot y devolvería menos de 1% punta a punta, así que no se hizo. Si se saca,
+se pierde la detección end-to-end de corrupción en el enlace — que es
+justamente lo que costó encontrar la vez pasada.
