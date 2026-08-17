@@ -2,18 +2,34 @@
 # SPDX-License-Identifier: Apache-2.0
 """Carga MIXTA: un hilo largo + varios agentes chicos. El patron real de uso.
 
-Las otras dos cargas prueban extremos (todo prefill, o todo generacion). Esta
-prueba lo que de verdad corre en este rig: UNA conversacion de contexto largo
-mas varios subagentes con prompts cortos entrando en el medio.
+Mide LA LATENCIA ENTRE TOKENS de un agente mientras el hilo largo prefilea.
 
-Lo que mide, que es la pregunta que importa:
-  cuanto TARDA en arrancar un agente chico que llega mientras el hilo largo
-  esta prefileando.
+POR QUE ESA METRICA Y NO EL WALL-CLOCK
+--------------------------------------
+La v1 media cuanto tardaba cada agente de punta a punta. No sirve: los agentes
+generan una cantidad VARIABLE de tokens (temperatura 0.7, cortan por EOS
+cuando quieren), asi que el total mezcla "que tan rapido va el engine" con
+"cuanto decidio escribir el modelo". Medido: la MISMA config dio 50,6s y 77,3s
+en dos corridas, mas dispersion que la diferencia entre las configs que
+queriamos comparar.
 
-Es la latencia que paga --max-num-batched-tokens: un chunk de prefill del hilo
-largo se come el presupuesto entero del paso, asi que el agente que llega en
-ese momento espera en la cola. Se compara contra el mismo agente con el engine
-ocioso, que es el piso.
+La latencia inter-token no tiene ese problema: es directamente la duracion del
+paso del scheduler, que es la magnitud que mueven estos flags.
+
+    tick del scheduler = el chunk de prefill del hilo largo domina el paso
+    cada request en el batch avanza 1 token (4 con MTP) por paso
+    => latencia inter-token del agente == duracion del paso
+
+EL QUANTUM ES block_size, NO UN NUMERO REDONDO
+----------------------------------------------
+Con mamba_cache_mode=align, todo chunk de prefill largo se trunca a multiplo
+de block_size (1600):
+
+    scheduler.py _mamba_block_aligned_split:  n = n // 1600 * 1600
+
+Asi que 4096 no es una config: son 2,56 bloques que el scheduler recorta a 2
+(3200), mientras el profiler reserva transitorio para los 4096 completos. Por
+eso los valores se expresan en MULTIPLOS de block_size.
 
     python3 carga_mixta.py <puerto> <key> [--grande 100000] [--agentes 5]
 """
@@ -22,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
 import threading
 import time
@@ -38,7 +55,8 @@ CUERPO = (
 
 PREGUNTA_AGENTE = (
     "Escribi una funcion Python que valide un email con regex y devuelva "
-    "(bool, motivo). Solo el codigo, sin explicacion."
+    "(bool, motivo), despues otra que normalice un telefono argentino. "
+    "Solo codigo, sin explicacion."
 )
 
 
@@ -53,6 +71,7 @@ def pedir(base, key, ruta, datos=None, timeout=1800):
 
 
 def chat(base, key, texto, salida):
+    """Sin streaming: para el hilo largo y el calentamiento."""
     t0 = time.time()
     r = pedir(base, key, "/v1/chat/completions", {
         "model": chat.modelo,
@@ -65,58 +84,125 @@ def chat(base, key, texto, salida):
     return time.time() - t0, u.get("prompt_tokens"), u.get("completion_tokens")
 
 
+def chat_stream(base, key, texto, salida):
+    """Con streaming: devuelve (ttft, [latencias entre tokens], n_tokens)."""
+    req = urllib.request.Request(
+        base + "/v1/chat/completions",
+        data=json.dumps({
+            "model": chat.modelo,
+            "messages": [{"role": "user", "content": texto}],
+            "max_tokens": salida,
+            "temperature": 0.7,
+            "stream": True,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }).encode(),
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    t0 = time.time()
+    ttft = None
+    previo = None
+    deltas: list[float] = []
+    n = 0
+    with urllib.request.urlopen(req, timeout=1800) as r:
+        for linea in r:
+            linea = linea.decode().strip()
+            if not linea.startswith("data: ") or linea == "data: [DONE]":
+                continue
+            d = json.loads(linea[6:])
+            trozo = (d.get("choices") or [{}])[0].get("delta", {}).get("content")
+            if not trozo:
+                continue
+            ahora = time.time()
+            if ttft is None:
+                ttft = ahora - t0
+            else:
+                deltas.append(ahora - previo)
+            previo = ahora
+            n += 1
+    return ttft or 0.0, deltas, n
+
+
+def trafico_pcie(base, key) -> dict[str, tuple[float, float]]:
+    """Bytes y segundos movidos entre GPU y CPU, por sentido.
+
+    El offloading de KV copia bloques a RAM en cada paso. Interesa saber si
+    esa copia compite con el computo. (Spoiler medido en el codigo: NO —
+    save_kv_layer y wait_for_save son no-op, los stores se difieren al
+    start_kv_transfers del paso siguiente y corren en un stream aparte,
+    v1/kv_offload/cpu/gpu_worker.py:372 con un pool de streams. Pero se mide
+    igual, que para eso estan las metricas.)
+    """
+    out: dict[str, list] = {}
+    try:
+        r = urllib.request.Request(base + "/metrics",
+                                   headers={"Authorization": f"Bearer {key}"})
+        with urllib.request.urlopen(r, timeout=15) as resp:
+            for linea in resp.read().decode().splitlines():
+                if linea.startswith("#"):
+                    continue
+                for clave, idx in (("kv_offload_total_bytes_total", 0),
+                                   ("kv_offload_total_time_total", 1)):
+                    if clave in linea and "transfer_type=" in linea:
+                        tipo = linea.split('transfer_type="')[1].split('"')[0]
+                        val = float(linea.split()[-1])
+                        out.setdefault(tipo, [0.0, 0.0])[idx] = val
+    except Exception:
+        pass
+    return {k: (v[0], v[1]) for k, v in out.items()}
+
+
+def resumen(nombre, deltas: list[float]) -> str:
+    if not deltas:
+        return f"   {nombre}: sin datos"
+    d = sorted(deltas)
+    p50 = statistics.median(d)
+    p90 = d[int(len(d) * 0.9)] if len(d) > 1 else d[0]
+    return (f"   {nombre}: mediana {p50 * 1000:.0f} ms   p90 {p90 * 1000:.0f} ms   "
+            f"({len(d)} intervalos)")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("puerto", type=int)
     ap.add_argument("key")
-    ap.add_argument("--grande", type=int, default=100000, help="tokens del hilo largo")
+    ap.add_argument("--grande", type=int, default=100000)
     ap.add_argument("--agentes", type=int, default=5)
-    ap.add_argument("--retardo", type=float, default=4.0,
-                    help="segundos a esperar antes de soltar los agentes")
+    ap.add_argument("--retardo", type=float, default=4.0)
+    ap.add_argument("--salida", type=int, default=300)
     args = ap.parse_args()
-    # DOS CONTAMINACIONES QUE ARRUINAN LA COMPARACION ENTRE CORRIDAS:
-    #
-    # 1. El tier de offloading vive en /kv-offload y SOBREVIVE al reinicio del
-    #    engine, asi que la segunda corrida con el mismo texto no prefilea:
-    #    lo levanta del disco. Un nonce distinto por corrida rompe el prefijo
-    #    y obliga a prefillear de verdad.
-    # 2. Con --enable-flashinfer-autotune, los primeros requests despues del
-    #    arranque pagan autotune y JIT. Medido: el mismo piso de agentes dio
-    #    1,9s con el engine caliente y 48,9s recien arrancado. Por eso hay
-    #    calentamiento antes de medir nada.
+
+    # nonce por corrida: el tier de offloading vive en /kv-offload y SOBREVIVE
+    # al reinicio del engine, asi que sin esto la segunda corrida con el mismo
+    # texto lo levanta del disco en vez de prefillear.
     nonce = f"[corrida {time.time():.0f}] "
 
     base = f"http://127.0.0.1:{args.puerto}"
     chat.modelo = pedir(base, args.key, "/v1/models")["data"][0]["id"]
 
-    print("0) calentamiento (autotune + JIT), no se mide")
+    # con --enable-flashinfer-autotune los primeros requests pagan autotune y
+    # JIT: el mismo piso dio 1,9s caliente y 48,9s recien arrancado.
     for k in range(2):
-        t, _, _ = chat(base, args.key, f"{nonce}calentar {k}. Deci hola.", 16)
-        print(f"   {t:.1f}s")
-    print()
+        chat(base, args.key, f"{nonce}calentar {k}. Deci hola.", 16)
 
-    # ── piso: los agentes con el engine ocioso ──────────────────────────────
-    print("1) piso — agentes con el engine ocioso")
-    with ThreadPoolExecutor(max_workers=args.agentes) as ex:
-        piso = list(ex.map(
-            lambda i: chat(base, args.key, f"{nonce}[{i}] {PREGUNTA_AGENTE}", 200),
-            range(args.agentes)))
-    t_piso = [p[0] for p in piso]
-    print(f"   {min(t_piso):.1f}s / {sum(t_piso) / len(t_piso):.1f}s / "
-          f"{max(t_piso):.1f}s  (min/media/max)\n")
+    # ── piso: un agente solo, engine ocioso ─────────────────────────────────
+    ttft0, d0, n0 = chat_stream(base, args.key,
+                                f"{nonce}[piso] {PREGUNTA_AGENTE}", args.salida)
+    print(f"1) piso (engine ocioso)   ttft {ttft0 * 1000:.0f} ms")
+    print(resumen("inter-token", d0))
 
-    # ── mixto: los mismos agentes con el hilo largo prefileando ─────────────
-    print(f"2) mixto — hilo largo de ~{args.grande} tokens + {args.agentes} agentes "
-          f"soltados a los {args.retardo}s")
+    # ── mixto ───────────────────────────────────────────────────────────────
+    print(f"\n2) mixto: hilo de ~{args.grande} tok + {args.agentes} agentes "
+          f"a los {args.retardo}s")
     rep = max(1, args.grande * 3 // len(CUERPO.format(n=0, j=0)))
     texto_grande = nonce + "".join(CUERPO.format(n=99, j=j) for j in range(rep))
 
+    antes = trafico_pcie(base, args.key)
     res_grande: list = []
 
     def largo():
-        res_grande.append(
-            chat(base, args.key,
-                 "Resumi en tres lineas que hace este codigo:\n" + texto_grande, 200))
+        res_grande.append(chat(
+            base, args.key,
+            "Resumi en tres lineas que hace este codigo:\n" + texto_grande, 200))
 
     hilo = threading.Thread(target=largo)
     hilo.start()
@@ -124,25 +210,47 @@ def main() -> int:
 
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=args.agentes) as ex:
-        # prompts DISTINTOS del piso para que no haya hit de prefix cache
         mixto = list(ex.map(
-            lambda i: chat(base, args.key, f"{nonce}[mix-{i}] {PREGUNTA_AGENTE}", 200),
+            lambda i: chat_stream(base, args.key,
+                                  f"{nonce}[mix-{i}] {PREGUNTA_AGENTE}", args.salida),
             range(args.agentes)))
-    t_agentes = time.time() - t0
+    pared = time.time() - t0
     hilo.join()
+    despues = trafico_pcie(base, args.key)
 
-    t_mix = [m[0] for m in mixto]
-    print(f"   {min(t_mix):.1f}s / {sum(t_mix) / len(t_mix):.1f}s / "
-          f"{max(t_mix):.1f}s  (min/media/max)")
+    ttfts = [m[0] for m in mixto]
+    todos = [d for m in mixto for d in m[1]]
+    print(f"   ttft de los agentes: {min(ttfts):.1f}s / "
+          f"{sum(ttfts) / len(ttfts):.1f}s / {max(ttfts):.1f}s (min/media/max)")
+    print(resumen("inter-token bajo carga", todos))
+    print(f"   tokens generados por agente: "
+          f"{[m[2] for m in mixto]}   (por eso el wall-clock no compara)")
     if res_grande:
         seg, pt, ct = res_grande[0]
-        print(f"   hilo largo: {seg:.1f}s  prompt={pt} tok  salida={ct} tok")
+        print(f"   hilo largo: {seg:.1f}s  prompt={pt} tok")
 
-    media_piso = sum(t_piso) / len(t_piso)
-    media_mix = sum(t_mix) / len(t_mix)
-    print(f"\n   los {args.agentes} agentes tardaron {t_agentes:.1f}s en total")
-    print(f"   penalidad por estar el hilo largo prefileando: "
-          f"{media_mix / media_piso:.1f}x  ({media_piso:.1f}s -> {media_mix:.1f}s)")
+    if d0 and todos:
+        print(f"\n   degradacion del tick: "
+              f"{statistics.median(todos) / statistics.median(d0):.1f}x "
+              f"({statistics.median(d0) * 1000:.0f} ms -> "
+              f"{statistics.median(todos) * 1000:.0f} ms)")
+
+    print(f"\n3) trafico GPU<->CPU durante la fase mixta ({pared:.0f}s de pared)")
+    if not despues:
+        print("   sin metricas de kv_offload (¿offloading apagado?)")
+    for tipo in sorted(set(antes) | set(despues)):
+        b0, t_0 = antes.get(tipo, (0.0, 0.0))
+        b1, t_1 = despues.get(tipo, (0.0, 0.0))
+        gb = (b1 - b0) / (1 << 30)
+        seg = t_1 - t_0
+        if gb <= 0 and seg <= 0:
+            continue
+        print(f"   {tipo}: {gb:.2f} GiB en {seg:.2f}s "
+              f"({gb / seg if seg else 0:.1f} GiB/s, {100 * seg / pared:.1f}% del "
+              f"tiempo de pared)")
+    print("   NOTA: la copia NO esta en el camino critico. save_kv_layer y")
+    print("   wait_for_save son no-op; los stores se difieren y corren en un")
+    print("   stream aparte (v1/kv_offload/cpu/gpu_worker.py:372, pool de streams).")
     return 0
 
 
