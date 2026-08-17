@@ -127,18 +127,51 @@ def main() -> int:
         nombre, que = MODULOS[i % len(MODULOS)]
         t0 = time.time()
         try:
-            r = pedir(base, args.key, "/v1/chat/completions", {
-                "model": modelo,
-                "messages": [{"role": "user", "content": PLANTILLA.format(que=que)}],
-                "max_tokens": args.salida,
-                "temperature": 0.7,
-                "chat_template_kwargs": {"enable_thinking": args.pensar},
-            })
-            u = r.get("usage") or {}
-            texto = (r["choices"][0]["message"].get("content") or "")
-            razon = r["choices"][0].get("finish_reason")
+            # En streaming para separar PREFILL de GENERACION: el primer chunk
+            # con contenido marca el fin del prefill (TTFT). Sin esto los
+            # segundos totales mezclan las dos fases y no se puede atribuir
+            # una mejora a ninguna.
+            req = urllib.request.Request(
+                base + "/v1/chat/completions",
+                data=json.dumps({
+                    "model": modelo,
+                    "messages": [
+                        {"role": "user", "content": PLANTILLA.format(que=que)}],
+                    "max_tokens": args.salida,
+                    "temperature": 0.7,
+                    "stream": True,
+                    "stream_options": {"include_usage": True},
+                    "chat_template_kwargs": {"enable_thinking": args.pensar},
+                }).encode(),
+                headers={"Authorization": f"Bearer {args.key}",
+                         "Content-Type": "application/json"},
+            )
+            ttft = None
+            texto = []
+            razon = None
+            u = {}
+            with urllib.request.urlopen(req, timeout=1800) as r:
+                for linea in r:
+                    linea = linea.decode().strip()
+                    if not linea.startswith("data: "):
+                        continue
+                    cuerpo = linea[6:]
+                    if cuerpo == "[DONE]":
+                        break
+                    ch = json.loads(cuerpo)
+                    if ch.get("usage"):
+                        u = ch["usage"]
+                    for c in ch.get("choices") or []:
+                        trozo = (c.get("delta") or {}).get("content") or ""
+                        if trozo:
+                            if ttft is None:
+                                ttft = time.time() - t0
+                            texto.append(trozo)
+                        if c.get("finish_reason"):
+                            razon = c["finish_reason"]
             return (i, nombre, True, time.time() - t0, u.get("prompt_tokens"),
-                    u.get("completion_tokens"), razon, len(texto), "")
+                    u.get("completion_tokens"), razon, len("".join(texto)), "",
+                    ttft)
         except Exception as e:
             det = ""
             if hasattr(e, "read"):
@@ -147,7 +180,7 @@ def main() -> int:
                 except Exception:
                     pass
             return (i, nombre, False, time.time() - t0, None, None, None, 0,
-                    f"{type(e).__name__}: {e} {det}")
+                    f"{type(e).__name__}: {e} {det}", None)
 
     picos: dict = {}
     parar = threading.Event()
@@ -163,17 +196,29 @@ def main() -> int:
     total = time.time() - t0
 
     ok = gen = 0
-    for i, nombre, bien, seg, pt, ct, razon, chars, err in res:
+    ttfts = []
+    prompt_toks = 0
+    for i, nombre, bien, seg, pt, ct, razon, chars, err, ttft in res:
         if bien:
             ok += 1
             gen += ct or 0
-            print(f"  {nombre:<22} OK  {seg:6.1f}s  "
-                  f"{ct:>5} tok  {(ct or 0) / seg:5.1f} tok/s  "
-                  f"{chars:>6} chars  fin={razon}")
+            prompt_toks += pt or 0
+            if ttft is not None:
+                ttfts.append(ttft)
+            # tok/s de GENERACION pura: descuenta el prefill
+            tgen = seg - (ttft or 0)
+            print(f"  {nombre:<22} OK  {seg:6.1f}s  ttft {(ttft or 0):5.2f}s  "
+                  f"{ct:>5} tok  {(ct or 0) / max(tgen, 1e-9):5.1f} tok/s  "
+                  f"fin={razon}")
         else:
             print(f"  {nombre:<22} FALLO {seg:6.1f}s  {err}")
 
     print(f"\n  {ok}/{args.paralelo} en {total:.1f}s")
+    if ttfts:
+        ttfts.sort()
+        print(f"  PREFILL (ttft): min {ttfts[0]:.2f}s  mediana "
+              f"{ttfts[len(ttfts) // 2]:.2f}s  max {ttfts[-1]:.2f}s"
+              f"   ({prompt_toks} tokens de prompt en total)")
     print(f"  generacion: {gen} tokens  ->  {gen / total:.0f} tok/s agregados, "
           f"{gen / total / max(ok, 1):.1f} tok/s por request")
     print(f"  concurrencia real (sondeo a /metrics cada 0.5s): "
