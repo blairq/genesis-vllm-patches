@@ -256,8 +256,39 @@ services:
       # SIGUIENTE PASO (no aplicado aún): PN12 (FFN intermediate scratch pool) y
       # PN25 (SiluAndMul opaque-op pool) atacan exactamente el sitio (b). Ambos
       # son categoría memory_savings, sin gate de modelo y opt-in.
+      #
+      # 2026-08-16: se sube 4 -> 10 y SE VALIDA. Lo que cambio desde el
+      # diagnostico de arriba es que PN25 y PN12 (los pools que atacan el sitio
+      # (b), los transitorios del FFN) ya estan ACTIVOS en este compose, que es
+      # justamente el "siguiente paso no aplicado aun" que dejaba la nota.
+      #
+      # COSTO medido al pasar de 4 a 10:
+      #   KV en GPU        361.729 -> 344.155 tokens  (-4,9%)
+      #   memoria grafos      0,79 -> 0,94 GiB        (+0,15)
+      # OJO: la lista de --cudagraph-capture-sizes NO cambio y la memoria de
+      # grafos igual subio. Los buffers estaticos de cada grafo escalan con
+      # max_num_seqs (block tables, indices de estado GDN), no solo con la
+      # talla de la batch. No alcanza con mirar las tallas.
+      #
+      # 10 seqs x 4 tokens/paso (MTP K=3) = 40, que es la talla mas grande
+      # capturada, asi que nada cae en eager y no hace falta capturar mas.
+      #
+      # VALIDADO con dos cargas distintas (tests/repro/):
+      #   carga_paralela.py   10 x 40k tokens de prompt -> 10/10, 0 OOMs,
+      #                       643 MiB libres por GPU en el pico
+      #   carga_generacion.py 10 x 4000 tokens de salida (codigo RPG) ->
+      #                       10/10, 509 tok/s agregados, 50,9 por request,
+      #                       MTP 72,1%, pico REAL de 10 corriendo y 0 en cola
+      #
+      # Con prompts GRANDES nunca llega a 10 en paralelo: se queda en 4-5. No
+      # es este flag, es --max-num-batched-tokens 4096 -- un chunk de prefill
+      # se come el presupuesto entero del paso y no entra nadie mas. Para
+      # paralelismo real con prompts grandes hay que subir ESE, y se paga con
+      # KV y con transitorio de GDN.
+      #
+      # Si vuelve a OOMear, el primer valor a bajar es este, no el util.
       - --max-num-seqs
-      - "4"
+      - "10"
       - --disable-custom-all-reduce
       # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
       - --tensor-parallel-size
