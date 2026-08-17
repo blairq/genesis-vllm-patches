@@ -42,7 +42,10 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-# ~4 caracteres por token; 6000 "parrafos" ~ 20k tokens
+# ~160 caracteres por parrafo. OJO: es codigo, que tokeniza denso
+# (~3 char/token), asi que 1400 parrafos son ~70k tokens, no 20k.
+# Con 4 en vuelo eso es ~280k tokens = 77% del KV del fp8: justo lo que
+# hace falta para que los bloques sembrados se desalojen de la VRAM.
 PARRAFO = (
     "def etapa_{i}(entrada):\n"
     "    acumulado = 0\n"
@@ -145,7 +148,7 @@ def main() -> int:
     ap.add_argument("puerto", type=int)
     ap.add_argument("key")
     ap.add_argument("--rondas", type=int, default=3)
-    ap.add_argument("--parrafos", type=int, default=1400)  # ~20k tokens
+    ap.add_argument("--parrafos", type=int, default=1400)  # ~70k tokens
     ap.add_argument("--presion", type=int, default=14)
     args = ap.parse_args()
 

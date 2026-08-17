@@ -50,10 +50,14 @@ antes `python3 -m vllm._genesis.patches.apply_all`.
 Resultado medido (60 semillas por celda):
 
                  spec=SI          spec=NO
-    hibrido=SI   3 x :612         1 x :771
-    hibrido=NO   0                5 x :771
+    hibrido=SI   3 x :612         0
+    hibrido=NO   0                0
 
     con PN84:    0 x :612  (y 6x mas eventos del camino ejercitados)
+
+Los prompts se topean a max_model_len-1: el engine real rechaza con 400 los
+mas largos antes del scheduler, y sin ese tope el banco disparaba un assert
+en scheduler.py:771 que en produccion no puede pasar (ver KV-OFFLOADING §10.4).
 """
 
 from __future__ import annotations
@@ -321,6 +325,30 @@ def instrumentar(sched, cont: Contadores, dump: bool = False):
 
     kvm.get_computed_blocks = gcb
 
+    # Traza de allocate_slots: que le pidieron y cuantos bloques quedo teniendo.
+    # Sin esto no se puede distinguir "el connector rastrea mal" de "el
+    # scheduler asigno menos bloques de los que los tokens necesitan".
+    alocaciones: dict[str, list] = {}
+    orig_alloc = kvm.allocate_slots
+
+    def alloc(request, num_new_tokens, *a, **kw):
+        res = orig_alloc(request, num_new_tokens, *a, **kw)
+        try:
+            total = [len(g) for g in kvm.get_blocks(request.request_id).blocks]
+        except Exception:
+            total = "?"
+        alocaciones.setdefault(request.request_id, []).append(
+            f"nuevos={num_new_tokens} computados_nuevos={kw.get('num_new_computed_tokens')} "
+            f"externos={kw.get('num_external_computed_tokens')} "
+            f"lookahead={kw.get('num_lookahead_tokens')} "
+            f"req.computed={request.num_computed_tokens} -> bloques={total} "
+            f"{'RECHAZADA' if res is None else ''}"
+        )
+        return res
+
+    kvm.allocate_slots = alloc
+    instrumentar.alocaciones = alocaciones
+
     def envuelto(request, blocks, num_external_tokens):
         cont.alloc += 1
         if num_external_tokens:
@@ -363,13 +391,33 @@ def instrumentar(sched, cont: Contadores, dump: bool = False):
                         f"prompt={req.num_prompt_tokens} "
                         f"preempciones={req.num_preemptions} bsf={bsf}"
                     )
-                    for gc, gs in zip(cs.config.kv_group_configs, st.group_states):
+                    for gi, (gc, gs) in enumerate(
+                        zip(cs.config.kv_group_configs, st.group_states)
+                    ):
+                        # cuantos bloques cree el KVCacheManager que tiene la
+                        # request, contra cuantos rastrea el connector
+                        try:
+                            reales = len(
+                                kvm.coordinator.single_type_managers[gi]
+                                .req_to_blocks[rid]
+                            )
+                        except Exception:
+                            reales = "?"
                         print(
                             f"    g{gc.group_idx} obs={gc.offloaded_block_size} "
                             f"keys={len(gs.offload_keys)} "
-                            f"block_ids={len(gs.block_ids)} "
+                            f"block_ids_connector={len(gs.block_ids)} "
+                            f"bloques_reales={reales} "
                             f"next_stored={gs.next_stored_block_idx}"
                         )
+                    for ln in alocaciones.get(rid, [])[-3:]:
+                        print(f"    allocate_slots: {ln}")
+                    print(
+                        f"    scheduled_new={[r.req_id for r in scheduler_output.scheduled_new_reqs]} "
+                        f"cached={list(scheduler_output.scheduled_cached_reqs.req_ids)} "
+                        f"resumed={scheduler_output.scheduled_cached_reqs.resumed_req_ids} "
+                        f"preempted={scheduler_output.preempted_req_ids}"
+                    )
             raise
 
     cs._build_store_jobs = store_envuelto
@@ -462,10 +510,18 @@ def correr(esc: Escenario, cont: Contadores | None = None, dump: bool = False) -
             base = []
             for _ in range(rng.randint(1, 5)):
                 base += trozos[rng.randrange(len(trozos))]
+        # cola parcial para que no siempre caiga en borde de bloque
+        base = base + [rng.randrange(10, 60000) for _ in range(rng.randint(0, 400))]
+        # TOPE POR max_model_len. El engine real rechaza con 400 cualquier prompt
+        # mas largo antes de que llegue al scheduler; aca las Request se crean a
+        # mano y esa validacion no existe. Sin este tope el banco genera prompts
+        # imposibles y dispara un assert (scheduler.py:771) que en produccion no
+        # puede pasar: allocate_slots clampea a max_model_len y _build_store_jobs
+        # no, asi que las cuentas de bloques no cierran.
+        base = base[: esc.max_model_len - 1]
         if len(base) // BLOCK_SIZE >= 2:
             historial.append(base[: (len(base) // BLOCK_SIZE) * BLOCK_SIZE])
-        # cola parcial para que no siempre caiga en borde de bloque
-        return base + [rng.randrange(10, 60000) for _ in range(rng.randint(0, 400))]
+        return base
 
     pendientes = [
         nueva_request(f"r{i}", prompt_del_arbol(), hasher, rng.randint(1, 40))

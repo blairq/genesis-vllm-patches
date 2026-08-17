@@ -261,7 +261,7 @@ T2.
 | `incompatible with PYTORCH_CUDA_ALLOC_CONF=expandable_segments` | falta cumem | `--enable-cumem-allocator` |
 | El disco crece sin parar | PN81 apagado | `GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1` |
 | `AssertionError` **sin mensaje** en `offloading/scheduler.py:612` → `EngineDeadError`, tras horas de uso normal | hit de prefijo inconsistente entre grupos (hibrido + MTP) — bug de vLLM | PN84, §10 |
-| `AssertionError` sin mensaje en `offloading/scheduler.py:771` (`_build_store_jobs`) | segundo assert pelado, distinto; reproducido en el banco, **sin arreglar** | §10.4 |
+| `AssertionError` sin mensaje en `offloading/scheduler.py:771` (`_build_store_jobs`) | prompt más largo que `max_model_len` llegando al scheduler (no pasa vía API: da 400) | §10.4 |
 
 ---
 
@@ -427,8 +427,8 @@ Matriz medida, 60 semillas por celda:
 
 | | spec decode SÍ | spec decode NO |
 |---|---|---|
-| **híbrido SÍ** | **3 fallos** en `:612` | 1 fallo en `:771` |
-| **híbrido NO** | 0 | 5 fallos en `:771` |
+| **híbrido SÍ** | **3 fallos** en `:612` | 0 |
+| **híbrido NO** | 0 | 0 |
 
 Hacen falta **las dos** cosas: modelo híbrido (atención + GDN) y speculative
 decoding, que es lo que hace que el grupo de atención sea grupo eagle. Es
@@ -437,14 +437,39 @@ request tenga hit **local** (VRAM) y hit **externo** (RAM/disco) al mismo
 tiempo — eso es lo raro, y por eso tardó 14 horas en aparecer. Cuando esa
 combinación se da, revienta en ~1 de cada 3.
 
-Los dos asserts siguen apareciendo con `--sin-async`, así que no son un
-efecto del scheduling asíncrono.
+El fallo sigue apareciendo con `--sin-async`, así que no es un efecto del
+scheduling asíncrono.
 
-⚠️ **`scheduler.py:771` es un bug distinto y sigue sin arreglar.** Es
-`assert len(offload_keys) == len(offload_block_ids)` en `_build_store_jobs`,
-no depende de híbrido ni de spec decode, y también mata el EngineCore. Lo
-encontró el mismo banco. No es el crash que se vio en producción y no está
-confirmado contra el engine real.
+#### El falso positivo de `scheduler.py:771`
+
+Una versión anterior del banco disparaba además un `assert
+len(offload_keys) == len(offload_block_ids)` en `_build_store_jobs`
+(`scheduler.py:771`), en 6 de 240 escenarios, **sin** depender de híbrido ni
+de spec decode. Era un **artefacto del banco**, no un bug alcanzable.
+
+La traza lo dejó claro:
+
+```
+r24: computed=16000 sched=3522 num_tokens=19522  max_model_len=16384
+  g0 keys=12  block_ids_connector=11  bloques_reales=11
+  allocate_slots: nuevos=3522 computados_nuevos=16000 -> bloques=[11]
+```
+
+El prompt (19.522 tokens) es **más largo que `max_model_len`** (16.384).
+`allocate_slots` clampea con `min(..., self.max_model_len)` y reserva 11
+bloques; `_build_store_jobs` calcula `min(computed + scheduled,
+req.num_tokens)` **sin** clampear y pide 12. Las cuentas no cierran y salta
+el assert.
+
+Ese prompt nunca llega al scheduler en producción: el engine lo rechaza antes
+con un 400 (*"maximum context length"*). El banco creaba las `Request` a mano
+y se saltaba esa validación. Con el tope puesto (`prompt[:max_model_len-1]`),
+los 6 fallos **desaparecen** y los 3 de `:612` quedan intactos — o sea que el
+tope no tapa el bug real, sólo saca el ruido.
+
+Queda como nota de robustez de vLLM, no como algo a parchear: si alguna vez
+una request más larga que `max_model_len` llegara al scheduler con offloading
+activo, mataría el EngineCore.
 
 ### 10.5 El arreglo
 
