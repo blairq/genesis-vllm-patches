@@ -221,6 +221,9 @@ services:
       - --dtype
       - float16
       # fp8_e4m3: Duplica la capacidad de almacenamiento de la KV cache vs fp16
+      # PRUEBA: estado SSM en fp16 en vez de fp32
+      - --mamba-ssm-cache-dtype
+      - "float16"
       - --kv-cache-dtype
       - "fp8_e4m3"
       # ⚠️ NO SUBIR. Diagnóstico completo 2026-08-14/15 (sonda en el código).
@@ -438,12 +441,12 @@ services:
       #    difieren y corren en streams aparte, v1/kv_offload/cpu/
       #    gpu_worker.py:372).
       - --max-num-batched-tokens
-      - "1600"
+      - "832"
       # Redundante con el presupuesto (los dos en 1x) pero explicito a
       # proposito: si algun dia se sube el presupuesto, esto deja el chunk del
       # prefill largo en 1 bloque en vez de seguirlo hacia arriba.
       - --long-prefill-token-threshold
-      - "1600"
+      - "832"
       - --performance-mode
       - "throughput"
       # Tallas de CUDA Graph. Con MTP num_speculative_tokens=3 cada secuencia
