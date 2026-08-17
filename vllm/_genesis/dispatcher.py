@@ -620,6 +620,23 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN87": {
+        "title": "OffloadingConnector boundary fix para grupos hibridos/Mamba (evita AssertionError en :612)",
+        "env_flag": "GENESIS_ENABLE_PN87_OFFLOAD_HYBRID_BOUNDARY",
+        "default_on": True,
+        "category": "correctness",
+        "credit": (
+            "Genesis-original 2026-08-17. Bug de vLLM en "
+            "OffloadingConnectorScheduler.update_state_after_alloc: la busqueda "
+            "lineal del primer bloque unhashed asume correspondencia 1:1 token-a-bloque "
+            "de Full Attention. En capas GDN/Mamba (o capas con placeholders nulos "
+            "o recicladas), el assert pelado :612 salta y mata el EngineCore entero. "
+            "PN87 alinea deterministamente la frontera local/remota de bloques a la "
+            "cota real de tokens locales para cada grupo."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN83": {
         "title": "Informe de arranque en lenguaje humano (VRAM, capacidad, riesgos, flags)",
         "env_flag": "GENESIS_ENABLE_PN83_ANALISIS_ARRANQUE",

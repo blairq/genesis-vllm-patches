@@ -807,6 +807,30 @@ def apply_patch_N84_hybrid_eagle_hit_consistency() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN87 OffloadingConnector boundary fix para grupos hibridos/Mamba")
+def apply_patch_N87_offload_hybrid_alloc_boundary() -> PatchResult:
+    """PN87: alinea deterministamente la frontera de bloques en update_state_after_alloc.
+
+    Previene el AssertionError no capturado en offloading/scheduler.py:612 cuando
+    se procesan hits mixtos en modelos hibridos (GDN/Mamba) o con placeholders nulos.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN87=1.
+    """
+    name = "PN87 offload hybrid alloc boundary"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N87_offload_hybrid_alloc_boundary
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N87_offload_hybrid_alloc_boundary.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN83 analisis de arranque (informe en lenguaje humano)")
 def apply_patch_N83_analisis_arranque() -> PatchResult:
     """PN83: emite al final del arranque un informe explicando la config.
