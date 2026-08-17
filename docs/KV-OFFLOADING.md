@@ -495,3 +495,75 @@ Los eventos **subieron 6×**: el parche no tapó el camino, lo hizo consistente
 —así que ocurre mucho más seguido y sobrevive.
 
 Kill switch: `GENESIS_DISABLE_PN84=1`.
+
+---
+
+## Auditoría del camino de copia (2026-08-17)
+
+Disparada por un hallazgo del trabajo de P2P: en este rig el **motor de copia
+(DMA) de la placa rinde 5,28 GiB/s contra 12,10 de las escrituras desde los SM**
+sobre el mismo cable (ver `docs/P2P-ENTRE-LAS-3090.md` §8). La pregunta era si
+vLLM usa el motor lento en algún lado del camino caliente.
+
+### Resultado del barrido
+
+| candidato | veredicto |
+|---|---|
+| `_select_swap_blocks_fn` cablea DMA para GPU→CPU (`gpu_worker.py:43`) | **correcto, no tocar.** El comentario dice "the dedicated copy engine beats Triton" y acá se cumple: el DMA hacia host da 12,27 GiB/s, o sea velocidad de enlace. El problema del DMA es GPU→GPU, no GPU→CPU. |
+| `THRESHOLD_BYTES = 28 KiB` para Triton en CPU→GPU | no aplica: nuestro `page_size` es ~1,6 MiB, muy por encima, así que va por DMA. Correcto. |
+| copias GPU↔GPU por `cudaMemcpyPeer` | **no existen en el camino caliente.** Un solo hit de `DeviceToDevice` en todo vLLM y es de otro modelo (minimax). Las colectivas van por NCCL, que ya usa los SM. |
+| **el mmap de offloading no queda pinneado** | **hallazgo real, ver abajo** |
+
+### El mmap de offloading corre a medio pinnear
+
+`pin_mmap_region()` (`gpu_worker.py:139`) registra la región entera con
+`cudaHostRegister`. Con TP=2 **los dos ranks registran las mismas páginas
+físicas** y el driver rechaza el segundo:
+
+```
+cudaHostRegister failed for rank=0 (code=1) — transfers will still work
+but may be slower (unpinned DMA)
+```
+
+Ya lo sabíamos por PN82, pero lo tratábamos sólo como un problema de error
+pegajoso en el contexto CUDA. La otra mitad del problema es de rendimiento.
+
+Medido (`tests/repro/pinned_vs_mmap.py`, GPU→CPU de 512 MiB):
+
+| destino | GiB/s |
+|---|---|
+| pinned de torch | 12,27 |
+| mmap de /dev/shm + `cudaHostRegister` | 12,27 |
+| **mmap SIN registrar** | **9,24** |
+
+**No pinnear cuesta 25%.** Como falla un rank de dos, el efecto sobre el
+offloading agregado es ~12%.
+
+#### No era el `memlock`
+
+Sospecha razonable y falsa: el contenedor arranca con `memlock` = 8 MB y se
+intentan registrar 5,36 GB. Probado con `ulimits: memlock: -1` — **sigue
+fallando con el mismo `code=1`**. Y un pinned de torch de 512 MiB funciona a
+12,27 GiB/s con el límite de 8 MB puesto: el driver de NVIDIA pinea por fuera
+de `RLIMIT_MEMLOCK`. No agregar el ulimit, no hace nada.
+
+#### Cómo se arreglaría
+
+El layout **ya está particionado por rank**: `_worker_offset = rank *
+cpu_page_size`, y la rutina de `MADV_POPULATE_WRITE` ya recorre sólo las
+páginas de su worker (`shared_offload_region.py:90-102`). Pero las porciones
+están **intercaladas dentro de cada fila de bloque**, no contiguas, así que no
+alcanza con registrar un rango: hay que hacer un `cudaHostRegister` por fila,
+espejando el bucle de `madvise` que ya existe.
+
+Condición: `cpu_page_size % mmap.PAGESIZE == 0`, o el redondeo a página pisa el
+área del otro rank y vuelve a fallar. En esta config se cumple
+(1.703.936 = 416 páginas), pero el parche tiene que verificarlo y caer al
+comportamiento actual si no.
+
+**Prioridad baja.** Las copias de offloading no están en el camino crítico
+(`save_kv_layer` y `wait_for_save` son no-op, los stores se difieren a streams
+aparte) y hoy son el 2,4% del tiempo de pared. Un 12% sobre eso es ruido punta
+a punta. Sube de prioridad si el volumen de offloading crece o si el tier de
+disco se vuelve activo. Efecto lateral lindo: si el registro deja de fallar,
+PN82 se queda sin motivo.
