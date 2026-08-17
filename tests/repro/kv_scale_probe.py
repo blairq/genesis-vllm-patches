@@ -37,15 +37,20 @@ son GDN y no usan KV cache).
 
     |max| global      91,0   -> queda 5x de margen hasta 448
     recortados        0 de 262.144.000 (0,0000%)
-    en denormales     0,26%
+    en denormales     0,22%
 
-Y NO es cuestion de haber medido poco: con 16x menos tokens (512) el |max| daba
-90,5. La distribucion esta saturada, no tiene cola creciente.
+Y NO es cuestion de haber medido poco: con 16x menos tokens el |max| daba 90,5.
+La distribucion esta saturada, no tiene cola creciente.
 
 => escala 1.0 esta bien; calibrar k_scale/v_scale no aportaria nada.
 
-El |max| crece con la profundidad (8 en la capa 3, 91 en la 63) y V supera a K
-en la segunda mitad del modelo, pero ni el peor caso se acerca a 448.
+K queda plana (9,2 a 22,8) porque k_norm la normaliza. La que crece con la
+profundidad es V, que no pasa por ninguna norma: 6,0 en la capa 3 y 91,0 en la
+63. Aun asi el peor caso queda a 5x de 448.
+
+Las escalas que calcularia vLLM salen todas < 1, o sea que calibrar SUBIRIA las
+magnitudes (alejandolas de los denormales), no las bajaria. Como el recorte ya
+es cero, lo unico que tocaria es ese 0,22% de denormales: nada.
 
 No necesita el engine corriendo, pero SI necesita las GPUs libres.
 
@@ -107,31 +112,51 @@ def main() -> int:
 
     stats: dict[str, dict] = {}
 
-    def hook(nombre):
-        def fn(_mod, _inp, out):
-            t = out[0] if isinstance(out, tuple) else out
-            t = t.detach().float()
-            a = t.abs()
-            d = stats.setdefault(nombre, {"max": 0.0, "min_nz": float("inf"),
-                                          "n": 0, "n_denorm": 0, "n_clip": 0})
-            d["max"] = max(d["max"], a.max().item())
-            nz = a[a > 0]
-            if nz.numel():
-                d["min_nz"] = min(d["min_nz"], nz.min().item())
-            d["n"] += a.numel()
-            d["n_denorm"] += int((nz < E4M3_MIN_NORMAL).sum().item())
-            d["n_clip"] += int((a > E4M3_MAX).sum().item())
-        return fn
+    def acumular(nombre, t):
+        a = t.detach().float().abs()
+        d = stats.setdefault(nombre, {"max": 0.0, "min_nz": float("inf"),
+                                      "n": 0, "n_denorm": 0, "n_clip": 0})
+        d["max"] = max(d["max"], a.max().item())
+        nz = a[a > 0]
+        if nz.numel():
+            d["min_nz"] = min(d["min_nz"], nz.min().item())
+        d["n"] += a.numel()
+        d["n_denorm"] += int((nz < E4M3_MIN_NORMAL).sum().item())
+        d["n_clip"] += int((a > E4M3_MAX).sum().item())
 
+    # --- V: la salida de v_proj SI es lo que entra al cache (no pasa por
+    # ninguna norma ni por RoPE), asi que alcanza con un hook.
     handles = []
-    n_reg = 0
     for nombre, mod in modelo.named_modules():
-        if nombre.endswith((".k_proj", ".v_proj")):
-            handles.append(mod.register_forward_hook(hook(nombre)))
-            n_reg += 1
-            if args.capas and n_reg >= args.capas * 2:
-                break
-    print(f"  hooks registrados: {n_reg}\n")
+        if nombre.endswith(".v_proj") and ".self_attn." in nombre + ".":
+            capa = nombre.split(".layers.")[1].split(".")[0]
+            handles.append(mod.register_forward_hook(
+                lambda _m, _i, out, c=capa: acumular(f"capa {int(c):>2}  V", out)))
+
+    # --- K: la salida de k_proj NO es lo que entra al cache. El modelo hace
+    #     key_states = k_norm(k_proj(x))  ->  apply_rotary_pos_emb(...)
+    # k_norm reescala y RoPE mezcla pares, asi que hay que tomar el tensor
+    # DESPUES de RoPE. Se envuelve la funcion; el contador de llamadas da el
+    # indice de capa de atencion porque solo las 16 capas plenas la llaman, y
+    # en orden.
+    from transformers.models import qwen3_5
+    mod_qwen = qwen3_5.modeling_qwen3_5
+    rope_original = mod_qwen.apply_rotary_pos_emb
+    capas_attn: list[int] = [
+        int(n.split(".layers.")[1].split(".")[0])
+        for n, _ in modelo.named_modules() if n.endswith(".self_attn.k_norm")
+    ]
+    contador = {"i": 0}
+
+    def rope_instrumentado(q, k, cos, sin, *a, **kw):
+        q2, k2 = rope_original(q, k, cos, sin, *a, **kw)
+        i = contador["i"] % len(capas_attn)
+        contador["i"] += 1
+        acumular(f"capa {capas_attn[i]:>2}  K", k2)
+        return q2, k2
+
+    mod_qwen.apply_rotary_pos_emb = rope_instrumentado
+    print(f"  capas con KV: {capas_attn}\n")
 
     texto = ("def procesar(x):\n    acc = 0\n    for i in range(x):\n"
              "        acc += i * 7 - (i % 13)\n    return acc\n\n") * (args.tokens // 25)
@@ -141,16 +166,26 @@ def main() -> int:
         modelo(ids.to("cuda:0"))
     for h in handles:
         h.remove()
+    mod_qwen.apply_rotary_pos_emb = rope_original
 
-    print(f"{'tensor':<44}{'|max|':>10}{'margen a 448':>14}{'clip':>8}{'denorm':>9}")
+    # vLLM no divide por 448 sino por estas constantes heuristicas
+    # (envs.K_SCALE_CONSTANT / V_SCALE_CONSTANT), que dejan margen de sobra:
+    #     _k_scale = abs(key).max() / 200
+    #     _v_scale = abs(value).max() / 100
+    K_CONST, V_CONST = 200.0, 100.0
+
+    print(f"{'tensor':<14}{'|max|':>9}{'escala vLLM':>13}{'margen a 448':>14}"
+          f"{'clip':>7}{'denorm':>9}")
     peor = 0.0
     tot_clip = tot_den = tot_n = 0
     for nombre in sorted(stats):
         d = stats[nombre]
         peor = max(peor, d["max"])
         tot_clip += d["n_clip"]; tot_den += d["n_denorm"]; tot_n += d["n"]
-        print(f"{nombre[-44:]:<44}{d['max']:>10.3f}{E4M3_MAX / max(d['max'], 1e-9):>13.0f}x"
-              f"{d['n_clip']:>8}{100 * d['n_denorm'] / max(d['n'], 1):>8.2f}%")
+        escala = d["max"] / (K_CONST if nombre.endswith("K") else V_CONST)
+        print(f"{nombre:<14}{d['max']:>9.3f}{escala:>13.3f}"
+              f"{E4M3_MAX / max(d['max'], 1e-9):>13.0f}x"
+              f"{d['n_clip']:>7}{100 * d['n_denorm'] / max(d['n'], 1):>8.2f}%")
 
     print(f"\n  |max| global: {peor:.3f}   (e4m3 llega a {E4M3_MAX})")
     print(f"  margen sin usar: {E4M3_MAX / max(peor, 1e-9):.0f}x")
