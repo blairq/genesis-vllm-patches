@@ -33,4 +33,5 @@ failed" o queda bloqueado en `read()`). Hay que correrlo a mano.
   `210305` traía 370 bytes de datos ajenos en `0x4000`, una región que esta
   placa tiene sin programar. Por eso se usó el del instalador oficial.
 
-Ver `../P2P-SIN-PARCHAR-EL-DRIVER.md`
+La Zotac fue flasheada para habilitar ReBAR: BAR1 paso de 256 MiB a 32768 MiB
+(`resource1_resize` 0x01c0 -> 0xffc0). Eso NO habilita P2P por si solo.
