@@ -291,6 +291,25 @@ services:
       - "10"
       - --disable-custom-all-reduce
       # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
+      # TP=2 NO ES UNA ELECCION, ES LO UNICO QUE HAY (probado 2026-08-17).
+      # PP=2 falla al arrancar:
+      #   NotImplementedError: Pipeline parallelism is not supported for
+      #   this model. Supported models implement the `SupportsPP` interface.
+      # En qwen3_5.py el SupportsPP lo declara Qwen3_5ForCausalLMBase (l.433,
+      # texto solo). Este checkpoint resuelve a
+      # Qwen3_5ForConditionalGeneration (l.554) porque trae vision tower, y
+      # esa clase no lo implementa. No re-probar sin cambiar de checkpoint.
+      #
+      # COSTO MEDIDO de TP=2 (profile con torch, 2026-08-17): el all-reduce
+      # es el 31,8% del tiempo de GPU (10,5s de 33,2s), 4.968 llamadas de
+      # ncclDevKernel_AllReduce_Sum_f16_RING_LL. Son 128 all-reduce de 16 MB
+      # por forward (2 por capa x 64 capas) y NO hay P2P entre las placas
+      # (nvidia-smi topo -p2p r -> CNS), asi que cada byte cruza PCIe dos
+      # veces rebotando en el host. Link real bajo carga: Gen4 x8.
+      # Por eso --disable-custom-all-reduce esta puesto: el all-reduce custom
+      # de vLLM necesita P2P por IPC y sin el no puede funcionar.
+      # Si algun dia se consigue P2P (driver open + BAR/firmware), ese 31,8%
+      # se reduce solo, sin tocar nada de esta config.
       - --tensor-parallel-size
       - "2"
       # Contexto máximo soportado de 262K tokens
