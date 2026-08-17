@@ -323,3 +323,46 @@ corrupción del P2P). Agrega 4 bytes de digest a **cada** TLP: con payload de
 reboot y devolvería menos de 1% punta a punta, así que no se hizo. Si se saca,
 se pierde la detección end-to-end de corrupción en el enlace — que es
 justamente lo que costó encontrar la vez pasada.
+
+---
+
+## 8. De donde sale el hueco entre 15,75 GB/s y lo que medimos
+
+Medido con `tests/repro/pcie_desglose.py`. Cierra sin residuo, y **no queda
+margen recuperable**.
+
+| tramo | GiB/s | |
+|---|---|---|
+| velocidad de linea Gen4 x8 | 14,67 | 15,75 **GB**/s son 14,67 **GiB**/s: 7% del "hueco" era decimal vs binario |
+| − overhead de TLP | **13,32** | −9,2%; techo practico |
+| NCCL p2p (SM → BAR1) | **12,10** | **91% de ese techo** |
+| NCCL all-reduce | 10,9 | −10% de algoritmo y kernel |
+
+El overhead de TLP con MPS de 256 B y direccion de 64 bits: 4 B de STP + 2 de
+numero de secuencia + 16 de header + 4 de LCRC sobre 256 de payload = 282 B en
+el cable, 90,8% de eficiencia. **Sin ECRC**: aunque el cmdline del kernel diga
+`ecrc=on`, los cuatro extremos reportan `ECRCGenEn-` / `ECRCChkEn-` y las GPUs
+ni siquiera tienen `ECRCGenCap`. No hay nada que sacar ahi.
+
+El 1,22 GiB/s que va de 12,10 al techo son DLLPs de ACK y de credito, SKP
+ordered sets y turnaround: protocolo obligatorio, no configuracion.
+
+**El enlace esta sano:** los contadores de AER estan en cero en los cuatro
+extremos (`RxErr- BadTLP- BadDLLP- Rollover- Timeout-`). No se pierde ancho de
+banda en reenvios.
+
+### El hallazgo que importa: el motor de copia es 2,3× mas lento que el enlace
+
+| camino | GiB/s |
+|---|---|
+| `cudaMemcpyPeer` (motor de DMA de la placa) | 5,28 |
+| NCCL p2p (los SM escriben directo en la BAR1 del vecino) | **12,10** |
+| NCCL p2p bidireccional (suma) | 22,59 |
+
+Son **dos motores distintos sobre el mismo cable**, y el DMA es el que se queda
+corto. El full duplex funciona (22,59 sumados, ~11,3 por sentido).
+
+⚠️ **Consecuencia: cualquier medicion de "ancho de banda P2P" hecha con memcpy
+subestima el enlace a menos de la mitad.** Por eso `p2p_bandwidth.py` da razon
+1,00× y no puede discriminar — sirve solo para el chequeo de integridad, como
+ya decia §4, pero el motivo real es este y no el que figuraba ahi.
