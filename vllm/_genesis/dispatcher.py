@@ -700,6 +700,33 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN88": {
+        "title": "KV tier metrics (el tier de disco de vLLM no publica una sola metrica)",
+        "env_flag": "GENESIS_ENABLE_PN88_KV_TIER_METRICS",
+        "default_on": False,
+        "category": "observability",
+        "credit": (
+            "Genesis-original 2026-08-21. vLLM instrumenta el offloading a "
+            "medias: todo lo que publica sale de OffloadingConnectorStats y "
+            "cubre solo el tier de RAM (kv_offload_total_bytes / _time / "
+            "_size, con transfer_type GPU_to_CPU y CPU_to_GPU). El tier de "
+            "disco no aporta nada: FileSystemTierManager.get_finished_jobs "
+            "construye un JobResult con job_id y success, y record_transfer "
+            "solo lo alimenta cpu/gpu_worker.py, que unicamente maneja "
+            "GPU<->CPU. Medido en este rig sin poder verlo desde /metrics: "
+            "598 podas de PN81 en 66 h, del orden de 1,3 TiB/dia al NVMe. "
+            "PN88 mide bytes, latencia y errores del tier fs; separa el hit "
+            "rate de RAM del de disco (external_prefix_cache_hits los "
+            "fusiona); y cuenta las promociones rechazadas por tier primario "
+            "lleno — el caso peor, porque lookup() devuelve False igual que "
+            "un miss frio y el scheduler corta el hit de prefijo ahi, "
+            "perdiendo todo el prefijo restante en vez de un bloque. "
+            "El canal es KVConnectorStats: el tier de disco corre en el "
+            "scheduler y /metrics lo sirve el proceso de la API."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN81": {
         "title": "KV disk tier quota + poda por antiguedad (el tier fs de vLLM no tiene ninguna)",
         "env_flag": "GENESIS_ENABLE_PN81_KV_DISK_QUOTA",

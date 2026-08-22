@@ -84,7 +84,13 @@ services:
       # deja vacío— para podar por antigüedad, y purga al arrancar los mmap
       # huérfanos de /dev/shm que deja un cierre abrupto (llenarlo mata el
       # arranque siguiente con 'madvise: Bad address').
-      # La cuota es POR RANK: con TP=2 el disco total es 2 x MAX_GB.
+      # CORRECCION 2026-08-21: la cuota NO es por rank. Decia que con TP=2 el
+      # disco total era 2 x MAX_GB, y es 1 x MAX_GB. TieringOffloadingSpec.
+      # get_manager() se llama desde un unico sitio (offloading/scheduler.py:265,
+      # OffloadingConnectorScheduler), asi que existe UN FileSystemTierManager,
+      # en el proceso scheduler, con rank 0. En /kv-offload solo aparece _r0.
+      # Lo que si es por rank es el mmap de RAM, que se crea aparte en
+      # create_handlers() del lado del worker -- de ahi venia la confusion.
       - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1
       - GENESIS_KV_DISK_MAX_GB=30
       # Chequeo por TIEMPO, no por pasos del scheduler. El gate viejo era
@@ -93,13 +99,41 @@ services:
       # 61 requests no llegaron a 2000 pasos, y el dir toco 31,4 GiB con
       # limite de 30 sin una sola poda.
       - GENESIS_KV_DISK_CHECK_SECS=60
-      # Borra al arrancar las caches de OTROS modelos sin usar hace N dias.
-      # La cuota solo mira el dir del modelo actual, asi que sin esto cada
-      # modelo que probas deja el suyo para siempre: se habian juntado 142 GiB,
-      # 54 de un modelo que ya ni estaba descargado. Por antiguedad y no por
-      # 'no es el mio', para no tirar la cache del engine que usaste ayer.
+      # Borra las caches de OTROS modelos sin usar hace N dias. La cuota solo
+      # mira el dir del modelo actual, asi que sin esto cada modelo que probas
+      # deja el suyo para siempre: se habian juntado 142 GiB, 54 de un modelo
+      # que ya ni estaba descargado. Por antiguedad y no por 'no es el mio',
+      # para no tirar la cache del engine que usaste ayer.
       - GENESIS_KV_DISK_ORPHAN_DAYS=3
+      # PERIODICA, NO SOLO AL ARRANQUE (fix 2026-08-21). Antes corria una vez
+      # por proceso: un dir que quedaba huerfano DESPUES del arranque no se
+      # revisaba nunca mas. Medido: al arrancar el 08-19, _3ef784eef730_r0
+      # llevaba 1,6 dias sin uso (umbral 3) y se salteo con razon; dos dias
+      # despues ya calificaba y sus 25,47 GiB seguian ahi. Despistaba que su
+      # hermano sin datos (solo config.json) SI se habia borrado, porque nadie
+      # le escribe despues de crearlo y su mtime ya tenia 3,2 dias.
+      # Cadencia propia y mas lenta que la de la cuota: este barrido recorre
+      # TODOS los directorios de /kv-offload, no solo el del modelo actual.
+      - GENESIS_KV_DISK_ORPHAN_CHECK_SECS=3600
       - GENESIS_KV_DISK_TARGET_RATIO=0.85
+      # ── PN88: telemetria de los tiers del cache de KV ────────────────────
+      # El tier de disco de vLLM no publica UNA SOLA metrica: su JobResult
+      # lleva job_id y success, y record_transfer solo lo alimenta el handler
+      # GPU<->CPU. Sin esto, los ~1,3 TiB/dia que se escriben al NVMe solo se
+      # ven contando lineas del log de PN81.
+      # Publica, con labels tier/direction/agent:
+      #   kv_tier_bytes_total · kv_tier_ops_total · kv_tier_op_seconds
+      #   kv_tier_errors_total · kv_tier_lookups_total (RAM y disco SEPARADOS,
+      #   que external_prefix_cache_hits fusiona) · kv_tier_promotion_refused_total
+      #   kv_tier_evictions_total · kv_tier_bytes_used · kv_tier_capacity_bytes
+      # Observacion pura: no altera ninguna asignacion ni resultado numerico.
+      - GENESIS_ENABLE_PN88_KV_TIER_METRICS=1
+      # Allowlist CERRADA para la label `agent`. El nombre entra por
+      # kv_transfer_params.genesis_agent, o sea desde el cliente: sin lista
+      # cerrada un typo en un extraBody de opencode crea una serie de
+      # Prometheus nueva para siempre. Todo lo que no este aca cae en `other`,
+      # y su ausencia en `unknown`. Debe seguir a los canales de opencode.
+      - GENESIS_KV_AGENTS=coach,primary,primary_low,primary_high,primary_nothink,planner,planner_nothink,coder,verifier,utility,explorer,vision,art
       - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
       # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
       - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
@@ -113,11 +147,29 @@ services:
       - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1
       # P100: CUDAGraphs FULL para spec-decode -> Mejora la latencia single-stream en +5-10%
       - GENESIS_ENABLE_P100=1
-      # PN8: Cuantización online del borrador MTP -> Ahorra ~1-2 GiB de VRAM por GPU
-      - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=1
-      # P112: Sistema de cuantización y caché en disco de MTP con fingerprint SHA256 (0% CPU en arranques posteriores)
-      - GENESIS_ENABLE_MTP_QUANT_CACHE=1
+      # PN8: Cuantización online del borrador MTP.
+      # APAGADO 2026-08-19: el propio Genesis lo marca "enabled but NOT
+      # recommended on this GPU (may regress or no-op)", y su lógica es no-op
+      # cuando el target no está online-quantized -- que es este caso (el FP8
+      # sale estático del config.json, quantization=fp8). No ahorraba nada acá.
+      - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=0
+      # P112: cuantización + caché en disco del MTP.
+      # APAGADO 2026-08-19 tras auditoría (ver el encabezado de
+      # vllm/_genesis/mtp_cache.py, 7 bugs con evidencia). Resumen: sobre un
+      # checkpoint FP8 hacía un round-trip FP8 -> INT8 -> FP16 que dequantizaba
+      # de vuelta antes de llegar a la GPU. O sea: toda la pérdida de precisión
+      # del INT8, y CERO beneficio -- ni IMMA (los pesos quedaban FP16 densos),
+      # ni VRAM (0 MiB), ni velocidad. El "ahorro" real eran 39 MiB en DISCO.
+      # Además corrompía los weight_scale_inv del FP8 (filtro por numel>1024).
+      - GENESIS_ENABLE_MTP_QUANT_CACHE=0
       - GENESIS_MTP_QUANT_FORMAT=int8
+      # P66: filtra --cudagraph-capture-sizes a los divisibles por K+1.
+      # ACTIVADO 2026-08-19. Con K=3 las tallas actuales (4..40) ya son todas
+      # múltiplos de 4, así que hoy es NO-OP. Se activa como red de seguridad
+      # para el barrido de K: sin esto, una talla no divisible por K+1 hornea
+      # una rama de PREFILL dentro de un grafo de "decode uniforme" y en
+      # runtime eso lee metadata de atención basura (vllm#28015).
+      - GENESIS_ENABLE_P66_CUDAGRAPH_SIZE_FILTER=1
       # P5b: Estrategia de tamaño de página KV para Qwen -> Ahorra ~34% de VRAM por bloque KV
       - GENESIS_ENABLE_P5B=1
       # P69: Inyecta recordatorio de formato <tool_call> al final del último mensaje si supera el umbral
@@ -187,6 +239,16 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
       - TRITON_CACHE_DIR=/root/.cache/triton
       - VLLM_USE_FLASHINFER_SAMPLER=1
+      # ── SEMILLA DE HASH: hace persistente el tier de disco ───────────────
+      # Sin esto, kv_cache_utils.py:112 hace NONE_HASH = os.urandom(32) y la
+      # RAIZ de toda la cadena de hashes de bloque cambia en cada arranque.
+      # Consecuencia medida: los 57 GB que hay en /kv-offload quedan
+      # INALCANZABLES despues de cada reinicio -- no se borran, simplemente
+      # ningun lookup vuelve a machear, hasta que PN81 los purgue por
+      # antiguedad a los 3 dias. O sea, el tier 2 se reconstruia de cero cada
+      # vez. vLLM ya avisa de esto por log ("PYTHONHASHSEED is not set...").
+      # El valor concreto da igual; lo que importa es que sea FIJO y estable.
+      - PYTHONHASHSEED=0
     shm_size: "16gb"
     ipc: host
     deploy:
@@ -211,6 +273,15 @@ services:
       - qwen3.8
       - --disable-access-log-for-endpoints
       - "/metrics,/health"
+      # Llena usage.prompt_tokens_details.cached_tokens en CADA respuesta, o
+      # sea atribucion de cache por request en vez de solo agregados. El
+      # cliente ya pide stream_options.include_usage, asi que el dato aparece
+      # sin tocar nada mas. Sin este flag, serving.py:899 lo omite siempre.
+      # OJO: hoy es la SUMA de hit local + KV externo. El split por origen
+      # existe por request en PrefillStats (num_local_cached_tokens /
+      # num_external_cached_tokens) pero output_processor.py:630 lo colapsa
+      # antes de llegar a la API -- preservarlo es un parche aparte.
+      - --enable-prompt-tokens-details
       - --trust-remote-code
       - --attention-backend
       - FLASHINFER
@@ -441,7 +512,15 @@ services:
       #    difieren y corren en streams aparte, v1/kv_offload/cpu/
       #    gpu_worker.py:372).
       - --max-num-batched-tokens
-      - "832"
+      # 2026-08-19: 832 -> 1664 (x2, múltiplo exacto del bloque de 832).
+      # ADVERTENCIA: las mediciones de más arriba en este mismo archivo dicen
+      # que esto NO acelera el prefill (133,9 / 136,4 / 136,9 / 136,4s en las
+      # cuatro configs: está pegado al techo de cómputo, ~770 tok/s). Y con
+      # max_num_partial_prefills=1 tampoco hay prefills concurrentes que
+      # aprovechen el presupuesto mayor. El costo SÍ es real: el profiler mide
+      # el pico de activaciones con este número, así que sale de la KV.
+      # Revertir a "832" si la KV baja y no aparece ganancia medida.
+      - "1664"
       # Redundante con el presupuesto (los dos en 1x) pero explicito a
       # proposito: si algun dia se sube el presupuesto, esto deja el chunk del
       # prefill largo en 1 bloque en vez de seguirlo hacia arriba.

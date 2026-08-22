@@ -916,8 +916,10 @@ def apply_patch_N81_kv_disk_tier_quota() -> PatchResult:
     """PN81: cuota y poda por antiguedad del tier de disco del cache de KV.
 
     Status: opt-in via GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1.
-    Tunables: GENESIS_KV_DISK_MAX_GB=30, GENESIS_KV_DISK_CHECK_EVERY=2000,
-              GENESIS_KV_DISK_TARGET_RATIO=0.85.
+    Tunables: GENESIS_KV_DISK_MAX_GB=30, GENESIS_KV_DISK_CHECK_SECS=60,
+              GENESIS_KV_DISK_TARGET_RATIO=0.85,
+              GENESIS_KV_DISK_ORPHAN_DAYS=0,
+              GENESIS_KV_DISK_ORPHAN_CHECK_SECS=3600.
     """
     name = "PN81 KV disk tier quota"
     if not _APPLY_MODE:
@@ -927,6 +929,72 @@ def apply_patch_N81_kv_disk_tier_quota() -> PatchResult:
     except Exception as e:
         return _failed(name, f"wiring import failed: {e}")
     status, reason = patch_N81_kv_disk_tier_quota.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN88 KV tier metrics (telemetria del tier de disco)")
+def apply_patch_N88_kv_tier_metrics() -> PatchResult:
+    """PN88: publica en Prometheus la telemetria de los tiers del cache de KV.
+
+    El tier de disco de vLLM no expone ni un numero: su JobResult lleva
+    job_id y success, y record_transfer solo lo alimenta el handler GPU<->CPU.
+    PN88 mide bytes, latencia y errores del tier fs, separa el hit rate de
+    RAM del de disco, cuenta las promociones rechazadas por tier primario
+    lleno, y saca a metricas los desalojos que PN81 hoy solo loguea.
+
+    Status: opt-in via GENESIS_ENABLE_PN88_KV_TIER_METRICS=1.
+    Tunables: GENESIS_KV_AGENTS (allowlist de nombres para la label `agent`;
+              cualquier otro valor cae en `other`).
+    Observacion pura: no altera ninguna asignacion ni resultado numerico.
+    """
+    name = "PN88 KV tier metrics"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N88_kv_tier_metrics
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N88_kv_tier_metrics.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN89 KV offload requests activity endpoint (/v1/kv-offload/requests)")
+def apply_patch_N89_kv_offload_requests_endpoint() -> PatchResult:
+    """PN89: Registra el endpoint nativo de actividad /v1/kv-offload/requests en vLLM."""
+    name = "PN89 KV offload requests endpoint"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N89_kv_offload_requests_endpoint
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N89_kv_offload_requests_endpoint.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN90 KV disk write gating (gating por agente hacia SSD)")
+def apply_patch_N90_kv_disk_write_gating() -> PatchResult:
+    """PN90: Filtra escrituras a tiers secundarios (disco) según agente o flag persist_disk."""
+    name = "PN90 KV disk write gating"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N90_kv_disk_write_gating
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N90_kv_disk_write_gating.apply()
     if status == "applied":
         return _applied(name, reason)
     if status == "skipped":

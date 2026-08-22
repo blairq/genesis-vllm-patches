@@ -8,6 +8,37 @@ with cryptographic fingerprint verification (SHA256).
 - On Cache HIT: Loads in <0.05s with 0% CPU overhead via memory-mapped safetensors.
 - On Cache MISS: Vectorized quantization in GPU/PyTorch, atomic disk save + manifest.
 """
+# ═══════════════════════════════════════════════════════════════════════════
+# ⚠️  AUDITORÍA 2026-08-19 — MANTENER DESACTIVADO (GENESIS_ENABLE_MTP_QUANT_CACHE=0)
+#
+# La auditoría completa (7 bugs, con evidencia medida) está en el encabezado de
+# vllm/_genesis/mtp_cache.py. Resumen: sobre un checkpoint FP8 este parche
+# aplica un round-trip FP8 → INT8 → FP16 que pierde precisión y no entrega ni
+# IMMA ni VRAM, porque los pesos se dequantizan a FP16 antes de llegar a la GPU.
+#
+# Dos de esos bugs nacen EN ESTE ARCHIVO, en el replacement de más abajo:
+#
+#   [B4] `source_file=str(_genesis_p112_model_name)` — se pasa el NOMBRE del
+#        repo HF donde get_cache_key() espera un PATH de archivo. Como el path
+#        no existe, compute_file_hash() devuelve la string literal "missing" y
+#        termina dentro de la clave del cache. Verificado:
+#          sha256("orcarouter/Qwen3.8-27B-Uncensored-FP8|missing|int8|tp2|v1.0")
+#            = afe2f5a591956d2072608ffa == fingerprint del manifest real.
+#        O sea que la verificación SHA256 no hashea ni un byte de los pesos y el
+#        cache no se invalida nunca al cambiar el checkpoint.
+#        → FIX: resolver los safetensors reales del modelo y pasar sus paths.
+#
+#   [B5] Nunca se pasa `target_dtype` a process_mtp_weights(), así que gana el
+#        default `torch.float16` de la firma. En un engine bfloat16 los pesos
+#        del drafter saldrían fp16 en silencio.
+#        → FIX: pasar vllm_config.model_config.dtype, y que además entre en la
+#          clave del cache.
+#
+# NOTA AL EDITAR: los bugs de arriba viven DENTRO de P112_LOAD_WEIGHTS_REPLACEMENT,
+# que es texto fuente que se inyecta en vLLM. No agregar comentarios adentro de
+# ese string sin querer: cambia el código parcheado y el marker de idempotencia
+# (GENESIS_P112_MARKER). Los comentarios de auditoría van acá afuera.
+# ═══════════════════════════════════════════════════════════════════════════
 from __future__ import annotations
 
 import logging
