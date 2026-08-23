@@ -1234,6 +1234,24 @@ def apply_patch_N100_staging_ring() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN101 sonda del prefijo compartido por agente")
+def apply_patch_N101_shared_prefix_probe() -> PatchResult:
+    """PN101: publica el prefijo compartido real de cada agente."""
+    name = "PN101 sonda de prefijo compartido"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N101_shared_prefix_probe
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N101_shared_prefix_probe.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.

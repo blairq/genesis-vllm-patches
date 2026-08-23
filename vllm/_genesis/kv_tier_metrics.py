@@ -517,6 +517,25 @@ _BUCKETS: dict[str, tuple[float, ...]] = {
 }
 
 _DOC = {
+    "kv_prefix_shared_blocks": (
+        "Bloques iniciales en comun entre dos requests consecutivas del mismo "
+        "agente. Es el prefijo REALMENTE compartido, medido sobre los hashes de "
+        "contenido alineados a bloque — no una estimacion del prompt de sistema. "
+        "Si da 0, el cliente esta inyectando algo variable al principio y no se "
+        "comparte nada."
+    ),
+    "kv_prefix_shared_tokens": (
+        "Lo mismo que kv_prefix_shared_blocks, en tokens. Es el valor que hay que "
+        "usar para max_offload_tokens de ese agente."
+    ),
+    "kv_prefix_shared_blocks_max": (
+        "Maximo prefijo compartido visto para ese agente. Es el techo de lo que "
+        "puede llegar a reusar, y el numero para dimensionar."
+    ),
+    "kv_prefix_observations": (
+        "Comparaciones hechas para ese agente. Con pocas observaciones el maximo "
+        "todavia no es representativo."
+    ),
     "kv_tier_bytes_total": (
         "Bytes movidos por tier de offloading, contados AL ENCOLAR el job. Es "
         "una COTA SUPERIOR y NO sirve para estimar desgaste del SSD: "

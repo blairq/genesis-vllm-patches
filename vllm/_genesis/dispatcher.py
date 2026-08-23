@@ -912,6 +912,28 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN101": {
+        "title": "Mide y publica el prefijo REALMENTE compartido de cada agente",
+        "env_flag": "GENESIS_ENABLE_PN101_SHARED_PREFIX_PROBE",
+        "default_on": True,
+        "category": "observability",
+        "credit": (
+            "Genesis-original 2026-08-23. max_offload_tokens se venia estimando "
+            "tokenizando el prompt del agente del archivo de config, que mide la "
+            "cosa equivocada: lo que importa es el prefijo que de verdad se "
+            "repite entre invocaciones, que incluye lo que el cliente ponga "
+            "ANTES (framing global, esquemas de herramientas) y va en bloques. "
+            "Se puede medir exacto porque las claves de offload SON hashes de "
+            "contenido alineados a bloque: las claves iniciales en comun entre "
+            "dos requests del mismo genesis_agent son el prefijo compartido. "
+            "Ademas contesta lo que la config no puede: si el cliente inyecta "
+            "algo variable al principio (timestamp, id de sesion, cwd) el "
+            "prefijo se rompe en el bloque 0 y la medicion da 0. Observacion "
+            "pura."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",
