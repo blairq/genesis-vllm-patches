@@ -28,12 +28,24 @@ QUE PUBLICA
 
     kv_prefix_shared_blocks{agent}      ultima medicion, en bloques
     kv_prefix_shared_tokens{agent}      lo mismo en tokens
-    kv_prefix_shared_blocks_max{agent}  maximo visto para ese agente
+    kv_prefix_shared_blocks_min{agent}  MINIMO visto  <- el que sirve
+    kv_prefix_shared_tokens_min{agent}  lo mismo en tokens
+    kv_prefix_shared_blocks_max{agent}  maximo visto
     kv_prefix_observations{agent}       cuantas comparaciones se hicieron
 
-El maximo es el que sirve para dimensionar: es el techo de lo que ese agente
-puede llegar a reusar. La ultima medicion sirve para detectar que algo rompio
-el prefijo.
+**El que sirve es el MINIMO.** `last` y `max` estan contaminados por la
+historia de conversacion: en un loop agentico el request anterior del mismo
+agente suele ser el TURNO anterior de la misma charla, que comparte todo menos
+el ultimo tramo. Eso no es preambulo reusable entre invocaciones, es prefijo
+conversacional — y de ese ya se encarga el prefix cache de la GPU.
+
+Se ve en los datos (2026-08-23): `coder` dio max 12 bloques en una corrida y
+19 en la siguiente. Un prompt de sistema no cambia entre corridas; una
+conversacion si. `explorer`, que encadena menos turnos, dio 6 en las dos.
+
+Solo el minimo cruza el borde entre invocaciones distintas, que es donde
+queda el preambulo de verdad. Necesita suficientes observaciones para haber
+visto al menos un cruce: con pocas, el minimo tambien esta contaminado.
 """
 
 from __future__ import annotations
@@ -121,6 +133,17 @@ def publicar(agent: str, comun: int, tokens_por_bloque: int) -> None:
         lab = (("agent", M.agent_label({"genesis_agent": agent})),)
         s.set("kv_prefix_shared_blocks", lab, float(comun))
         s.set("kv_prefix_shared_tokens", lab, float(comun * max(tokens_por_bloque, 0)))
+        # El MINIMO es el numero que sirve. `last` y `max` estan contaminados
+        # por la historia de conversacion: en un loop agentico el request
+        # anterior del mismo agente suele ser el TURNO anterior de la misma
+        # charla, que comparte todo menos el ultimo tramo. Solo el minimo cruza
+        # el borde entre invocaciones distintas, que es donde queda el
+        # preambulo de verdad. Se ve en los datos: coder dio max 12 en una
+        # corrida y 19 en la siguiente (un prompt de sistema no cambia), pero
+        # explorer dio 6 en las dos.
+        s.set("kv_prefix_shared_blocks_min", lab, float(minimo(agent)))
+        s.set("kv_prefix_shared_tokens_min", lab,
+              float(minimo(agent) * max(tokens_por_bloque, 0)))
         s.set("kv_prefix_shared_blocks_max", lab, float(maximo(agent)))
         s.set("kv_prefix_observations", lab, float(observaciones(agent)))
     except Exception:

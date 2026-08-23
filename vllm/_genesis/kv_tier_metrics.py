@@ -528,6 +528,16 @@ _DOC = {
         "Lo mismo que kv_prefix_shared_blocks, en tokens. Es el valor que hay que "
         "usar para max_offload_tokens de ese agente."
     ),
+    "kv_prefix_shared_blocks_min": (
+        "MINIMO prefijo compartido visto para ese agente. ES EL NUMERO QUE "
+        "SIRVE: last y max estan contaminados por la historia de conversacion "
+        "(en un loop agentico el request anterior suele ser el turno anterior "
+        "de la misma charla). Solo el minimo cruza el borde entre invocaciones "
+        "distintas, que es donde queda el preambulo reusable."
+    ),
+    "kv_prefix_shared_tokens_min": (
+        "El minimo en tokens. Es el valor correcto para max_offload_tokens."
+    ),
     "kv_prefix_shared_blocks_max": (
         "Maximo prefijo compartido visto para ese agente. Es el techo de lo que "
         "puede llegar a reusar, y el numero para dimensionar."
