@@ -934,6 +934,34 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN102": {
+        "title": "Desalojo por score de bloque con envejecimiento (encima de ARC)",
+        "env_flag": "GENESIS_ENABLE_PN102_BLOCK_SCORE_PATCH",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-23. ARC ya tiene frecuencia (T1->T2 al "
+            "segundo uso) y ya prefiere victimas de T1, pero le falta "
+            "ENVEJECIMIENTO —T2 es permanente, asi que el preambulo de un agente "
+            "que no se usa hace horas sigue tan protegido como el del que se "
+            "esta martillando— y GRANULARIDAD: T1/T2 es de 1 bit. El score es "
+            "'en cuantos requests distintos aparecio el bloque' y tiene una "
+            "propiedad que evita todo el andamiaje: ya es monotono decreciente a "
+            "lo largo del prefijo, porque el hash del bloque 3 incluye al 2. "
+            "Ordenando por score ascendente el desalojo se va solo a las COLAS y "
+            "nunca parte un prefijo por el medio, que es el peor error posible "
+            "(el lookup corta en el primer miss, asi que lo que queda detras "
+            "vale cero ocupando lugar). Es la version simple de lo que hacen "
+            "W-TinyLFU (frecuencia con aging) y RadixAttention de SGLang "
+            "(desalojo de hojas primero); aca las dos colapsan en un entero por "
+            "clave porque los hashes de prefijo dan la monotonia gratis. NO se "
+            "reusa `counts` porque prepare_store filtra por el y "
+            "_maximal_prefix_lookup corta en el primer miss: los bloques nuevos "
+            "quedarian en 0 y no se guardaria nada."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",
