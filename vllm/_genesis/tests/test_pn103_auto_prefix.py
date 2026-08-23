@@ -71,7 +71,9 @@ def test_usa_el_minimo_no_el_maximo(monkeypatch):
 
     monkeypatch.setenv("GENESIS_PN103_MIN_OBS", "2")
     pre = [b"k%d" % i for i in range(12)]
-    for n, i in ((9, 0), (12, 1), (9, 2), (10, 3)):
+    # `observar` compara contra el request ANTERIOR, asi que para que el
+    # maximo llegue a 12 hacen falta dos consecutivos que compartan 12.
+    for n, i in ((12, 0), (12, 1), (12, 2), (9, 3), (9, 4)):
         P.observar("coder", pre[:n] + [b"cola%d" % i])
     assert P.maximo("coder") == 12
     assert P.minimo("coder") == 9
