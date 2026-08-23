@@ -1194,6 +1194,28 @@ def apply_patch_N98_l2_sizing_advisory() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN99 L2/L3 comprimidos a 4 bits en GPU")
+def apply_patch_N99_gpu_compressed_l2() -> PatchResult:
+    """PN99: la KV baja a L2 cuantizada a 4 bits, cuantizando en la GPU.
+
+    1,78x mas bloques en los mismos bytes de RAM. Hooks siempre; el
+    comportamiento se prende con GENESIS_ENABLE_PN99_GPU_COMPRESSED_L2=1.
+    """
+    name = "PN99 L2/L3 comprimidos en GPU"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N99_gpu_compressed_l2
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N99_gpu_compressed_l2.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.

@@ -221,6 +221,15 @@ services:
       # ocasional. Mide `vllm:kv_tier_hit_truncated_tokens_total` y bajalo si
       # ese contador crece.
       - GENESIS_ENABLE_PN93_SPARSE_GDN=1
+      # PN99: la KV baja a L2 (y por arrastre a L3) cuantizada a 4 bits,
+      # con la cuantizacion corriendo EN LA GPU. 1,78x mas bloques en los
+      # mismos bytes: 12 GiB pasan de 444 a 790 bloques (553k tokens), o
+      # sea L2/L1 = 1,35x en vez de 0,76x.
+      # OJO: cambia el layout de /dev/shm y de /kv-offload. Al prender o
+      # apagar hay que BORRAR /kv-offload o los bloques viejos se leen
+      # como basura. Y PN92 tiene que seguir apagado: comprimir dos veces
+      # seria un desastre.
+      - GENESIS_ENABLE_PN99_GPU_COMPRESSED_L2=1
       # BARRIDO MEDIDO 2026-08-23 (8 prompts de 25k tok, 2 pasadas identicas):
       #   PN93 apagado   21,32 GB al SSD | 1586 desalojos L2 | 0% cacheado | 139,5 s
       #   stride 8        6,17 GB        |  377             | 0% cacheado | 139,2 s
@@ -511,7 +520,11 @@ services:
       # disponible: con 0.965 moria en _allocate_kv_cache_tensors pidiendo
       # 610 MiB con 191 libres. Bajar el util compensa ese error.
       - --gpu-memory-utilization
-      - "0.755"
+      # 0,755 -> 0,745 el 2026-08-23: libera ~240 MB por placa para el
+      # scratch de compresion en GPU (PN99). Achicar L1 para agrandar la
+      # L2 EFECTIVA es buen negocio cuando L2 es el cuello: PN98 medía
+      # L2/L1 = 0,76x, o sea que sobra L1 y falta L2.
+      - "0.745"
       # Visión: 1 imagen por request (el contrato de agi_vision_inspector es de
       # UNA imagen) y video en 0 — nunca se usa. El budget del encoder cache se
       # dimensiona por el ítem multimodal MÁS GRANDE, y un video pesa mucho más

@@ -864,6 +864,30 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN99": {
+        "title": "L2/L3 comprimidos a 4 bits cuantizando en la GPU (1,78x mas bloques)",
+        "env_flag": "GENESIS_ENABLE_PN99_GPU_COMPRESSED_L2_PATCH",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-23. PN98 midio la jerarquia y salio "
+            "invertida (L2/L1 = 0,40x). Subir L2 de 6 a 12 GiB llevo la "
+            "relectura de 0% a 96,7% cacheado, pero deja el ratio en 0,76x y ya "
+            "no hay RAM. El codec de 4 bits da 1,78x sobre fp8_e4m3 (4 bits + "
+            "escala fp16 por grupo de 32): 12 GiB reales rinden 21,3 GiB "
+            "efectivos = 553.031 tokens, o sea L2/L1 = 1,35x. Visto al reves, "
+            "7 GiB de RAM real rendirian mas que los 12 GiB de hoy. La "
+            "cuantizacion corre EN LA GPU (kv_gpu_codec, ops de torch) porque "
+            "meter la CPU en el camino del DMA mataria el ancho de banda que "
+            "PN94 acaba de duplicar; el DMA sigue siendo bytes crudos, solo que "
+            "1,78x menos. Verificado: ratio 1,778x, error L2 12,13%, coseno "
+            "0,992758. L3 sale gratis porque el tier de disco escribe los bytes "
+            "de L2. Los hooks se instalan siempre; el comportamiento se prende "
+            "con GENESIS_ENABLE_PN99_GPU_COMPRESSED_L2=1. Supersede a PN92."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",
