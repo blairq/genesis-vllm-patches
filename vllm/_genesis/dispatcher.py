@@ -888,6 +888,30 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN100": {
+        "title": "Anillo de staging: los agentes efimeros no desalojan al hilo principal",
+        "env_flag": "GENESIS_ENABLE_PN100_STAGING_RING",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-23. El patron real de carga es un hilo "
+            "principal de 60-100k tokens que dispara ~6 subagentes coder/"
+            "explorer en paralelo; los subagentes llenan L2 con material de un "
+            "solo uso, desalojan el prefijo del principal, y al terminar el "
+            "cliente reenvia esos 100k. Ninguna politica por recencia puede "
+            "acertar: en el momento del desalojo los bloques del subagente son "
+            "los MAS recientes, asi que LRU y ARC eligen al reves. Medido con "
+            "store_threshold=2 (PN96), que no dio resistencia a escaneo sino "
+            "que desactivo L2. Pero la informacion existe: PN90 ya clasifica "
+            "por genesis_agent. PN100 reserva los ultimos K bloques como "
+            "anillo FIFO y sirve de ahi los bloques de agentes efimeros, que "
+            "asi no salen del presupuesto del cache y no pueden desalojar al "
+            "principal, pero siguen visibles para lookup(). Se dimensiona con "
+            "GENESIS_PN100_RING_BLOCKS (0 = apagado)."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",

@@ -236,6 +236,47 @@ COPY_NEW = (
 )
 
 
+# ─────────── 4. borrar el tier de disco al arrancar ───────────
+#
+# El layout comprimido es incompatible con el crudo: un bloque viejo leido
+# como comprimido da basura. Como no interesa conservar KV entre boots, con
+# PN99 activo se limpia el directorio del run al crear el tier. Corre solo en
+# el proceso del scheduler (el fs manager se instancia ahi), asi que no hay
+# carrera entre workers.
+
+WIPE_OLD = (
+    "        # Write config file\n"
+    "        config_path = self.file_mapper.get_config_file_path()\n"
+    "        os.makedirs(os.path.dirname(config_path), exist_ok=True)\n"
+)
+
+WIPE_NEW = (
+    "        # " + GENESIS_PN99_MARKER + "\n"
+    "        # Con PN99 los bloques van comprimidos: los de un boot anterior\n"
+    "        # tienen otro layout y se leerian como basura. No interesa\n"
+    "        # conservar KV entre boots, asi que se limpia y listo.\n"
+    "        config_path = self.file_mapper.get_config_file_path()\n"
+    "        try:\n"
+    "            from vllm._genesis import pn99_gate as _g99g\n"
+    "\n"
+    "            if _g99g.activo():\n"
+    "                import shutil as _g99_sh\n"
+    "\n"
+    "                _g99_dir = os.path.dirname(config_path)\n"
+    "                if os.path.isdir(_g99_dir):\n"
+    "                    _g99_sh.rmtree(_g99_dir, ignore_errors=True)\n"
+    "                    logger.info(\n"
+    "                        'PN99: borrado el tier de disco de boots anteriores "
+    "(%s): '\n"
+    "                        'el layout comprimido es incompatible con el crudo.',\n"
+    "                        _g99_dir,\n"
+    "                    )\n"
+    "        except Exception as _g99_exc:\n"
+    "            logger.warning('PN99: no pude limpiar el tier: %s', _g99_exc)\n"
+    "        os.makedirs(os.path.dirname(config_path), exist_ok=True)\n"
+)
+
+
 def _is_disabled() -> bool:
     return os.environ.get("GENESIS_DISABLE_PN99", "").strip().lower() in (
         "1", "true", "yes", "on",
@@ -250,7 +291,25 @@ def _patchers() -> list[TextPatcher] | None:
     worker = os.path.join(root, "v1", "kv_offload", "cpu", "gpu_worker.py")
     if not (os.path.exists(spec) and os.path.exists(worker)):
         return None
+    if not os.path.exists(
+        os.path.join(root, "v1", "kv_offload", "tiering", "fs", "manager.py")
+    ):
+        return None
+    fsm = os.path.join(root, "v1", "kv_offload", "tiering", "fs", "manager.py")
     return [
+        TextPatcher(
+            patch_name="PN99 GPU-compressed L2 (fs tier wipe)",
+            target_file=fsm,
+            marker=GENESIS_PN99_MARKER,
+            sub_patches=[
+                TextPatch(
+                    name="pn99_wipe_stale_tier_on_boot",
+                    anchor=WIPE_OLD,
+                    replacement=WIPE_NEW,
+                    required=True,
+                ),
+            ],
+        ),
         TextPatcher(
             patch_name="PN99 GPU-compressed L2 (cpu spec)",
             target_file=spec,

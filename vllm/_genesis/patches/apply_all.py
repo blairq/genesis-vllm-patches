@@ -1216,6 +1216,24 @@ def apply_patch_N99_gpu_compressed_l2() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN100 anillo de staging por clase de agente")
+def apply_patch_N100_staging_ring() -> PatchResult:
+    """PN100: los bloques de agentes efimeros salen de un anillo reservado."""
+    name = "PN100 anillo de staging"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N100_staging_ring
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N100_staging_ring.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.

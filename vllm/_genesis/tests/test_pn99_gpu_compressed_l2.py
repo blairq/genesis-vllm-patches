@@ -129,6 +129,11 @@ def test_activar_memoriza_los_tamanos(monkeypatch):
 # ─────────────────── anclas ───────────────────
 
 
+def _ya_aplicado(P, rel):
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+        return P.GENESIS_PN99_MARKER in fh.read()
+
+
 @_needs
 def test_anclas_unicas_y_compilan():
     P = _P()
@@ -136,6 +141,8 @@ def test_anclas_unicas_y_compilan():
         (_REL_SPEC, [("SPEC_OLD", "SPEC_NEW")]),
         (_REL_W, [("ASSERT_OLD", "ASSERT_NEW"), ("COPY_OLD", "COPY_NEW")]),
     ):
+        if _ya_aplicado(P, rel):
+            pytest.skip(f"PN99 ya aplicado sobre {rel}")
         with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
             out = fh.read()
         for o, n in pares:
@@ -152,6 +159,8 @@ def test_convive_con_pn82_pn94_en_gpu_worker():
     from vllm._genesis.wiring.hybrid import patch_N94_per_rank_host_register as P94
 
     P = _P()
+    if _ya_aplicado(P, _REL_W):
+        pytest.skip("PN99 ya aplicado sobre gpu_worker.py")
     with open(os.path.join(ROOT, _REL_W), encoding="utf-8") as fh:
         txt = fh.read()
     txt = txt.replace(P82.ANCHOR_OLD, P82.ANCHOR_NEW)
@@ -166,6 +175,8 @@ def test_convive_con_pn82_pn94_en_gpu_worker():
 def test_apply_de_modulo_aplica_de_verdad(tmp_path, monkeypatch):
     import shutil
 
+    if _ya_aplicado(_P(), _REL_SPEC):
+        pytest.skip("PN99 ya aplicado sobre el arbol de origen")
     tree = tmp_path / "vllm"
     shutil.copytree(ROOT, tree, symlinks=True)
     from vllm._genesis import guards
