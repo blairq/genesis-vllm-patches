@@ -1002,6 +1002,156 @@ def apply_patch_N90_kv_disk_write_gating() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN91 deferral acotado de promociones SSD->RAM")
+def apply_patch_N91_kv_lazy_streaming() -> PatchResult:
+    """PN91: acota cuántos pasos difiere un request esperando promociones.
+
+    Pasado el presupuesto arranca con el prefijo que ya está listo, en vez de
+    seguir esperando. NO solapa transferencia con cómputo: la carga del prefijo
+    reemplaza al cómputo, no corre en paralelo con él.
+    """
+    name = "PN91 deferral acotado de promociones"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N91_kv_lazy_streaming
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N91_kv_lazy_streaming.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN92 cuantizacion agrupada a 4 bits del tier de disco")
+def apply_patch_N92_kv_fp4_compressed_tiers() -> PatchResult:
+    """PN92: cuantiza a 4 bits (INT4 + escala fp16 por grupo) los bloques del tier de DISCO.
+
+    Corre en numpy en los hilos de I/O, no en GPU. No toca la L2 RAM ni el
+    tráfico PCIe: comprime en la frontera del SSD, después de que el dato ya
+    cruzó. La compresión al escribir va APAGADA por default.
+    """
+    name = "PN92 cuantizacion 4-bit del tier de disco"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N92_kv_fp4_compressed_tiers
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N92_kv_fp4_compressed_tiers.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN93 checkpointing disperso del estado recurrente GDN/Mamba")
+def apply_patch_N93_kv_sparse_gdn() -> PatchResult:
+    """PN93: guarda 1 de cada N fronteras de bloque en los grupos recurrentes.
+
+    vLLM ya los lee con _sliding_window_lookup(window=1) ("Mamba depends on a
+    single state"), asi que los intermedios se guardaban y no se leian nunca.
+    Filtra ANTES de manager.prepare_store, con lo cual el bloque no entra ni a
+    L2 RAM ni a L3 SSD.
+    """
+    name = "PN93 checkpointing disperso GDN"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N93_kv_sparse_gdn
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N93_kv_sparse_gdn.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+
+
+
+
+
+@register_patch("PN94 registro de host pinneado por rank (TP>1)")
+def apply_patch_N94_per_rank_host_register() -> PatchResult:
+    """PN94: cada rank pinnea SOLO sus slots de la region mmap compartida.
+
+    Upstream registra la region entera desde todos los ranks; con TP>1 los dos
+    mapean el mismo /dev/shm y el segundo falla sobre las mismas paginas
+    fisicas, quedandose con DMA no-pinneado. PN82 arregla el crash que eso
+    provoca; PN94 arregla la perdida de rendimiento.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN94=1.
+    """
+    name = "PN94 registro de host por rank"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N94_per_rank_host_register
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N94_per_rank_host_register.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN95 ocupacion y desalojos del tier L2 (RAM)")
+def apply_patch_N95_l2_occupancy_metrics() -> PatchResult:
+    """PN95: publica kv_tier_{bytes_used,capacity_bytes,evictions_total} con tier="ram".
+
+    El desalojo de L2 es lo que PN90 convierte en escritura al SSD; sin
+    medirlo, "el disco recibio 0 bytes" es ambiguo.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN95=1.
+    """
+    name = "PN95 ocupacion de L2"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N95_l2_occupancy_metrics
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N95_l2_occupancy_metrics.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN96 admision a L2 resistente a escaneo")
+def apply_patch_N96_l2_scan_resistant_admission() -> PatchResult:
+    """PN96: habilita store_threshold en el tiering manager.
+
+    Con extra_config store_threshold=2 un bloque entra a L2 recien en su
+    segunda aparicion, asi que el material de un solo uso deja de desalojar al
+    working set. Inerte con el default de 1.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN96=1.
+    """
+    name = "PN96 admision resistente a escaneo"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N96_l2_scan_resistant_admission
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N96_l2_scan_resistant_admission.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.

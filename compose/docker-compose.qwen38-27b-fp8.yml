@@ -121,11 +121,36 @@ services:
       # lleva job_id y success, y record_transfer solo lo alimenta el handler
       # GPU<->CPU. Sin esto, los ~1,3 TiB/dia que se escriben al NVMe solo se
       # ven contando lineas del log de PN81.
-      # Publica, con labels tier/direction/agent:
+      # Publica, con labels tier/direction/agent/group:
       #   kv_tier_bytes_total · kv_tier_ops_total · kv_tier_op_seconds
       #   kv_tier_errors_total · kv_tier_lookups_total (RAM y disco SEPARADOS,
       #   que external_prefix_cache_hits fusiona) · kv_tier_promotion_refused_total
       #   kv_tier_evictions_total · kv_tier_bytes_used · kv_tier_capacity_bytes
+      #   kv_tier_disk_written_bytes_total · kv_tier_disk_read_bytes_total
+      #   kv_tier_disk_write_syscalls_total · kv_tier_disk_read_syscalls_total
+      #   kv_tier_recurrent_blocks_skipped_total (PN93)
+      #   kv_tier_recurrent_bytes_skipped_total  (PN93)
+      #
+      # ⚠️ PARA DESGASTE DEL SSD USAR kv_tier_disk_written_bytes_total, NO
+      # kv_tier_bytes_total. El segundo se calcula AL ENCOLAR como
+      # bloques x block_size y sobreestima por dos motivos a la vez:
+      #   - store_block saltea el archivo si el bloque ya existe -> 0 bytes
+      #     escritos y un bloque entero contado;
+      #   - con PN92 lo que se escribe es el bloque comprimido (~0,56x).
+      # Verificado sobre el io.py parcheado: en el caso de re-escritura el
+      # viejo contaba 1 MiB y se escribieron 0; con compresion contaba 1 MiB y
+      # se escribieron 594 KB (+77%). El nuevo sale del os.write.
+      #
+      #   bytes/dia al NVMe:
+      #     rate(vllm:kv_tier_disk_written_bytes_total[5m]) * 86400
+      #
+      # ⚠️ El hit rate del disco hay que leerlo POR GRUPO. Con PN93 activo los
+      # bloques recurrentes salteados a proposito cuentan como `miss`, y en este
+      # hibrido son 3 de los 4 grupos. El hit rate que importa es el del grupo
+      # de atencion (g3 en este modelo):
+      #     sum(rate(vllm:kv_tier_lookups_total{tier="disk",group="3",result="hit"}[5m]))
+      #   / sum(rate(vllm:kv_tier_lookups_total{tier="disk",group="3"}[5m]))
+      #
       # Observacion pura: no altera ninguna asignacion ni resultado numerico.
       - GENESIS_ENABLE_PN88_KV_TIER_METRICS=1
       # Allowlist CERRADA para la label `agent`. El nombre entra por
@@ -134,6 +159,69 @@ services:
       # Prometheus nueva para siempre. Todo lo que no este aca cae en `other`,
       # y su ausencia en `unknown`. Debe seguir a los canales de opencode.
       - GENESIS_KV_AGENTS=coach,primary,primary_low,primary_high,primary_nothink,planner,planner_nothink,coder,verifier,utility,explorer,vision,art
+      # PN90: la L3 SSD pasa a ser exclusiva — el bloque baja a disco solo al
+      # ser desalojado de L2 RAM, y solo si el agente esta en la allowlist.
+      # El ahorro REAL viene del gating por agente: store_block ya deduplica con
+      # os.path.exists, asi que el write-through de upstream tambien escribia
+      # cada bloque unico una sola vez.
+      - GENESIS_ENABLE_PN90_KV_DISK_WRITE_GATING=1
+      # Techo de RAM para snapshots de democion pendientes. Un bloque pesa
+      # 27,6 MB: el tope va en bytes, no en cantidad. 512 -> 256 MB: esta RAM
+      # compite directamente con L2, y la cola se drena en el mismo paso que la
+      # llena, asi que ~9 bloques sobran. Al llegar al tope NO se copia el
+      # bloque (antes se copiaba y despues se descartaba el mas viejo).
+      - GENESIS_PN90_MAX_PENDING_MB=256
+      #
+      # PN91: pasados N pasos difiriendo, el request arranca con el prefijo que
+      # YA esta listo en vez de seguir esperando promociones en vuelo.
+      # Techo acotado: el trafico de offloading es 1,0-1,9% del wall time y esta
+      # fuera del camino critico. Ataca TTFT de prefijos grandes, no throughput.
+      - GENESIS_ENABLE_PN91_KV_LAZY_STREAMING=1
+      # Presupuesto en SEGUNDOS: un paso del scheduler va de ~30 ms (ocioso) a
+      # ~1,6 s (con prefill largo en el batch), asi que "4 pasos" no significaba
+      # nada. El tope en pasos queda como red de seguridad.
+      - GENESIS_PN91_MAX_DEFER_SECONDS=2.0
+      - GENESIS_PN91_MAX_DEFER_STEPS=32
+      #
+      # PN92: instala los hooks del codec de 4 bits en fs/io.py. Dejarlo en 1
+      # para que los bloques ya comprimidos SIEMPRE se puedan leer.
+      - GENESIS_ENABLE_PN92_KV_FP4_COMPRESSION=1
+      # ⚠️ Lo que realmente comprime al escribir es ESTE flag, y va APAGADO.
+      # Medido sobre bloques reales de /kv-offload: 12,4% de error L2 relativo
+      # en el grupo de atencion (ratio 0,563, grupo de 32). El KV ya corre en
+      # fp8 y este hibrido no tolera menos (ver memoria kv-fp8-degrada-gdn).
+      # Ademas el disco NO es el recurso escaso: 26 GB usados de 266 disponibles.
+      - GENESIS_PN92_COMPRESS_ON_WRITE=0
+      # Tiene que coincidir con --kv-cache-dtype o el codec se desactiva solo.
+      - GENESIS_PN92_KV_DTYPE=fp8_e4m3
+      # Elementos por bloque de trabajo del codec. La version anterior
+      # materializaba el bloque entero en float32 (28 MB -> 116 MB) y con 16
+      # hilos de escritura eso son 1,8 GB de transitorio, compitiendo con L2.
+      # Con 1M elementos el pico baja a ~4 MB por hilo.
+      - GENESIS_PN92_CHUNK_ELEMS=1048576
+      #
+      # PN93: guarda 1 de cada N fronteras de bloque en los grupos recurrentes
+      # (g0/g1/g2 = linear_attn = GDN). vLLM ya los lee con
+      # _sliding_window_lookup(window=1) — "Mamba depends on a single state" —
+      # asi que los intermedios se guardaban y no se leian NUNCA.
+      # MEDIDO: GDN son 102 de los 136 KB/token (75%). Con stride 4 el costo baja
+      # a 61,6 KB/token: 2,2x mas contexto tanto en L2 RAM como en L3 SSD.
+      # OJO con el stride EFECTIVO: la referencia de "ultimo bloque" tiene que
+      # ser el total del PROMPT. Cuando se pasaba el num_blocks del paso, el
+      # prefill fragmentado hacia que "conservar el ultimo" disparara una vez
+      # POR PASO y el stride efectivo caia a 1,33 (36 de 48 bloques guardados).
+      # Importa sobre todo en L2: sus 172 slots son los que topean el hit maximo
+      # (~36k tokens sin PN93, ~82k con stride 4).
+      # Costo: hasta N-1 bloques de recomputo cuando el hit redondea hacia abajo.
+      # Con is_last arreglado ese costo es raro: el ultimo bloque del prompt
+      # SIEMPRE se conserva, y en el patron agentico (cada turno agrega al
+      # anterior) el punto de reanudacion es justo ese borde -> costo cero. El
+      # stride solo se paga al reanudar en el MEDIO de un prefijo, o sea en
+      # ramas divergentes. Por eso 8 y no 4: la RAM vale mas que el recomputo
+      # ocasional. Mide `vllm:kv_tier_hit_truncated_tokens_total` y bajalo si
+      # ese contador crece.
+      - GENESIS_ENABLE_PN93_SPARSE_GDN=1
+      - GENESIS_PN93_GDN_CHECKPOINT_STRIDE=8
       - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
       # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
       - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
@@ -386,13 +474,17 @@ services:
       # COSTO MEDIDO de TP=2 (profile con torch, 2026-08-17): el all-reduce
       # es el 31,8% del tiempo de GPU (10,5s de 33,2s), 4.968 llamadas de
       # ncclDevKernel_AllReduce_Sum_f16_RING_LL. Son 128 all-reduce de 16 MB
-      # por forward (2 por capa x 64 capas) y NO hay P2P entre las placas
-      # (nvidia-smi topo -p2p r -> CNS), asi que cada byte cruza PCIe dos
-      # veces rebotando en el host. Link real bajo carga: Gen4 x8.
-      # Por eso --disable-custom-all-reduce esta puesto: el all-reduce custom
-      # de vLLM necesita P2P por IPC y sin el no puede funcionar.
-      # Si algun dia se consigue P2P (driver open + BAR/firmware), ese 31,8%
-      # se reduce solo, sin tocar nada de esta config.
+      # por forward (2 por capa x 64 capas). Link real bajo carga: Gen4 x8.
+      #
+      # ACTUALIZADO 2026-08-23: YA HAY P2P. Con el driver 610.57.04,
+      # `nvidia-smi topo -p2p rw` da OK en los dos sentidos y la topologia es
+      # PIX (un solo puente PCIe). BAR1 = 32 GB por placa (ReBAR al maximo).
+      # El comentario anterior decia CNS y quedo viejo. NCCL ya usa ese P2P,
+      # asi que el 31,8% medido en agosto es un techo, no el numero de hoy:
+      # hay que volver a perfilar antes de citarlo.
+      # --disable-custom-all-reduce SIGUE puesto: el backend CUSTOM no falla
+      # por falta de P2P sino en la captura de CUDA graphs
+      # (custom_all_reduce.cuh:455 'invalid argument'), ver la nota de arriba.
       - --tensor-parallel-size
       - "2"
       # Contexto máximo soportado de 262K tokens
@@ -426,7 +518,23 @@ services:
       - --tool-call-parser
       - qwen3_coder
       # Prefix caching
-      # ── Cache de KV en dos capas: RAM (5 GiB, ARC) + NVMe ───────────────
+      # ── Cache de KV en dos capas: RAM (6 GiB, ARC) + NVMe ───────────────
+      #
+      # 5 -> 6 GiB (2026-08-23). L2 es la variable que aparece en los DOS
+      # problemas a la vez: topea el hit maximo, y con PN90 la tasa de escritura
+      # al SSD ES la tasa de desalojo de L2. Sumar RAM fisica no es opcion
+      # (32 GB ~ 1M ARS), asi que el resto sale de PN93.
+      #
+      # Techo duro: la maquina tiene 30 GB de RAM (14 en uso) y /dev/shm son
+      # 16 GB. Mas de ~8 GiB aca deja el margen fino contra el OOM killer con
+      # los otros contenedores corriendo.
+      #
+      # Capacidad efectiva medida (KB/token -> tokens que entran en 6 GiB):
+      #   sin PN93                     136,0  ->   46k
+      #   PN93 stride 4                 61,6  ->  102k
+      #   PN93 stride 8                 51,0  ->  123k   <- config actual
+      # Un hilo de 126k tokens necesita 6,1 GB con stride 8: entra justo, y
+      # cuando entra deja de generar escrituras al SSD por completo.
       # Evita re-prefillear un prefijo largo cuando los subagentes lo desalojan
       # de la VRAM. Medido: 51.5s de prefill en frío vs 2.8s recuperándolo.
       # ARC separa lo accedido UNA vez (subagentes efímeros -> se desalojan
@@ -442,7 +550,22 @@ services:
       # _allocate_kv_cache_tensors, hay que BAJARLE --gpu-memory-utilization.
       - --enable-cumem-allocator
       - --kv-transfer-config
-      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 5368709120, "eviction_policy": "arc", "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload"}]}}'
+      # store_threshold: PROBADO EN 2 EL 2026-08-23 Y NO SIRVE. Queda en 1.
+      # La idea era resistencia a escaneo: que un bloque entre a L2 recien en
+      # su SEGUNDA aparicion, para que el material de un solo uso no desaloje
+      # al working set. PN96 habilita el parametro (upstream lo rechazaba con
+      # un ValueError), pero la MEDICION lo desmiente:
+      #
+      #   ocupacion de L2   6,43 GB (100%)  ->  58 MB (0,9%)
+      #   ronda de relectura tras escaneo     0,0%  ->  0,0%  (sin cambio)
+      #
+      # Por que: `counts` se incrementa en lookup(), y lookup() solo corre
+      # cuando una request BUSCA el bloque. El flujo natural es computar y
+      # offloadear (store) ANTES de que nadie lo busque, asi que el contador
+      # casi nunca llega a 2 antes de que pase la oportunidad de guardar.
+      # Con 2 no se gana resistencia a escaneo: se desactiva L2.
+      # No re-probar sin cambiar donde se incrementa el contador.
+      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 6442450944, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload"}]}}'
       - --enable-prefix-caching
       # Prefill fragmentado en bloques de 8192 tokens
       - --enable-chunked-prefill

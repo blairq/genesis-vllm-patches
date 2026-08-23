@@ -190,7 +190,84 @@ def test_jobs_pendientes_tienen_techo(sink):
 )
 def test_note_lookup_clasifica(sink, resultado, label):
     _ktm().note_lookup("disk", resultado)
-    assert sink.drain()["counters"][f"kv_tier_lookups_total|result={label},tier=disk"] == 1
+    key = f"kv_tier_lookups_total|group=unknown,result={label},tier=disk"
+    assert sink.drain()["counters"][key] == 1
+
+
+def test_note_lookup_etiqueta_el_grupo_de_kv_cache(sink):
+    """La label `group` sale de los 4 bytes finales de la OffloadKey.
+
+    Sin ella el hit rate del disco queda inservible con PN93 activo: los
+    bloques recurrentes salteados a propósito cuentan como `miss`, y en este
+    híbrido son 3 de los 4 grupos.
+    """
+    M = _ktm()
+    attn_key = b"\xaa" * 32 + (3).to_bytes(4, "big")
+    gdn_key = b"\xbb" * 32 + (0).to_bytes(4, "big")
+
+    M.note_lookup("disk", True, attn_key)
+    M.note_lookup("disk", False, gdn_key)
+
+    counters = sink.drain()["counters"]
+    assert counters["kv_tier_lookups_total|group=3,result=hit,tier=disk"] == 1
+    assert counters["kv_tier_lookups_total|group=0,result=miss,tier=disk"] == 1
+
+
+def test_note_lookup_tolera_una_clave_invalida(sink):
+    """Una métrica nunca puede tumbar el lookup."""
+    _ktm().note_lookup("disk", True, object())
+    counters = sink.drain()["counters"]
+    assert any("group=unknown" in k for k in counters)
+
+
+# ───────── bytes reales al NVMe (la serie de desgaste del SSD) ─────────
+
+
+def test_disk_write_cuenta_bytes_del_syscall(sink):
+    """`kv_tier_disk_written_bytes_total` es lo único válido para desgaste.
+
+    `kv_tier_bytes_total{direction=write}` se calcula al encolar y se desvía por
+    dos motivos: store_block saltea el archivo si ya existe, y con PN92 se
+    escribe el bloque comprimido.
+    """
+    M = _ktm()
+    M.note_disk_write(4096)
+    M.note_disk_write(8192)
+    counters = sink.drain()["counters"]
+    assert counters["kv_tier_disk_written_bytes_total|tier=disk"] == 12288
+    assert counters["kv_tier_disk_write_syscalls_total|tier=disk"] == 2
+
+
+def test_disk_read_cuenta_bytes_del_syscall(sink):
+    M = _ktm()
+    M.note_disk_read(1024)
+    counters = sink.drain()["counters"]
+    assert counters["kv_tier_disk_read_bytes_total|tier=disk"] == 1024
+    assert counters["kv_tier_disk_read_syscalls_total|tier=disk"] == 1
+
+
+@pytest.mark.parametrize("valor", [0, -1, None])
+def test_disk_counters_ignoran_valores_no_positivos(sink, valor):
+    M = _ktm()
+    M.note_disk_write(valor)
+    M.note_disk_read(valor)
+    assert sink.drain() is None
+
+
+def test_trim_jobs_descarta_los_viejos_no_todo(sink):
+    """Regresión: antes era `jobs.clear()` y se perdían TODAS las mediciones.
+
+    Con PN90 la democión encola un job por bloque, así que hay muchos más jobs
+    vivos y un clear() se comía un pico entero de escrituras.
+    """
+    M = _ktm()
+    mgr = _FakeMgr()
+    for i in range(4200):
+        M.note_demote(mgr, job_id=-i - 1, nbytes=100, agent="primary")
+    jobs = mgr._genesis_pn88_jobs
+    assert len(jobs) <= 4096
+    # los MÁS RECIENTES sobreviven
+    assert -4200 in jobs
 
 
 def test_promotion_refused_tiene_contador_propio(sink):

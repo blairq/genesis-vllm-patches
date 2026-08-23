@@ -71,3 +71,6 @@ compose/cache/
 # ...pero la PLANTILLA sí se versiona: no tiene valores reales y es lo que
 # permite que un checkout nuevo sepa qué credenciales configurar.
 !compose/.env.example
+
+# entorno virtual local
+.venv/

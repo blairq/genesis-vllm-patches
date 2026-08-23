@@ -700,8 +700,150 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN90": {
+        "title": "KV disk write gating & democion por desalojo (L2 RAM -> L3 SSD)",
+        "env_flag": "GENESIS_ENABLE_PN90_KV_DISK_WRITE_GATING",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-22, corregido 2026-08-23. vLLM cascadea a "
+            "disco en complete_store (write-through). PN90 lo reemplaza por una "
+            "L3 exclusiva: el bloque baja a SSD solo al ser desalojado de L2 RAM, "
+            "y solo para agentes habilitados a persistir. "
+            "MEDIDO: el ahorro real viene del GATING por agente, no del cambio a "
+            "democion — store_block ya deduplica con os.path.exists, asi que "
+            "write-through escribe cada bloque unico una sola vez, y con L2 de "
+            "172 slots todo lo que entra termina desalojado igual."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN91": {
+        "title": "Deferral acotado de promociones SSD -> RAM (admision temprana con hit parcial)",
+        "env_flag": "GENESIS_ENABLE_PN91_KV_LAZY_STREAMING",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-22, reescrito 2026-08-23. _lookup() difiere "
+            "el request entero mientras haya un solo bloque en vuelo. Pasado un "
+            "presupuesto de pasos, PN91 fuerza un lookup 'solo-listos' y el "
+            "request arranca con el prefijo disponible en vez de seguir esperando. "
+            "TECHO MEDIDO: el trafico de offloading es 1,0-1,9% del wall time y "
+            "esta fuera del camino critico; esto ataca la LATENCIA DE ADMISION de "
+            "prefijos grandes, no el throughput agregado."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN92": {
+        "title": "Cuantizacion agrupada a 4 bits del tier de disco (INT4 + escala fp16 por grupo)",
+        "env_flag": "GENESIS_ENABLE_PN92_KV_FP4_COMPRESSION",
+        "default_on": False,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-22, reescrito 2026-08-23. Comprime bloques "
+            "KV en el tier de disco a 4 bits con escala fp16 por grupo de 32. "
+            "APAGADO POR DEFAULT: medido sobre bloques reales da 12,4% de error L2 "
+            "en el grupo de atencion (ratio 0,563). Este hibrido ya corre KV en "
+            "fp8 y bajar mas degrada la reconstruccion del prefijo (ver "
+            "kv-fp8-degrada-gdn). Ademas el disco no es el recurso escaso: 26 de "
+            "266 GB usados. Encenderlo es una decision explicita."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN94": {
+        "title": (
+            "Registro de host pinneado por rank (arregla el DMA no-pinneado "
+            "del segundo rank con TP>1)"
+        ),
+        "env_flag": "GENESIS_ENABLE_PN94_PER_RANK_HOST_REGISTER",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-23. Bug de vLLM: pin_mmap_region() "
+            "(v1/kv_offload/cpu/gpu_worker.py) registra la region mmap ENTERA "
+            "desde todos los ranks. Con TP>1 los dos mapean el mismo archivo de "
+            "/dev/shm, asi que el segundo registra paginas fisicas ya "
+            "registradas y falla con cudaErrorInvalidValue; vLLM loguea el "
+            "warning y ese rank se queda con DMA no-pinneado (staging buffer "
+            "del driver, sin solape con computo). PN82 ya evitaba que el fallo "
+            "tumbara el arranque; PN94 evita que el rank pierda el pinneo. El "
+            "layout YA es disjunto por rank (_worker_offset = rank * "
+            "cpu_page_size dentro de cada fila) y el propio vLLM lo respeta en "
+            "el madvise(MADV_POPULATE_WRITE): registramos solo los slots "
+            "propios. Medido aca (Qwen3.8-27B TP=2, 2x RTX 3090): "
+            "row_stride=28.966.912 y cpu_page_size=14.483.456, los dos "
+            "multiplos de 4096. Verificar con vllm:kv_offload_total_bytes / "
+            "vllm:kv_offload_total_time."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN95": {
+        "title": "Ocupacion y desalojos del tier L2 (RAM) en Prometheus",
+        "env_flag": "GENESIS_ENABLE_PN95_L2_OCCUPANCY",
+        "default_on": True,
+        "category": "observability",
+        "credit": (
+            "Genesis-original 2026-08-23. De L2 solo se publicaba "
+            "kv_tier_lookups_total{tier=\"ram\"}: faltaban ocupacion y "
+            "desalojos, que existian en el pipeline de PN88 pero solo con "
+            "tier=\"disk\". El desalojo de L2 es exactamente lo que PN90 "
+            "convierte en escritura al SSD, asi que era el unico eslabon sin "
+            "medir de la cadena VRAM->RAM->NVMe: sin el, 'el disco recibio 0 "
+            "bytes' no se distingue de 'la carga fue chica'. Engancha en "
+            "v1/kv_offload/cpu/manager.py (proceso del scheduler) y toma el "
+            "tamano de bloque del registro de PN93."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN96": {
+        "title": "Admision a L2 resistente a escaneo (habilita store_threshold en el tiering)",
+        "env_flag": "GENESIS_ENABLE_PN96_SCAN_RESISTANT_ADMISSION",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-23. Todo bloque entra a L2 en su PRIMERA "
+            "escritura, asi que un barrido secuencial mas grande que L2 desaloja "
+            "todo lo util. MEDIDO: hot set de 30k tokens, escaneo de 150k, y la "
+            "ronda de relectura paso de 99,2% cacheado a 0,0% (6,75 s por prompt "
+            "contra 0,18 s). vLLM ya trae store_threshold en CPUOffloadingManager "
+            "y el contador se incrementa en lookup(), pero estaba inalcanzable: "
+            "TieringOffloadingSpec lo rechaza con un ValueError, el __init__ del "
+            "tier primario no acepta el parametro y el spec no lo pasa. El guard "
+            "de upstream es correcto para el flujo con cascada, pero PN90 ya la "
+            "elimino: aca un bloque baja a L3 solo al ser desalojado de L2, con "
+            "lo cual 'no entro a L2' = 'no se escribe al SSD' es la politica "
+            "buscada. Inerte con el default store_threshold=1."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN93": {
+        "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
+        "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-22, corregido 2026-08-23. Los grupos "
+            "recurrentes se resuelven con _sliding_window_lookup(window=1) — vLLM "
+            "ya declara 'Mamba depends on a single state' — asi que los estados "
+            "intermedios se guardan y no se leen nunca. MEDIDO en este modelo: "
+            "GDN son 104 de los 139 KB/token (75%). Guardando 1 de cada 4 el costo "
+            "baja a 60,8 KB/token (2,3x mas contexto por GB) y el hit redondea "
+            "hacia abajo al checkpoint anterior, que es correcto por construccion. "
+            "Es la misma idea que el alignment_block_count de upstream para SWA, "
+            "que queda inerte cuando todos los grupos comparten block_size."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+
     "PN88": {
         "title": "KV tier metrics (el tier de disco de vLLM no publica una sola metrica)",
+
         "env_flag": "GENESIS_ENABLE_PN88_KV_TIER_METRICS",
         "default_on": False,
         "category": "observability",

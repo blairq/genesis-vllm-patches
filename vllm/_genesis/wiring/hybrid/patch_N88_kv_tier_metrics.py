@@ -169,7 +169,7 @@ B1_NEW = (
     "        # " + GENESIS_PN88_MARKER + "\n"
     "        " + _IMPORT + "\n"
     "        primary_hit = self.primary_tier.lookup(key, req_context)\n"
-    "        _g88.note_lookup('ram', primary_hit)\n"
+    "        _g88.note_lookup('ram', primary_hit, key)\n"
     "        if primary_hit is True:\n"
 )
 
@@ -181,7 +181,8 @@ B2_OLD = (
 )
 B2_NEW = (
     "            result = tier.lookup(key, req_context)\n"
-    "            _g88.note_lookup(getattr(tier, 'tier_type', 'secondary'), result)\n"
+    "            _g88.note_lookup(\n"
+    "                getattr(tier, 'tier_type', 'secondary'), result, key)\n"
     "            if result is True:\n"
     "                if not self._initiate_promotion(tier, key, req_context):\n"
     "                    _g88.note_promotion_refused(\n"
@@ -279,6 +280,59 @@ D0_NEW = (
 )
 
 
+# ─────────────────────────── fs/io.py ───────────────────────────
+#
+# `kv_tier_bytes_total` se calcula AL ENCOLAR, como `bloques × block_size`, y
+# se desvía de la realidad por dos motivos independientes: `store_block`
+# saltea el archivo si el bloque ya existe (0 bytes, un bloque contado), y con
+# PN92 lo que se escribe es el bloque comprimido (~0,56×). Para estimar
+# desgaste del SSD hace falta el número del syscall, que es lo que miden E1/E2.
+
+E1_OLD = (
+    "        finally:\n"
+    "            os.close(fd)\n"
+    "        os.replace(tmp_path, dest_path)\n"
+)
+E1_NEW = (
+    "        finally:\n"
+    "            os.close(fd)\n"
+    "        os.replace(tmp_path, dest_path)\n"
+    "        # " + GENESIS_PN88_MARKER + "\n"
+    "        " + _IMPORT + "\n"
+    "        _g88.note_disk_write(written)\n"
+)
+
+E2_OLD = (
+    "        bytes_read = os.readv(fd, [view_slice])\n"
+    "        if bytes_read < block_size:\n"
+    "            raise OSError(f\"Short read: expected {block_size} bytes, read {bytes_read}\")\n"
+)
+E2_NEW = (
+    "        bytes_read = os.readv(fd, [view_slice])\n"
+    "        if bytes_read < block_size:\n"
+    "            raise OSError(f\"Short read: expected {block_size} bytes, read {bytes_read}\")\n"
+    "        " + _IMPORT + "\n"
+    "        _g88.note_disk_read(bytes_read)\n"
+)
+
+
+def _fs_io_patcher() -> TextPatcher | None:
+    target = resolve_vllm_file("v1/kv_offload/tiering/fs/io.py")
+    if target is None:
+        return None
+    return TextPatcher(
+        patch_name="PN88 kv tier metrics (fs io: bytes reales al syscall)",
+        target_file=str(target),
+        marker=GENESIS_PN88_MARKER,
+        sub_patches=[
+            TextPatch(name="pn88_io_bytes_written", anchor=E1_OLD,
+                      replacement=E1_NEW, required=True),
+            TextPatch(name="pn88_io_bytes_read", anchor=E2_OLD,
+                      replacement=E2_NEW, required=True),
+        ],
+    )
+
+
 def _is_enabled() -> bool:
     import os
 
@@ -365,7 +419,8 @@ def _prom_patcher() -> TextPatcher | None:
     )
 
 
-_PATCHERS = (_fs_patcher, _tiering_patcher, _connector_patcher, _prom_patcher)
+_PATCHERS = (_fs_patcher, _fs_io_patcher, _tiering_patcher,
+             _connector_patcher, _prom_patcher)
 
 
 def apply() -> tuple[str, str]:

@@ -71,7 +71,12 @@ AGENT_OTHER = "other"
 _DEFAULT_AGENTS = (
     "coach",
     "primary",
+    "primary_nothink",
+    "primary_high",
+    "primary_low",
     "planner",
+    "planner_nothink",
+    "build",
     "coder",
     "verifier",
     "utility",
@@ -80,6 +85,7 @@ _DEFAULT_AGENTS = (
     "art",
     "sculptor",
 )
+
 
 
 def _sep(name: str, labels: tuple[tuple[str, str], ...]) -> str:
@@ -226,6 +232,24 @@ def agent_label(kv_transfer_params) -> str:
 # ---------------------------------------------------------------------------
 
 
+_MAX_TRACKED_JOBS = 4096
+
+
+def _trim_jobs(jobs: dict) -> None:
+    """Acota el dict de jobs en vuelo descartando los MAS VIEJOS.
+
+    Antes se hacía `jobs.clear()`, que tiraba TODAS las mediciones en vuelo de
+    un saque. Con PN90 eso pasó a importar: la democión encola un job POR
+    BLOQUE, así que hay muchos más jobs vivos que con la cascada batcheada de
+    upstream, y un `clear()` se comía un pico entero de escrituras.
+    """
+    excess = len(jobs) - _MAX_TRACKED_JOBS
+    if excess <= 0:
+        return
+    for k in list(jobs)[:excess]:
+        jobs.pop(k, None)
+
+
 def note_job(mgr, job_metadata, direction: str) -> None:
     """Anota el arranque de un job del tier fs para poder medirlo al terminar.
 
@@ -248,8 +272,7 @@ def note_job(mgr, job_metadata, direction: str) -> None:
         ctx = getattr(job_metadata, "req_context", None)
         agent = agent_label(getattr(ctx, "kv_transfer_params", None))
         jobs[job_metadata.job_id] = (nbytes, _t.perf_counter(), direction, agent)
-        if len(jobs) > 4096:  # red de seguridad contra una fuga por jobs perdidos
-            jobs.clear()
+        _trim_jobs(jobs)
     except Exception:
         pass
 
@@ -287,6 +310,29 @@ def finish_job(mgr, result):
     return result
 
 
+def note_demote(mgr, job_id: int, nbytes: int, agent: str | None = None) -> None:
+    """Anota el arranque de un job de democión hacia el tier secundario (disco).
+
+    `agent` tiene que venir YA normalizado por `agent_label()`, igual que en
+    `start_job`. No se re-normaliza acá: hacerlo convertía el centinela
+    `unknown` (que no está en la allowlist) en `other`, y las series de democión
+    quedaban sin `agent="unknown"` mientras las de store sí lo tenían.
+    """
+    if not enabled():
+        return
+    try:
+        import time as _t
+
+        jobs = getattr(mgr, "_genesis_pn88_jobs", None)
+        if jobs is None:
+            jobs = mgr._genesis_pn88_jobs = {}
+        jobs[job_id] = (nbytes, _t.perf_counter(), "write", agent or AGENT_UNKNOWN)
+        _trim_jobs(jobs)
+    except Exception:
+        pass
+
+
+
 # El nombre del tier llega de dos fuentes que no coinciden: el tiering manager
 # pasa `tier.tier_type`, que es el tipo REGISTRADO en SecondaryTierFactory
 # ("fs", "obj", "example"), mientras PN81 y las gauges de ocupacion hablan de
@@ -305,17 +351,90 @@ def tier_name(tier: str) -> str:
     return _TIER_ALIASES.get(tier, tier)
 
 
-def note_lookup(tier: str, result) -> None:
-    """Clasifica un lookup de tier. `True` hit, `None` en vuelo, `False` miss."""
+def note_disk_write(nbytes) -> None:
+    """Bytes REALMENTE escritos al NVMe, contados en el `os.write`.
+
+    Esto es lo único que sirve para estimar desgaste del SSD.
+    `kv_tier_bytes_total{direction="write"}` NO sirve para eso: es una cota
+    superior calculada como `bloques × block_size` en el momento de encolar, y
+    se desvía de la realidad por dos motivos a la vez —
+
+      - `store_block` saltea el archivo si el bloque ya existe (0 bytes
+        escritos, un bloque entero contado);
+      - con PN92 activo lo que se escribe es el bloque COMPRIMIDO (~0,56×),
+        no el bloque crudo que se contabilizó.
+
+    Este contador se toma en el syscall, después del `os.replace`, así que
+    cubre los dos casos y también el camino de democión de PN90.
+    """
+    if not enabled():
+        return
+    try:
+        n = int(nbytes or 0)
+        if n <= 0:
+            return
+        s = sink()
+        s.inc("kv_tier_disk_written_bytes_total", (("tier", "disk"),), n)
+        s.inc("kv_tier_disk_write_syscalls_total", (("tier", "disk"),))
+    except Exception:
+        pass
+
+
+def note_disk_read(nbytes) -> None:
+    """Bytes REALMENTE leídos del NVMe, contados en el syscall.
+
+    Contraparte de `note_disk_write`. Incluye el camino comprimido de PN92,
+    que no pasa por `os.readv`.
+    """
+    if not enabled():
+        return
+    try:
+        n = int(nbytes or 0)
+        if n <= 0:
+            return
+        s = sink()
+        s.inc("kv_tier_disk_read_bytes_total", (("tier", "disk"),), n)
+        s.inc("kv_tier_disk_read_syscalls_total", (("tier", "disk"),))
+    except Exception:
+        pass
+
+
+def note_lookup(tier: str, result, key=None) -> None:
+    """Clasifica un lookup de tier. `True` hit, `None` en vuelo, `False` miss.
+
+    La label `group` separa los grupos de KV cache, que NO son intercambiables:
+    en un híbrido los grupos recurrentes (GDN/Mamba) se resuelven con
+    `_sliding_window_lookup(window=1)` y, con PN93 activo, sus bloques
+    intermedios se saltean a propósito — o sea que cuentan como `miss` sin que
+    haya ningún problema de caché. Sin esta label el hit rate del disco se ve
+    hundido por un ahorro deliberado. Para el hit rate que importa, filtrá por
+    el grupo de atención.
+
+    Cardinalidad acotada: tier × result × group ≈ 2 × 3 × (nº de grupos).
+    """
     if not enabled():
         return
     try:
         label = "hit" if result is True else ("inflight" if result is None else "miss")
-        sink().inc(
-            "kv_tier_lookups_total", (("tier", tier_name(tier)), ("result", label))
-        )
+        labels = [("tier", tier_name(tier)), ("result", label)]
+        labels.append(("group", _group_of(key)))
+        sink().inc("kv_tier_lookups_total", tuple(labels))
     except Exception:
         pass
+
+
+def _group_of(key) -> str:
+    """Índice del grupo de KV cache codificado en una `OffloadKey`.
+
+    `OffloadKey` es `block_hash || group_idx` con 4 bytes big-endian al final
+    (ver `vllm/v1/kv_offload/base.py::make_offload_key`).
+    """
+    try:
+        if key is None:
+            return "unknown"
+        return str(int.from_bytes(bytes(key)[-4:], "big", signed=False))
+    except Exception:
+        return "unknown"
 
 
 def note_promotion_refused(tier: str) -> None:
@@ -392,19 +511,65 @@ _BUCKETS: dict[str, tuple[float, ...]] = {
     "kv_tier_time_to_first_reuse_seconds": (
         1.0, 10.0, 60.0, 300.0, 900.0, 1800.0, 3600.0, 7200.0, 21600.0,
     ),
+    "kv_promotion_defer_seconds": (
+        0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0,
+    ),
 }
 
 _DOC = {
     "kv_tier_bytes_total": (
-        "Bytes movidos por tier de offloading. Para el tier de disco en "
-        "direction=write es una COTA SUPERIOR: store_block saltea el archivo "
-        "si el bloque ya existe."
+        "Bytes movidos por tier de offloading, contados AL ENCOLAR el job. Es "
+        "una COTA SUPERIOR y NO sirve para estimar desgaste del SSD: "
+        "store_block saltea el archivo si el bloque ya existe, y con PN92 lo "
+        "que se escribe es el bloque comprimido. Para bytes reales al NVMe usar "
+        "kv_tier_disk_written_bytes_total."
+    ),
+    "kv_tier_disk_written_bytes_total": (
+        "Bytes REALMENTE escritos al NVMe, contados en el os.write de "
+        "store_block despues del os.replace. Esta es la serie para desgaste del "
+        "SSD: rate(...[5m]) * 86400 da bytes/dia."
+    ),
+    "kv_tier_disk_read_bytes_total": (
+        "Bytes REALMENTE leidos del NVMe, contados en el syscall. Incluye el "
+        "camino comprimido de PN92, que no pasa por os.readv."
+    ),
+    "kv_tier_disk_write_syscalls_total": (
+        "Escrituras completadas al tier de disco. Con kv_tier_disk_written_"
+        "bytes_total da el tamano medio de escritura."
+    ),
+    "kv_tier_disk_read_syscalls_total": "Lecturas completadas del tier de disco.",
+    "kv_promotion_strict_armed_total": (
+        "Requests que agotaron el presupuesto de espera de PN91 y arrancaron "
+        "con el prefijo que ya estaba listo en vez de seguir esperando "
+        "promociones en vuelo. Si crece, o el disco esta lento o L2 es chica."
+    ),
+    "kv_promotion_defer_seconds": (
+        "Cuanto espero un request antes de que PN91 lo forzara a arrancar. "
+        "Es el costo que paga el TTFT por las promociones desde SSD."
+    ),
+    "kv_tier_hit_truncated_tokens_total": (
+        "Tokens de hit perdidos porque un grupo trunco el prefijo. Para los "
+        "grupos recurrentes es el COSTO de PN93: el hit redondeo hacia abajo al "
+        "checkpoint anterior y esos tokens se recomputan. Es la contraparte de "
+        "kv_tier_recurrent_bytes_skipped_total."
+    ),
+    "kv_tier_recurrent_blocks_skipped_total": (
+        "Bloques de estado recurrente (GDN/Mamba) que PN93 no guardo en NINGUN "
+        "tier. Es una COTA SUPERIOR de las escrituras a SSD evitadas: de estos "
+        "bloques, solo habrian llegado al disco los que ademas hubieran sido "
+        "desalojados de L2 con tag de persistencia. Para escrituras reales, "
+        "kv_tier_disk_written_bytes_total."
+    ),
+    "kv_tier_recurrent_bytes_skipped_total": (
+        "Bytes de estado recurrente no guardados por PN93, con el "
+        "page_size_bytes real del grupo. Misma salvedad de cota superior."
     ),
     "kv_tier_ops_total": "Operaciones de I/O completadas por tier.",
     "kv_tier_op_seconds": (
-        "Latencia de una operación del tier, en segundos. Wall-clock del pool "
-        "de I/O — NO comparable con vllm:kv_offload_total_time, que son CUDA "
-        "events sobre el stream de copia y no camino crítico."
+        "Tiempo de encolado a fin de job, en segundos. INCLUYE la espera en la "
+        "cola del pool de I/O, no solo el syscall: con el pool saturado la cola "
+        "domina. NO comparable con vllm:kv_offload_total_time, que son CUDA "
+        "events sobre el stream de copia y no camino critico."
     ),
     "kv_tier_errors_total": "Operaciones fallidas por tier (short read/write, archivo ilegible).",
     "kv_tier_lookups_total": (
