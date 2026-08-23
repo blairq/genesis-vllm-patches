@@ -230,6 +230,19 @@ services:
       # como basura. Y PN92 tiene que seguir apagado: comprimir dos veces
       # seria un desastre.
       - GENESIS_ENABLE_PN99_GPU_COMPRESSED_L2=1
+      # PN100: anillo de staging. Los bloques de agentes EFIMEROS (coder,
+      # explorer: sin persist_disk) salen de estos K bloques reservados al
+      # final de L2, fuera del presupuesto del cache, asi que no pueden
+      # desalojar el prefijo del hilo principal. El preambulo compartido de
+      # cada subagente SI va al cache (se reconoce porque la clave, que es
+      # hash de contenido, ya aparecio antes).
+      # 240 de 790 bloques: cubre ~6 subagentes de 25k en paralelo y deja
+      # 550 al cache (~386k tokens, del orden de L1).
+      # 32 de 395 bloques. Con max_offload_tokens = tamano del prompt de
+      # sistema, cada subagente offloadea ~3 bloques (su preambulo), asi
+      # que el trafico efimero es chico y un anillo grande solo le robaria
+      # cache al hilo principal.
+      - GENESIS_PN100_RING_BLOCKS=32
       # BARRIDO MEDIDO 2026-08-23 (8 prompts de 25k tok, 2 pasadas identicas):
       #   PN93 apagado   21,32 GB al SSD | 1586 desalojos L2 | 0% cacheado | 139,5 s
       #   stride 8        6,17 GB        |  377             | 0% cacheado | 139,2 s
@@ -593,7 +606,7 @@ services:
       # casi nunca llega a 2 antes de que pase la oportunidad de guardar.
       # Con 2 no se gana resistencia a escaneo: se desactiva L2.
       # No re-probar sin cambiar donde se incrementa el contador.
-      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 12884901888, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload"}]}}'
+      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 6442450944, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload"}]}}'
       - --enable-prefix-caching
       # Prefill fragmentado en bloques de 8192 tokens
       - --enable-chunked-prefill

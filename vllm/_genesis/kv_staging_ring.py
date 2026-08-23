@@ -23,20 +23,23 @@ justamente el que no merece ocupar caché.
 COMO
 ================================================================
 
-Se reservan los ultimos K bloques de L2 como anillo. Los bloques de agentes
-efimeros se sirven de ahi:
+K es un **TOPE ELASTICO, no una reserva**. Esto es importante y la primera
+version lo hacia mal: reservaba K ids de bloque y achicaba `_num_blocks` de
+forma permanente, asi que con K=240 sobre 790 el hilo principal perdia el 30%
+de L2 aunque los subagentes usaran 18 bloques. Memoria inmovilizada.
 
-  - no salen del presupuesto del cache, asi que **nunca desalojan** al hilo
-    principal;
-  - siguen siendo visibles para `lookup()`, asi que el propio subagente
-    acierta si relee su prefijo;
-  - cuando el anillo se llena se recicla el mas viejo (FIFO), que es la
-    semantica correcta para material de un solo uso.
+Ahora no se reserva nada. Los bloques efimeros salen del pool normal, pero se
+anotan en un registro FIFO acotado a K: cuando llega el K+1, se recicla el mas
+viejo **del propio registro** en vez de desalojar del cache. Consecuencias:
 
-La reserva se hace perezosamente, en el primer `prepare_store`, cuando
-`_num_allocated_blocks` todavia es 0: se toman los ids del tope del rango sin
-asignar y se baja `_num_blocks`. Asi no hace falta tocar el `__init__`, que ya
-tiene parches de PN96.
+  - con trafico efimero en cero, el cache se queda con el 100% de L2;
+  - lo efimero nunca puede ocupar mas de K bloques, asi que **no desaloja** al
+    hilo principal;
+  - los bloques siguen siendo normales y visibles para `lookup()`, asi que el
+    subagente acierta si relee su preambulo.
+
+O sea: K deja de ser "cuanto le saco al cache" y pasa a ser "cuanto le permito
+ocupar a lo efimero".
 """
 
 from __future__ import annotations
@@ -90,80 +93,51 @@ def habilitado() -> bool:
     return bloques_pedidos() > 0
 
 
-class Anillo:
-    """Pool FIFO de ids de bloque reservados fuera del cache."""
-
-    def __init__(self, base: int, n: int) -> None:
-        self.base = base
-        self.n = n
-        self.libres: list[int] = list(range(base, base + n))
-        # key -> block_id, en orden de llegada (para reciclar el mas viejo)
-        self.en_uso: OrderedDict = OrderedDict()
-        self.reciclados = 0
-        self.servidos = 0
-
-    def contiene(self, block_id: int) -> bool:
-        return self.base <= int(block_id) < self.base + self.n
-
-    def tomar(self, key):
-        """Devuelve un id para `key`, reciclando el mas viejo si hace falta.
-
-        Devuelve (block_id, key_reciclada|None). `key_reciclada` hay que
-        sacarla de la politica: su bloque se reusa.
-        """
-        reciclada = None
-        if not self.libres:
-            if not self.en_uso:
-                return None, None
-            reciclada, bid = self.en_uso.popitem(last=False)
-            self.reciclados += 1
-            self.libres.append(bid)
-        bid = self.libres.pop()
-        self.en_uso[key] = bid
-        self.servidos += 1
-        return bid, reciclada
-
-    def liberar(self, block_id: int) -> None:
-        bid = int(block_id)
-        if not self.contiene(bid):
-            return
-        for k, v in list(self.en_uso.items()):
-            if v == bid:
-                del self.en_uso[k]
-                break
-        if bid not in self.libres:
-            self.libres.append(bid)
-
-    def stats(self) -> dict:
-        return {
-            "bloques": self.n,
-            "en_uso": len(self.en_uso),
-            "libres": len(self.libres),
-            "servidos": self.servidos,
-            "reciclados": self.reciclados,
-        }
+def _registro(mgr) -> OrderedDict:
+    reg = getattr(mgr, "_g100_reg", None)
+    if reg is None:
+        reg = OrderedDict()
+        mgr._g100_reg = reg
+    return reg
 
 
-def asegurar(mgr):
-    """Reserva el anillo en `mgr` la primera vez. Devuelve el Anillo o None.
+def hacer_lugar(mgr, keys_nuevas) -> int:
+    """Recicla bloques del propio anillo hasta que las nuevas entren en el tope.
 
-    Solo reserva si el cache todavia no asigno nada: los ids salen del tope
-    del rango sin usar, asi que no pueden chocar con nada ya entregado.
+    Devuelve cuantos bloques libero. No toca nada que no sea del anillo: si el
+    cupo alcanza no libera nada, y si una clave del anillo esta en uso
+    (`ref_cnt != 0`) se la deja al cache en vez de forzar.
     """
-    anillo = getattr(mgr, "_g100_anillo", None)
-    if anillo is not None:
-        return anillo
-    if getattr(mgr, "_g100_descartado", False):
-        return None
+    K = bloques_pedidos()
+    if K <= 0:
+        return 0
+    reg = _registro(mgr)
+    nuevas = [k for k in keys_nuevas if k not in reg and not es_compartido(k)]
+    if not nuevas:
+        return 0
 
-    n = bloques_pedidos()
-    disponible = mgr._num_blocks - mgr._num_allocated_blocks
-    if n <= 0 or n >= mgr._num_blocks or n > disponible:
-        mgr._g100_descartado = True
-        return None
+    liberados = 0
+    while reg and len(reg) + len(nuevas) > K:
+        vieja, _ = reg.popitem(last=False)
+        b = mgr._policy.get(vieja)
+        if b is None:
+            continue
+        if b.ref_cnt != 0:
+            # en uso por una transferencia: no se puede reciclar ahora.
+            # Sale del registro y queda como bloque normal del cache.
+            continue
+        mgr._policy.remove(vieja)
+        mgr._free_block(b)
+        liberados += 1
 
-    base = mgr._num_blocks - n
-    mgr._num_blocks = base
-    anillo = Anillo(base, n)
-    mgr._g100_anillo = anillo
-    return anillo
+    for k in nuevas:
+        reg[k] = True
+    return liberados
+
+
+def en_uso(mgr) -> int:
+    return len(getattr(mgr, "_g100_reg", ()) or ())
+
+
+def stats(mgr) -> dict:
+    return {"tope": bloques_pedidos(), "en_uso": en_uso(mgr)}

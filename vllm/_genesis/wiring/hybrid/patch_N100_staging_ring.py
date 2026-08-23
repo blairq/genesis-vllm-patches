@@ -47,6 +47,36 @@ asignar y se baja `_num_blocks`. Asi no hace falta tocar el `__init__`, que ya
 tiene parches de PN96.
 
 ================================================================
+QUE CUESTA DEJARLO PRENDIDO
+================================================================
+
+**VRAM: cero.** El anillo vive entero en el mmap de L2, que es RAM del host.
+El path de GPU no se toca.
+
+**RAM adicional: cero.** El anillo no aloca nada: PARTICIONA la region de L2
+que ya estaba reservada. `cpu_bytes_to_use` no cambia.
+
+**Cache: tampoco cuesta nada si no hay trafico efimero.** K es un TOPE, no una
+reserva. La PRIMERA VERSION de este parche si reservaba: agarraba K ids y
+achicaba `_num_blocks` de forma permanente, asi que con K=240 sobre 790 el
+hilo principal perdia el 30% de L2 aunque los subagentes usaran 18 bloques.
+Memoria inmovilizada para nada. Corregido el 2026-08-23.
+
+Hoy los bloques efimeros salen del pool normal y solo se llevan la cuenta:
+al pasarse de K se recicla el mas viejo DEL ANILLO. Con trafico efimero en
+cero, el cache usa todo L2. `kv_tier_capacity_bytes{tier="ram"}` refleja L2
+entera, como debe ser.
+
+La regla para K es: (subagentes en paralelo) x (bloques que offloadea cada
+uno). Con `max_offload_tokens` al tamano del prompt de sistema, cada subagente
+offloadea ~3 bloques, asi que K=32 cubre 10 subagentes en paralelo.
+
+**Limitacion de observabilidad conocida**: hoy solo se publica un contador
+cuando el anillo RECICLA. Si nunca recicla no hay forma de distinguir "no hizo
+falta" de "no se activo" — que es justo la ambiguedad que PN95 vino a eliminar
+para L2. Hay que exponer servidos/en_uso antes de dejarlo prendido en serio.
+
+================================================================
 SIMPLIFICACION CONOCIDA
 ================================================================
 
@@ -74,34 +104,11 @@ from __future__ import annotations
 import os
 
 from vllm._genesis.guards import vllm_install_root
-from vllm._genesis.wiring.text_patch import (
-    MultiFilePatchTransaction,
-    TextPatch,
-    TextPatcher,
-)
+from vllm._genesis.wiring.text_patch import TextPatch, TextPatcher
 
 GENESIS_PN100_MARKER = "_GENESIS_PN100_STAGING_RING"
 
-# ─────────── 1. un id del anillo vuelve al anillo ───────────
-
-FREE_OLD = (
-    "    def _free_block(self, block: BlockStatus) -> None:\n"
-    "        self._free_list.append(block.block_id)\n"
-)
-
-FREE_NEW = (
-    "    def _free_block(self, block: BlockStatus) -> None:\n"
-    "        # " + GENESIS_PN100_MARKER + "\n"
-    "        # Los ids del anillo NO son del cache: si cayeran en la free list,\n"
-    "        # _allocate_blocks los entregaria como si fueran suyos.\n"
-    "        _g100_a = getattr(self, '_g100_anillo', None)\n"
-    "        if _g100_a is not None and _g100_a.contiene(block.block_id):\n"
-    "            _g100_a.liberar(block.block_id)\n"
-    "            return\n"
-    "        self._free_list.append(block.block_id)\n"
-)
-
-# ─────────── 2. los agentes efimeros se sirven del anillo ───────────
+# ─────────── el unico hook: acotar lo efimero antes de que desaloje ───────────
 
 RING_OLD = (
     "        num_blocks_to_evict = len(keys_to_store) - self._get_num_free_blocks()\n"
@@ -109,57 +116,28 @@ RING_OLD = (
 
 RING_NEW = (
     "        # " + GENESIS_PN100_MARKER + "\n"
-    "        # Un agente efimero (coder/explorer/...) no merece cache: sus\n"
-    "        # bloques salen del anillo, asi no pueden desalojar el prefijo del\n"
-    "        # hilo principal. `should_persist` ya lo decidio PN90 mas arriba.\n"
+    "        # Un agente efimero (coder/explorer/...) no puede ocupar mas de K\n"
+    "        # bloques de L2. Antes de calcular desalojos, el anillo recicla lo\n"
+    "        # SUYO mas viejo para hacerse lugar; asi el excedente efimero nunca\n"
+    "        # se cobra sobre el prefijo del hilo principal.\n"
+    "        #\n"
+    "        # K es un TOPE, no una reserva: no se inmoviliza memoria. Con\n"
+    "        # trafico efimero en cero el cache se queda con todo L2.\n"
+    "        #\n"
+    "        # `should_persist` ya lo decidio PN90 unas lineas mas arriba.\n"
     "        if not should_persist:\n"
     "            from vllm._genesis import kv_staging_ring as _g100\n"
     "\n"
-    "            _g100_a = _g100.asegurar(self)\n"
-    "            if _g100_a is not None:\n"
-    "                # El preambulo compartido de un subagente (system prompt,\n"
-    "                # reglas, herramientas) es lo MAS valioso de L2: lo pega\n"
-    "                # cada invocacion. Como la clave es hash de contenido, se\n"
-    "                # reconoce porque ya aparecio antes. Ese va al cache; al\n"
-    "                # anillo va solo la cola, que es de un solo uso.\n"
-    "                _g100_cola = [\n"
-    "                    _g100_k\n"
-    "                    for _g100_k in keys_to_store\n"
-    "                    if not _g100.es_compartido(_g100_k)\n"
-    "                ]\n"
-    "                if len(_g100_cola) != len(keys_to_store):\n"
-    "                    _g100_a = None\n"
-    "            if _g100_a is not None:\n"
-    "                _g100_bloques = []\n"
-    "                for _g100_k in keys_to_store:\n"
-    "                    _g100_bid, _g100_rec = _g100_a.tomar(_g100_k)\n"
-    "                    if _g100_bid is None:\n"
-    "                        _g100_bloques = None\n"
-    "                        break\n"
-    "                    if _g100_rec is not None:\n"
-    "                        self._policy.remove(_g100_rec)\n"
-    "                    _g100_b = BlockStatus(_g100_bid)\n"
-    "                    self._policy.insert(_g100_k, _g100_b)\n"
-    "                    _g100_bloques.append(_g100_b)\n"
-    "                if _g100_bloques is not None:\n"
-    "                    try:\n"
-    "                        from vllm._genesis import kv_tier_metrics as _g100_m\n"
+    "            _g100_lib = _g100.hacer_lugar(self, keys_to_store)\n"
+    "            if _g100_lib:\n"
+    "                try:\n"
+    "                    from vllm._genesis import kv_tier_metrics as _g100_m\n"
     "\n"
-    "                        _g100_m.note_eviction(\n"
-    "                            'ram',\n"
-    "                            'anillo',\n"
-    "                            count=_g100_a.reciclados,\n"
-    "                            freed_bytes=0,\n"
-    "                        )\n"
-    "                    except Exception:\n"
-    "                        pass\n"
-    "                    return PrepareStoreOutput(\n"
-    "                        keys_to_store=keys_to_store,\n"
-    "                        store_spec=self._get_load_store_spec(\n"
-    "                            keys_to_store, _g100_bloques\n"
-    "                        ),\n"
-    "                        evicted_keys=[],\n"
+    "                    _g100_m.note_eviction(\n"
+    "                        'ram', 'anillo', count=_g100_lib, freed_bytes=0\n"
     "                    )\n"
+    "                except Exception:\n"
+    "                    pass\n"
     "        num_blocks_to_evict = len(keys_to_store) - self._get_num_free_blocks()\n"
 )
 
@@ -170,42 +148,26 @@ def _is_disabled() -> bool:
     )
 
 
-def _patchers() -> list[TextPatcher] | None:
+def _patcher() -> TextPatcher | None:
     root = vllm_install_root()
     if root is None:
         return None
-    cpu = os.path.join(root, "v1", "kv_offload", "cpu", "manager.py")
     tie = os.path.join(root, "v1", "kv_offload", "tiering", "manager.py")
-    if not (os.path.exists(cpu) and os.path.exists(tie)):
+    if not os.path.exists(tie):
         return None
-    return [
-        TextPatcher(
-            patch_name="PN100 staging ring (cpu manager)",
-            target_file=cpu,
-            marker=GENESIS_PN100_MARKER,
-            sub_patches=[
-                TextPatch(
-                    name="pn100_free_block_routes_to_ring",
-                    anchor=FREE_OLD,
-                    replacement=FREE_NEW,
-                    required=True,
-                ),
-            ],
-        ),
-        TextPatcher(
-            patch_name="PN100 staging ring (tiering manager)",
-            target_file=tie,
-            marker=GENESIS_PN100_MARKER,
-            sub_patches=[
-                TextPatch(
-                    name="pn100_ephemeral_agents_use_ring",
-                    anchor=RING_OLD,
-                    replacement=RING_NEW,
-                    required=True,
-                ),
-            ],
-        ),
-    ]
+    return TextPatcher(
+        patch_name="PN100 staging ring (tiering manager)",
+        target_file=tie,
+        marker=GENESIS_PN100_MARKER,
+        sub_patches=[
+            TextPatch(
+                name="pn100_cap_ephemeral_footprint",
+                anchor=RING_OLD,
+                replacement=RING_NEW,
+                required=True,
+            ),
+        ],
+    )
 
 
 def apply() -> tuple[str, str]:
@@ -219,31 +181,34 @@ def apply() -> tuple[str, str]:
         return "skipped", "GENESIS_DISABLE_PN100 set"
     if vllm_install_root() is None:
         return "skipped", "vllm install root not discoverable"
-    patchers = _patchers()
-    if patchers is None:
-        return "skipped", "targets de cpu/manager.py o tiering/manager.py no hallados"
+    p = _patcher()
+    if p is None:
+        return "skipped", "target de tiering/manager.py no encontrado"
 
-    txn = MultiFilePatchTransaction(patchers, name="PN100")
-    status, reason = txn.apply_or_skip()
-    if status != "applied":
-        return status, reason
-    return "applied", (
-        "PN100 aplicado: los bloques de agentes efimeros se sirven de un anillo "
-        "reservado al final de L2, asi que no pueden desalojar el prefijo del "
-        "hilo principal. Se dimensiona con GENESIS_PN100_RING_BLOCKS (0 = "
-        "apagado). Kill switch: GENESIS_DISABLE_PN100=1."
+    result, failure = p.apply()
+    from vllm._genesis.wiring.text_patch import result_to_wiring_status
+
+    return result_to_wiring_status(
+        result,
+        failure,
+        applied_message=(
+            "PN100 aplicado: lo que offloadea un agente efimero queda acotado a "
+            "GENESIS_PN100_RING_BLOCKS bloques de L2. Es un TOPE, no una "
+            "reserva: no inmoviliza memoria, y con trafico efimero en cero el "
+            "cache se queda con todo L2. Al pasarse, el anillo recicla lo suyo "
+            "mas viejo en vez de desalojar el prefijo del hilo principal. "
+            "Kill switch: GENESIS_DISABLE_PN100=1."
+        ),
+        patch_name="PN100 staging ring",
     )
 
 
 def is_applied() -> bool:
-    patchers = _patchers()
-    if patchers is None:
+    p = _patcher()
+    if p is None:
         return False
-    for p in patchers:
-        try:
-            with open(p.target_file) as f:
-                if GENESIS_PN100_MARKER not in f.read():
-                    return False
-        except Exception:
-            return False
-    return True
+    try:
+        with open(p.target_file) as f:
+            return GENESIS_PN100_MARKER in f.read()
+    except Exception:
+        return False
