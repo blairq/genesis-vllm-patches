@@ -221,7 +221,15 @@ services:
       # ocasional. Mide `vllm:kv_tier_hit_truncated_tokens_total` y bajalo si
       # ese contador crece.
       - GENESIS_ENABLE_PN93_SPARSE_GDN=1
-      - GENESIS_PN93_GDN_CHECKPOINT_STRIDE=8
+      # BARRIDO MEDIDO 2026-08-23 (8 prompts de 25k tok, 2 pasadas identicas):
+      #   PN93 apagado   21,32 GB al SSD | 1586 desalojos L2 | 0% cacheado | 139,5 s
+      #   stride 8        6,17 GB        |  377             | 0% cacheado | 139,2 s
+      #   stride 16       4,92 GB        |  285             | 0% cacheado | 138,0 s
+      # 77% menos escrituras que sin PN93, y CERO costo medible: el tiempo es
+      # el mismo y hit_truncated_tokens{recurrent="1"} no aparece en ninguno.
+      # El 0% cacheado NO lo causa PN93 (pasa igual apagado): la promocion
+      # disco->L2 queda inflight porque L2 esta llena. Ver la nota de L2.
+      - GENESIS_PN93_GDN_CHECKPOINT_STRIDE=16
       - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
       # P61b: Previene fuga de tags parciales en streaming hacia clientes agenticos
       - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
@@ -460,6 +468,13 @@ services:
       # de CUDA graphs, y CustomAllreduce tiene un camino aparte para eso
       # (capture() / register_graph_buffers). Ahi es donde rompe.
       # NCCL con P2P ya da la ganancia grande, asi que esto queda pendiente.
+      # RE-PROBADO 2026-08-23 CON PN94 APLICADO: SIGUE FALLANDO IGUAL.
+      #   Using ['CUSTOM','PYNCCL'] all-reduce backends for group 'tp:0'
+      #   Failed: Cuda error csrc/custom_all_reduce.cuh:455 'invalid argument'
+      # La hipotesis era que el fallo venia del error pegajoso de CUDA que
+      # dejaba el cudaHostRegister del rank 1; PN94 lo elimino (los dos ranks
+      # pinnean) y el CUSTOM rompe exactamente igual. Queda descartado: el
+      # problema esta en capture()/register_graph_buffers, no en el pinneo.
       - --disable-custom-all-reduce
       # Tensor Parallelism 2: Divide el modelo al 50/50 entre las 2 GPUs RTX 3090
       # TP=2 NO ES UNA ELECCION, ES LO UNICO QUE HAY (probado 2026-08-17).
