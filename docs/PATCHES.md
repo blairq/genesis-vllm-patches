@@ -4,7 +4,7 @@ This file is the **single source of truth** for every Genesis runtime patch.
 For each patch you get: ID, title, what it does, status (ON / opt-in / deprecated),
 env flag to toggle, upstream PR (if backported), and credit.
 
-**Total PATCH_REGISTRY entries:** 143 (range P1–P107 + PN8–PN67 + PN70 + sub-patches P5b/P7b/P15B/P18b/P38B/P39a/P67b/P67c/PN26b/PN40-classifier + library/diagnostic P51/P79d/P102). The dispatcher's `PATCH_REGISTRY` is the schema-validated, lifecycle-tracked, opt-in surface — `genesis self-test` and the schema validator gate this set on every commit.
+**Total PATCH_REGISTRY entries:** 144 (range P1–P107 + PN8–PN67 + PN70 + sub-patches P5b/P7b/P15B/P18b/P38B/P39a/P67b/P67c/PN26b/PN40-classifier + library/diagnostic P51/P79d/P102). The dispatcher's `PATCH_REGISTRY` is the schema-validated, lifecycle-tracked, opt-in surface — `genesis self-test` and the schema validator gate this set on every commit.
 
 **Total apply_all `@register_patch`:** 140 entries. P68/P69 share one `apply_patch_68_long_ctx_tool_adherence` function but are registered as two `PATCH_REGISTRY` entries; that's the reason for the 1-entry delta. As of v7.65 (2026-05-02) all legacy P1–P46 patches are first-class registry entries with `lifecycle: legacy` — historical pre-dispatcher patches with minimal metadata, kept default-on for compatibility.
 
@@ -257,6 +257,7 @@ validation pending) and default-ON (root-cause correctness fixes).
 | PN94 | Registro de host pinneado POR RANK. Upstream registra la región mmap entera desde todos los ranks; con TP>1 los dos mapean el mismo `/dev/shm`, el segundo choca con las mismas páginas físicas y se queda con DMA no-pinneado. Medido: **1,77× en ambas direcciones** (6,89→12,19 y 7,32→12,94 GB/s) | Sander | **ON** | `GENESIS_ENABLE_PN94_PER_RANK_HOST_REGISTER` (kill switch `GENESIS_DISABLE_PN94=1`) |
 | PN95 | Ocupación y desalojos del tier L2 (RAM) en Prometheus — `kv_tier_{bytes_used,capacity_bytes,evictions_total}` con `tier="ram"`. El desalojo de L2 es lo que PN90 convierte en escritura al SSD: era el único eslabón sin medir de la cadena VRAM→RAM→NVMe | Sander | **ON** | `GENESIS_ENABLE_PN95_L2_OCCUPANCY` (kill switch `GENESIS_DISABLE_PN95=1`) |
 | PN96 | Habilita `store_threshold` en `TieringOffloadingSpec` (upstream lo rechaza con un `ValueError` que sólo aplica al flujo con cascada, que PN90 ya eliminó). **Medido con 2 y NO sirve**: L2 cae de 6,43 GB a 58 MB porque `counts` se incrementa en `lookup()` y el store ocurre antes. Valor productivo: 1 | Sander | **ON** (inerte con el default) | `GENESIS_ENABLE_PN96_SCAN_RESISTANT_ADMISSION` (kill switch `GENESIS_DISABLE_PN96=1`) |
+| PN97 | Una promoción L3→L2 nunca desaloja. `prepare_write` es alias de `prepare_store`, así que traer un bloque del disco desalojaba a un residente y —con PN90— lo escribía al SSD: **leer del disco costaba escribir al disco**. Medido: los lookups `inflight` por grupo caen de 5184 a 0 y el trabajo del scheduler baja ~20x. No arregla el 0% de aciertos, que es capacidad, no lógica | Sander | **ON** | `GENESIS_ENABLE_PN97_PROMOTION_NEVER_EVICTS` (kill switch `GENESIS_DISABLE_PN97=1`) |
 
 ### v7.68 cross-rig fixes from noonghunna (2026-05-02)
 

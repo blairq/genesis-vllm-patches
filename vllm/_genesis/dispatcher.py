@@ -821,6 +821,31 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN97": {
+        "title": "Una promocion L3->L2 nunca desaloja (leer del SSD dejaba de costar escribir al SSD)",
+        "env_flag": "GENESIS_ENABLE_PN97_PROMOTION_NEVER_EVICTS",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-23. TieringOffloadingManager."
+            "_initiate_promotion llama a primary_tier.prepare_write, que en el "
+            "constructor es un alias de prepare_store: promover un bloque desde "
+            "disco pedia un slot de L2 y, si no habia, DESALOJABA. Con PN90 el "
+            "desalojo de un bloque taggeado lo baja al SSD, o sea que leer del "
+            "disco costaba escribir al disco, y encima destruia un residente. "
+            "MEDIDO: 8 prompts de 25k tokens dieron 285 desalojos de L2 en una "
+            "corrida cuyo objetivo era LEER, con 0% de aciertos externos porque "
+            "cada promocion se comia a la anterior. Es la semantica de las "
+            "cargas no-temporales de CPU y del primarycache=none de ZFS: el "
+            "trafico de streaming no debe allocar. NO se usa un anillo de "
+            "staging tipo MSHR porque el scheduler necesita el PREFIJO ENTERO "
+            "en L2 antes de emitir el load a la GPU (~36 bloques por prompt de "
+            "25k, 315 por grupo en el peor caso): un anillo mas chico que un "
+            "prefijo se llena de promociones que nunca completan y deadlockea."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",

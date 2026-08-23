@@ -1152,6 +1152,30 @@ def apply_patch_N96_l2_scan_resistant_admission() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN97 una promocion L3->L2 nunca desaloja")
+def apply_patch_N97_promotion_never_evicts() -> PatchResult:
+    """PN97: la promocion desde disco solo usa slots realmente libres.
+
+    prepare_write es alias de prepare_store, asi que traer un bloque del disco
+    desalojaba a un residente y —con PN90— lo escribia al SSD.
+
+    Status: default ON. Kill switch: GENESIS_DISABLE_PN97=1.
+    """
+    name = "PN97 promocion sin desalojo"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N97_promotion_never_evicts
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N97_promotion_never_evicts.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.
