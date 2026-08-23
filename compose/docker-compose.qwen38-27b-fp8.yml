@@ -580,7 +580,7 @@ services:
       # casi nunca llega a 2 antes de que pase la oportunidad de guardar.
       # Con 2 no se gana resistencia a escaneo: se desactiva L2.
       # No re-probar sin cambiar donde se incrementa el contador.
-      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 6442450944, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload"}]}}'
+      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 12884901888, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload"}]}}'
       - --enable-prefix-caching
       # Prefill fragmentado en bloques de 8192 tokens
       - --enable-chunked-prefill

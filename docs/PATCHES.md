@@ -4,7 +4,7 @@ This file is the **single source of truth** for every Genesis runtime patch.
 For each patch you get: ID, title, what it does, status (ON / opt-in / deprecated),
 env flag to toggle, upstream PR (if backported), and credit.
 
-**Total PATCH_REGISTRY entries:** 144 (range P1–P107 + PN8–PN67 + PN70 + sub-patches P5b/P7b/P15B/P18b/P38B/P39a/P67b/P67c/PN26b/PN40-classifier + library/diagnostic P51/P79d/P102). The dispatcher's `PATCH_REGISTRY` is the schema-validated, lifecycle-tracked, opt-in surface — `genesis self-test` and the schema validator gate this set on every commit.
+**Total PATCH_REGISTRY entries:** 145 (range P1–P107 + PN8–PN67 + PN70 + sub-patches P5b/P7b/P15B/P18b/P38B/P39a/P67b/P67c/PN26b/PN40-classifier + library/diagnostic P51/P79d/P102). The dispatcher's `PATCH_REGISTRY` is the schema-validated, lifecycle-tracked, opt-in surface — `genesis self-test` and the schema validator gate this set on every commit.
 
 **Total apply_all `@register_patch`:** 140 entries. P68/P69 share one `apply_patch_68_long_ctx_tool_adherence` function but are registered as two `PATCH_REGISTRY` entries; that's the reason for the 1-entry delta. As of v7.65 (2026-05-02) all legacy P1–P46 patches are first-class registry entries with `lifecycle: legacy` — historical pre-dispatcher patches with minimal metadata, kept default-on for compatibility.
 
@@ -258,6 +258,7 @@ validation pending) and default-ON (root-cause correctness fixes).
 | PN95 | Ocupación y desalojos del tier L2 (RAM) en Prometheus — `kv_tier_{bytes_used,capacity_bytes,evictions_total}` con `tier="ram"`. El desalojo de L2 es lo que PN90 convierte en escritura al SSD: era el único eslabón sin medir de la cadena VRAM→RAM→NVMe | Sander | **ON** | `GENESIS_ENABLE_PN95_L2_OCCUPANCY` (kill switch `GENESIS_DISABLE_PN95=1`) |
 | PN96 | Habilita `store_threshold` en `TieringOffloadingSpec` (upstream lo rechaza con un `ValueError` que sólo aplica al flujo con cascada, que PN90 ya eliminó). **Medido con 2 y NO sirve**: L2 cae de 6,43 GB a 58 MB porque `counts` se incrementa en `lookup()` y el store ocurre antes. Valor productivo: 1 | Sander | **ON** (inerte con el default) | `GENESIS_ENABLE_PN96_SCAN_RESISTANT_ADMISSION` (kill switch `GENESIS_DISABLE_PN96=1`) |
 | PN97 | Una promoción L3→L2 nunca desaloja. `prepare_write` es alias de `prepare_store`, así que traer un bloque del disco desalojaba a un residente y —con PN90— lo escribía al SSD: **leer del disco costaba escribir al disco**. Medido: los lookups `inflight` por grupo caen de 5184 a 0 y el trabajo del scheduler baja ~20x. No arregla el 0% de aciertos, que es capacidad, no lógica | Sander | **ON** | `GENESIS_ENABLE_PN97_PROMOTION_NEVER_EVICTS` (kill switch `GENESIS_DISABLE_PN97=1`) |
+| PN98 | Avisa al arrancar el tamaño mínimo recomendado de L2, traducido a **tokens** y comparado con L1. La regla es la de cualquier jerarquía de cachés: cada nivel más grande que el de arriba. Se violaba por 2,5x sin que nada lo dijera (L2 155.540 tok contra L1 390.444). Detectarlo y subir L2 de 6 a 12 GiB llevó la relectura de 0% a 96,7% cacheado y de 139 s a 6,3 s | Sander | **ON** | `GENESIS_ENABLE_PN98_L2_SIZING_ADVISORY` (kill switch `GENESIS_DISABLE_PN98=1`) |
 
 ### v7.68 cross-rig fixes from noonghunna (2026-05-02)
 

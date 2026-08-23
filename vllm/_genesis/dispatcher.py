@@ -846,6 +846,24 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN98": {
+        "title": "Avisa al arrancar el tamano minimo recomendado de L2 (en tokens, contra L1)",
+        "env_flag": "GENESIS_ENABLE_PN98_L2_SIZING_ADVISORY",
+        "default_on": True,
+        "category": "observability",
+        "credit": (
+            "Genesis-original 2026-08-23. El engine loguea 'primary tier (arc, "
+            "222 blocks)' y ese numero no se puede comparar con nada sin hacer "
+            "la cuenta a mano. La regla de cualquier jerarquia de caches es que "
+            "cada nivel sea mas grande que el de arriba, y aca se violaba por "
+            "2,5x sin que nada lo dijera: L2 = 155.540 tokens contra L1 = "
+            "390.444 (ratio 0,40x). Con L2 mas chica que L1 nada de lo que la "
+            "GPU desaloja entra completo y toda promocion termina desalojando. "
+            "Informativo puro."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",
