@@ -962,6 +962,28 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN103": {
+        "title": "max_offload_tokens automatico, derivado de lo que PN101 mide",
+        "env_flag": "GENESIS_ENABLE_PN103_AUTO_PREFIX_PATCH",
+        "default_on": True,
+        "category": "performance",
+        "credit": (
+            "Genesis-original 2026-08-23. Teniendo la medicion de PN101, "
+            "configurar max_offload_tokens a mano deja de tener sentido: es un "
+            "valor que hay que descubrir, mantener, y que se desactualiza solo "
+            "cuando cambian las herramientas o el prompt del agente. MEDIDO: el "
+            "estimado a mano (tokenizar el prompt del agente del archivo de "
+            "config) daba coder=2.496 contra 9.984 real y explorer=832 contra "
+            "4.992 real — corto por 4x y 6x, porque falta todo lo que el cliente "
+            "pone alrededor (esquemas de herramientas, framing). Arranca SIN "
+            "limite y lo pone recien con observaciones suficientes: limitar "
+            "antes de saber seria profecia autocumplida, nunca se veria "
+            "compartir mas de lo que se dejo guardar. Un valor explicito del "
+            "cliente siempre gana."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",

@@ -1270,6 +1270,24 @@ def apply_patch_N102_block_score_eviction() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN103 max_offload_tokens automatico")
+def apply_patch_N103_auto_prefix_limit() -> PatchResult:
+    """PN103: deriva max_offload_tokens de lo que PN101 midio."""
+    name = "PN103 limite de prefijo automatico"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N103_auto_prefix_limit
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N103_auto_prefix_limit.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.
