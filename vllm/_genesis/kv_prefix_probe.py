@@ -45,6 +45,7 @@ _MAX_CLAVES = 4096  # techo por agente; un prefijo mas largo que esto no se mide
 
 _PREV: OrderedDict = OrderedDict()
 _MAX: dict = {}
+_MIN: dict = {}
 _OBS: dict = {}
 
 
@@ -54,6 +55,7 @@ def _guardar(agent: str, keys: list) -> None:
     elif len(_PREV) >= _MAX_AGENTES:
         viejo, _ = _PREV.popitem(last=False)
         _MAX.pop(viejo, None)
+        _MIN.pop(viejo, None)
         _OBS.pop(viejo, None)
     _PREV[agent] = keys
 
@@ -82,12 +84,26 @@ def observar(agent: str, keys) -> int | None:
         n += 1
 
     _MAX[agent] = max(_MAX.get(agent, 0), n)
+    anterior = _MIN.get(agent)
+    _MIN[agent] = n if anterior is None else min(anterior, n)
     _OBS[agent] = _OBS.get(agent, 0) + 1
     return n
 
 
 def maximo(agent: str) -> int:
     return _MAX.get(agent, 0)
+
+
+def minimo(agent: str) -> int:
+    """El prefijo que se comparte SIEMPRE, no el que se comparte a veces.
+
+    Es el estadistico que hay que usar para dimensionar. El maximo incluye
+    bloques que solo coincidieron una vez: guardarlos cuesta L2 en cada
+    invocacion y casi nunca se releen. MEDIDO el 2026-08-23: pasar el limite
+    de coder de 3 a 12 bloques (su maximo) bajo el hit rate del tier de 21,4%
+    a 9,0%, porque 48 invocaciones x 9 bloques de mas dan vuelta L2 entera.
+    """
+    return _MIN.get(agent, 0)
 
 
 def observaciones(agent: str) -> int:
@@ -114,12 +130,17 @@ def publicar(agent: str, comun: int, tokens_por_bloque: int) -> None:
 def reset() -> None:
     _PREV.clear()
     _MAX.clear()
+    _MIN.clear()
     _OBS.clear()
 
 
 def snapshot() -> dict:
     """Para el endpoint de PN89 / el dashboard."""
     return {
-        a: {"max_bloques": _MAX.get(a, 0), "observaciones": _OBS.get(a, 0)}
+        a: {
+            "max_bloques": _MAX.get(a, 0),
+            "min_bloques": _MIN.get(a, 0),
+            "observaciones": _OBS.get(a, 0),
+        }
         for a in _PREV
     }

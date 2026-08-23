@@ -58,30 +58,31 @@ def test_no_limita_hasta_tener_min_obs(monkeypatch):
     assert A.limite_para("coder", BLK) is not None
 
 
-def test_usa_el_maximo_mas_margen(monkeypatch):
-    monkeypatch.setenv("GENESIS_PN103_MIN_OBS", "2")
-    monkeypatch.setenv("GENESIS_PN103_MARGIN_BLOCKS", "2")
-    _entrenar("coder", 4, 4)
-    assert _A().limite_para("coder", BLK) == (4 + 2) * BLK
+def test_usa_el_minimo_no_el_maximo(monkeypatch):
+    """REGRESION MEDIDA: usar el maximo empeora el hit rate a la mitad.
 
-
-def test_el_margen_evita_recortar_un_prefijo_apenas_mas_largo(monkeypatch):
-    monkeypatch.setenv("GENESIS_PN103_MIN_OBS", "2")
-    _entrenar("coder", 4, 4)
-    lim = _A().limite_para("coder", BLK)
-    assert lim > 4 * BLK, "sin margen, cualquier prefijo mas largo se recorta"
-
-
-def test_usa_el_maximo_y_no_la_ultima_medicion(monkeypatch):
-    """El maximo es el techo de lo reusable; la ultima puede ser un bajon."""
+    Subir el limite de coder de 3 a 12 bloques (su maximo) llevo el hit rate
+    del tier de 21,4% a 9,0%. El maximo incluye bloques que coincidieron una
+    sola vez: cuestan L2 en CADA invocacion y casi nunca se releen, y con 48
+    invocaciones dan vuelta L2 entera. El minimo es lo que se comparte
+    SIEMPRE.
+    """
     from vllm._genesis import kv_prefix_probe as P
 
     monkeypatch.setenv("GENESIS_PN103_MIN_OBS", "2")
-    monkeypatch.setenv("GENESIS_PN103_MARGIN_BLOCKS", "0")
-    _entrenar("coder", 6, 3)
-    P.observar("coder", [b"k0", b"distinto"])  # bajon a 1
-    assert P.maximo("coder") == 6
-    assert _A().limite_para("coder", BLK) == 6 * BLK
+    pre = [b"k%d" % i for i in range(12)]
+    for n, i in ((9, 0), (12, 1), (9, 2), (10, 3)):
+        P.observar("coder", pre[:n] + [b"cola%d" % i])
+    assert P.maximo("coder") == 12
+    assert P.minimo("coder") == 9
+    assert _A().limite_para("coder", BLK) == 9 * BLK
+
+
+def test_el_margen_por_defecto_es_cero(monkeypatch):
+    """El minimo ya es conservador; sumarle margen reintroduce el problema."""
+    monkeypatch.setenv("GENESIS_PN103_MIN_OBS", "2")
+    _entrenar("coder", 4, 4)
+    assert _A().limite_para("coder", BLK) == 4 * BLK
 
 
 # ─────────── guardas ───────────

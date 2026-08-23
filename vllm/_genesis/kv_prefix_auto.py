@@ -26,10 +26,13 @@ COMO SE COMPORTA
     permite APRENDER cual es el prefijo. Arrancar con un limite chico seria
     profecia autocumplida: nunca se veria compartir mas de lo que se dejo
     guardar.
-  - **Con datos: el maximo observado mas un margen.** Se usa el maximo y no la
-    ultima medicion porque el maximo es el techo de lo reusable; y el margen
-    (2 bloques por defecto) evita recortar un prefijo que hoy resulto un
-    poquito mas largo.
+  - **Con datos: el MINIMO observado.** La primera version usaba el maximo,
+    razonando que era "el techo de lo reusable". La medicion lo refuto: subir
+    el limite de coder de 3 a 12 bloques (su maximo) bajo el hit rate del tier
+    de 21,4% a 9,0%. El maximo incluye bloques que coincidieron una sola vez;
+    guardarlos cuesta L2 en CADA invocacion y casi nunca se releen, y con 48
+    invocaciones esos bloques de mas dan vuelta L2 entera. El minimo es lo que
+    se comparte SIEMPRE, que es lo unico que paga su lugar.
   - **Un valor explicito del cliente siempre gana.** Esto solo actua cuando no
     se mando `max_offload_tokens`.
 
@@ -42,7 +45,7 @@ from __future__ import annotations
 import os
 
 _MIN_OBS_DEFECTO = 3
-_MARGEN_DEFECTO = 2
+_MARGEN_DEFECTO = 0
 
 
 def habilitado() -> bool:
@@ -62,6 +65,8 @@ def min_observaciones() -> int:
 
 
 def margen_bloques() -> int:
+    # 0 por defecto: el minimo ya es conservador y agregarle margen vuelve a
+    # meter bloques que no siempre se comparten, que es lo que se midio mal.
     return _int_env("GENESIS_PN103_MARGIN_BLOCKS", _MARGEN_DEFECTO)
 
 
@@ -74,7 +79,7 @@ def limite_para(agent, tokens_por_bloque: int) -> int | None:
 
         if P.observaciones(agent) < min_observaciones():
             return None  # todavia aprendiendo: no limitar
-        bloques = P.maximo(agent)
+        bloques = P.minimo(agent)
         if bloques <= 0:
             # El prefijo se rompe en el primer bloque. Puede ser que el cliente
             # inyecte algo variable adelante. No es una conclusion para apagar
@@ -93,6 +98,7 @@ def explicacion(agent, tokens_por_bloque: int) -> str:
         return f"{agent}: {obs} observaciones, todavia aprendiendo (sin limite)"
     lim = limite_para(agent, tokens_por_bloque)
     return (
-        f"{agent}: max {P.maximo(agent)} bloques + margen {margen_bloques()}"
+        f"{agent}: min {P.minimo(agent)} (max {P.maximo(agent)}) + margen "
+        f"{margen_bloques()}"
         f" -> {lim} tokens ({obs} observaciones)"
     )
