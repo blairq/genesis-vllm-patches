@@ -1,0 +1,10 @@
+# Configuración de Ruff para el proyecto (solo afecta a graphlib/ y tests/).
+#
+# En tests/graphlib/ los bloques de imports siguen el orden local de cada
+# archivo (stdlib y frameworks antes que graphlib) y se itera sobre pares
+# sucesivos con zip; esos son hallazgos cosméticos (I001, RUF007) que no
+# se corrigen en tests para no ensuciar los diffs. El código de producción
+# (graphlib/) se revisa con la regla completa, sin exclusiones.
+
+[lint]
+extend-per-file-ignores = { "tests/graphlib/*.py" = ["I001", "RUF007"] }
