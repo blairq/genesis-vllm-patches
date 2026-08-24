@@ -229,6 +229,12 @@ services:
       # apagar hay que BORRAR /kv-offload o los bloques viejos se leen
       # como basura. Y PN92 tiene que seguir apagado: comprimir dos veces
       # seria un desastre.
+      # PN105: arregla dos bugs encadenados del reset de cache. El primero
+      # es que TieringOffloadingManager no implementaba reset_cache y
+      # heredaba un no-op, asi que el boton reportaba exito con L2 intacta.
+      # Arreglar eso destapo el segundo: el reset del connector no limpiaba
+      # los job ids por request y el EngineCore moria con KeyError en el
+      # primer request posterior. Los dos van juntos en el mismo parche.
       - GENESIS_ENABLE_PN99_GPU_COMPRESSED_L2=1
       # PN100: anillo de staging. Los bloques de agentes EFIMEROS (coder,
       # explorer: sin persist_disk) salen de estos K bloques reservados al

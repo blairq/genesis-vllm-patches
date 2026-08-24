@@ -97,3 +97,60 @@ def test_limpia_tambien_el_estado_de_los_parches_genesis():
     assert "kv_tier_attribution" in P.ANCHOR_NEW
     assert "_g100_reg" in P.ANCHOR_NEW
     assert "_g102" in P.ANCHOR_NEW
+
+
+# ─────────── el segundo bug, que el primero destapo ───────────
+
+
+@_needs
+def test_el_reset_del_connector_no_limpia_los_job_ids_por_request():
+    """REGRESION MEDIDA: con el reset funcionando, el engine moria.
+
+    `reset_cache()` del connector vacia `self._jobs` pero deja
+    `req_status.transfer_jobs` con ids viejos. En el paso siguiente:
+
+        any_jid = next(iter(req_status.transfer_jobs))
+        assert self._jobs[any_jid].is_store   -> KeyError: 110
+
+    y el EngineCore muere. Nunca se habia visto porque el reset era un no-op:
+    arreglarlo (PN105) fue lo que expuso este.
+    """
+    P = _P()
+    rel = "distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py"
+    with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+        txt = fh.read()
+    if P.GENESIS_PN105_MARKER in txt:
+        pytest.skip("PN105 ya aplicado")
+    ini = txt.index("    def reset_cache(self) -> None:")
+    fin = txt.index("_stale_job_threshold", ini)
+    assert "transfer_jobs" not in txt[ini:fin], (
+        "upstream ahora limpia transfer_jobs: revisar si este sub-parche sigue "
+        "haciendo falta"
+    )
+    assert txt.count(P.JOBS_OLD) == 1
+    out = txt.replace(P.JOBS_OLD, P.JOBS_NEW)
+    compile(out, rel, "exec")
+    assert "status.transfer_jobs.clear()" in out
+
+
+@_needs
+def test_los_dos_sub_parches_van_juntos(tmp_path, monkeypatch):
+    """Aplicar solo el de tiering deja el engine expuesto al crash."""
+    import shutil
+
+    tree = tmp_path / "vllm"
+    shutil.copytree(ROOT, tree, symlinks=True)
+    from vllm._genesis import guards
+
+    P = _P()
+    monkeypatch.setattr(guards, "vllm_install_root", lambda: str(tree))
+    monkeypatch.setattr(P, "vllm_install_root", lambda: str(tree))
+
+    status, reason = P.apply()
+    assert status == "applied", reason
+    assert P.is_applied() is True
+    # Los DOS archivos tienen que quedar marcados.
+    for rel in (_REL, "distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py"):
+        txt = (tree / rel).read_text()
+        assert P.GENESIS_PN105_MARKER in txt, rel
+        compile(txt, rel, "exec")

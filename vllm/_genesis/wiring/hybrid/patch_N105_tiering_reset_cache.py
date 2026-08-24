@@ -44,6 +44,41 @@ from vllm._genesis.wiring.text_patch import (
 
 GENESIS_PN105_MARKER = "_GENESIS_PN105_TIERING_RESET_CACHE"
 
+# ─────────── 2. el reset deja job ids colgados por request ───────────
+#
+# Al hacer que el reset LIMPIE DE VERDAD se destapa un segundo bug que nunca
+# se habia podido ver, porque el camino no se ejercitaba: `reset_cache()` del
+# connector vacia `self._jobs` pero NO limpia `req_status.transfer_jobs`, que
+# es donde viven los ids por request. En el paso siguiente:
+#
+#     any_jid = next(iter(req_status.transfer_jobs))
+#     assert self._jobs[any_jid].is_store      -> KeyError: 110
+#
+# y el EngineCore muere. Medido el 2026-08-24: el engine se cayo en el primer
+# request posterior a un reset exitoso.
+#
+# El loop que sigue ya recorre los requests para resetear next_stored_block_idx,
+# asi que alcanza con vaciar ahi tambien los transfer_jobs.
+
+JOBS_OLD = (
+    "        # Reset store progress so active requests re-offload from block 0\n"
+    "        for status in self._req_status.values():\n"
+    "            for group_state in status.group_states:\n"
+    "                group_state.next_stored_block_idx = 0\n"
+)
+
+JOBS_NEW = (
+    "        # Reset store progress so active requests re-offload from block 0\n"
+    "        for status in self._req_status.values():\n"
+    "            for group_state in status.group_states:\n"
+    "                group_state.next_stored_block_idx = 0\n"
+    "            # " + GENESIS_PN105_MARKER + "\n"
+    "            # Los ids por request tienen que morir con self._jobs. Si no,\n"
+    "            # el paso siguiente hace self._jobs[any_jid] sobre un dict ya\n"
+    "            # vacio y el EngineCore muere con KeyError.\n"
+    "            status.transfer_jobs.clear()\n"
+)
+
 ANCHOR_OLD = "    def _flush_pending_promotions(self) -> None:\n"
 
 ANCHOR_NEW = (
@@ -106,6 +141,27 @@ def _patcher() -> TextPatcher | None:
     )
 
 
+def _patcher_scheduler() -> TextPatcher | None:
+    root = vllm_install_root()
+    if root is None:
+        return None
+    t = os.path.join(
+        root, "distributed", "kv_transfer", "kv_connector", "v1",
+        "offloading", "scheduler.py",
+    )
+    if not os.path.exists(t):
+        return None
+    return TextPatcher(
+        patch_name="PN105 reset clears per-request job ids",
+        target_file=t,
+        marker=GENESIS_PN105_MARKER,
+        sub_patches=[
+            TextPatch(name="pn105_clear_transfer_jobs", anchor=JOBS_OLD,
+                      replacement=JOBS_NEW, required=True),
+        ],
+    )
+
+
 def apply() -> tuple[str, str]:
     from vllm._genesis.dispatcher import log_decision, should_apply
 
@@ -117,27 +173,35 @@ def apply() -> tuple[str, str]:
         return "skipped", "GENESIS_DISABLE_PN105 set"
     if vllm_install_root() is None:
         return "skipped", "vllm install root not discoverable"
-    p = _patcher()
-    if p is None:
-        return "skipped", "tiering/manager.py no encontrado"
-    result, failure = p.apply()
-    return result_to_wiring_status(
-        result, failure,
-        applied_message=(
-            "PN105 aplicado: TieringOffloadingManager.reset_cache() ahora existe "
-            "y vacia el tier primario. Sin esto heredaba el no-op de base.py y el "
-            "reset reportaba exito dejando L2 intacta."
-        ),
-        patch_name="PN105 tiering reset_cache",
+    ps = [_patcher(), _patcher_scheduler()]
+    if any(p is None for p in ps):
+        return "skipped", (
+            "targets de tiering/manager.py u offloading/scheduler.py no hallados"
+        )
+
+    from vllm._genesis.wiring.text_patch import MultiFilePatchTransaction
+
+    txn = MultiFilePatchTransaction(ps, name="PN105")
+    status, reason = txn.apply_or_skip()
+    if status != "applied":
+        return status, reason
+    return "applied", (
+        "PN105 aplicado: TieringOffloadingManager.reset_cache() ahora existe y "
+        "vacia el tier primario (heredaba un no-op de base.py, asi que el reset "
+        "reportaba exito dejando L2 intacta), y el reset del connector limpia "
+        "los job ids por request (sin eso el EngineCore moria con KeyError en el "
+        "primer request posterior a un reset)."
     )
 
 
 def is_applied() -> bool:
-    p = _patcher()
-    if p is None:
-        return False
-    try:
-        with open(p.target_file) as f:
-            return GENESIS_PN105_MARKER in f.read()
-    except Exception:
-        return False
+    for p in (_patcher(), _patcher_scheduler()):
+        if p is None:
+            return False
+        try:
+            with open(p.target_file) as f:
+                if GENESIS_PN105_MARKER not in f.read():
+                    return False
+        except Exception:
+            return False
+    return True
