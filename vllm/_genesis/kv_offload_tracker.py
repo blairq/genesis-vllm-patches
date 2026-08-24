@@ -242,11 +242,21 @@ async def reset_kv_cache_and_metrics(
             if chat_serving is not None:
                 engine_client = getattr(chat_serving, "engine_client", None)
 
-        if engine_client is not None and hasattr(engine_client, "reset_prefix_cache"):
+        if not clear_l1 and not clear_l2:
+            # Ni L1 ni L2: no hay nada que pedirle al engine. Antes se llamaba
+            # igual y se reportaba exito segun `success`, ignorando los flags —
+            # o sea que "resetear solo metricas" intentaba borrar la cache de la
+            # GPU. En la practica fallaba sola porque ese boton manda
+            # force=false, pero era una bomba con la mecha corta.
+            logger.debug("Reset sin clear_l1 ni clear_l2: no se toca el engine")
+        elif engine_client is not None and hasattr(engine_client, "reset_prefix_cache"):
             success = await engine_client.reset_prefix_cache(
                 reset_running_requests=force,
                 reset_connector=clear_l2,
             )
+            # `reset_prefix_cache` resetea L1 SIEMPRE que se la llama; no acepta
+            # un flag para saltearlo. Asi que solo se la invoca si se pidio al
+            # menos uno de los dos, y se reporta lo que de verdad se toco.
             report["l1_vram_prefix_cache"] = bool(success)
             report["l2_ram_arc_cache"] = bool(success and clear_l2)
         else:
