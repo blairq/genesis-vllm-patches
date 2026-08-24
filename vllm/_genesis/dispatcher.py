@@ -1005,6 +1005,28 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN105": {
+        "title": "reset_cache() del tiering manager, que heredaba un no-op silencioso",
+        "env_flag": "GENESIS_ENABLE_PN105_TIERING_RESET_CACHE",
+        "default_on": True,
+        "category": "correctness",
+        "credit": (
+            "Genesis-original 2026-08-23. Bug de vLLM: "
+            "OffloadingManager.reset_cache() en base.py es un no-op (`return`). "
+            "CPUOffloadingManager lo implementa, pero TieringOffloadingManager NO "
+            "lo sobreescribe, asi que hereda el vacio. Y como devuelve None y no "
+            "False, el chequeo del scheduler `if self.connector.reset_cache() is "
+            "False` nunca detecta la falla: el reset reporta exito sin limpiar "
+            "nada. MEDIDO con PN104: tras un 'Reset Total' que respondia "
+            "l2_ram_arc_cache=true, el mismo prompt volvia en 1,0 s con 24.128 "
+            "tokens cacheados, TODOS del tier externo (L1 si se limpiaba). O sea "
+            "que el usuario cree que arranca de cero y sigue midiendo sobre una "
+            "cache caliente. Los tiers secundarios no exponen reset en su "
+            "interfaz, asi que L3 se sigue limpiando por borrado de archivos."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",

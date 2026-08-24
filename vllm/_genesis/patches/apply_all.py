@@ -1306,6 +1306,24 @@ def apply_patch_N104_exact_tier_attribution() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN105 reset_cache del tiering manager")
+def apply_patch_N105_tiering_reset_cache() -> PatchResult:
+    """PN105: implementa el reset_cache que TieringOffloadingManager no tenia."""
+    name = "PN105 reset_cache del tiering"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N105_tiering_reset_cache
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N105_tiering_reset_cache.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.
