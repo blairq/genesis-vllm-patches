@@ -1288,6 +1288,24 @@ def apply_patch_N103_auto_prefix_limit() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN104 atribucion exacta de tier por acierto")
+def apply_patch_N104_exact_tier_attribution() -> PatchResult:
+    """PN104: publica kv_tier_hit_tokens_total{tier} contado, no adivinado."""
+    name = "PN104 atribucion exacta de tier"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_N104_exact_tier_attribution
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_N104_exact_tier_attribution.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.

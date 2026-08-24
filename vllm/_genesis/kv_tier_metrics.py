@@ -528,6 +528,12 @@ _DOC = {
         "Lo mismo que kv_prefix_shared_blocks, en tokens. Es el valor que hay que "
         "usar para max_offload_tokens de ese agente."
     ),
+    "kv_tier_hit_tokens_total": (
+        "Tokens de prompt servidos por cada tier, atribuidos EXACTAMENTE por el "
+        "engine (no adivinados por latencia). El tier primario los sirve desde "
+        "RAM; los del disco requirieron promocion. Los de L1 no estan aca: son "
+        "prefix_cache_hits_total menos external_prefix_cache_hits_total."
+    ),
     "kv_prefix_shared_blocks_min": (
         "MINIMO prefijo compartido visto para ese agente. ES EL NUMERO QUE "
         "SIRVE: last y max estan contaminados por la historia de conversacion "

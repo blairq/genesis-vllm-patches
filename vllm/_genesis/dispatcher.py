@@ -984,6 +984,27 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN104": {
+        "title": "Atribucion EXACTA de que tier sirvio cada acierto (en vez de adivinarla)",
+        "env_flag": "GENESIS_ENABLE_PN104_EXACT_TIER_ATTRIBUTION",
+        "default_on": True,
+        "category": "observability",
+        "credit": (
+            "Genesis-original 2026-08-23. El dashboard clasificaba el tier "
+            "ADIVINANDO por latencia: estimaba el prefill de los tokens nuevos, "
+            "le restaba eso y 0,8s fijos al TTFT y bucketeaba el sobrante. Daba "
+            "cualquier cosa — mostraba L3 = 99,1% de los aciertos y L1 = 0, con "
+            "75,1 GB leidos de un SSD cuyo directorio tenia 12 KB, mientras el "
+            "engine reportaba 1.389.440 aciertos de GPU y CERO de disco. Ademas "
+            "asignaba el request ENTERO a un solo tier, cuando un request real "
+            "toma bloques de L1, L2 y L3 a la vez. El engine si sabe la "
+            "respuesta: TieringOffloadingManager.lookup() distingue primario de "
+            "secundario. PN104 lleva la cuenta por request y reparte "
+            "num_hit_tokens en esa proporcion."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN93": {
         "title": "Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras)",
         "env_flag": "GENESIS_ENABLE_PN93_SPARSE_GDN",
