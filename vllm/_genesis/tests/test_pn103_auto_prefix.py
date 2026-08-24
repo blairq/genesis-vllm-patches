@@ -154,3 +154,45 @@ def test_un_valor_explicito_del_cliente_gana():
     from vllm._genesis.wiring.hybrid import patch_N103_auto_prefix_limit as P
 
     assert "if self.max_offload_tokens is None:" in P.ANCHOR_NEW
+
+
+# ─────────── el filtro de invocacion nueva ───────────
+
+
+def test_ignora_los_turnos_de_la_misma_charla():
+    """Solo cuenta como observacion un cruce entre INVOCACIONES.
+
+    En un turno siguiente el prompt CRECE; en una invocacion nueva no. Sin
+    este filtro, min y max miden historia de conversacion en vez de
+    preambulo. Verificado con un proxy que grabo los prompts crudos: dos
+    invocaciones frescas de `coder` comparten 9 bloques (system prompt + 12
+    esquemas de herramientas), mientras que los turnos intermedios comparten
+    hasta 13.
+    """
+    from vllm._genesis import kv_prefix_probe as P
+
+    pre = [b"p%d" % i for i in range(9)]
+    for extra in (1, 3, 5):  # invocacion 1, tres turnos que CRECEN
+        P.observar("coder", pre + [b"i1-%d" % j for j in range(extra)])
+    P.observar("coder", pre + [b"i2-0"])  # invocacion NUEVA (prompt mas corto)
+    for extra in (3, 5):
+        P.observar("coder", pre + [b"i2-%d" % j for j in range(extra)])
+    P.observar("coder", pre + [b"i3-0"])  # otra invocacion nueva
+
+    assert P.observaciones("coder") == 2, "solo los dos cruces son validos"
+    assert P.minimo("coder") == 9
+    assert P.maximo("coder") == 9
+
+
+def test_un_agente_que_solo_crece_no_genera_observaciones():
+    """El hilo principal es una sola charla: no tiene preambulo reusable.
+
+    Medido: primary_high comparte 41 tokens (0 bloques) entre invocaciones.
+    Lo que PN101 le veia eran 49-71 bloques de historia de conversacion.
+    """
+    from vllm._genesis import kv_prefix_probe as P
+
+    for n in range(1, 6):
+        P.observar("principal", [b"k%d" % i for i in range(n * 5)])
+    assert P.observaciones("principal") == 0
+    assert _A().limite_para("principal", BLK) is None

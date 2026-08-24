@@ -95,6 +95,19 @@ def observar(agent: str, keys) -> int | None:
             break
         n += 1
 
+    # Solo cuenta como observacion valida si esto parece una INVOCACION NUEVA
+    # y no el turno siguiente de la misma charla. La senal: en un turno
+    # siguiente el prompt CRECE (se le agrego la respuesta y el resultado de
+    # la herramienta); en una invocacion nueva no.
+    #
+    # Sin este filtro el minimo y el maximo miden historia de conversacion.
+    # Verificado con un proxy que grabo los prompts crudos (2026-08-23): dos
+    # invocaciones frescas de `coder` comparten 7.856 tokens = 9 bloques, que
+    # es system prompt (10.837 chars) + 12 esquemas JSON de herramientas
+    # (19.268 chars). Los turnos intermedios comparten mucho mas y contaminan.
+    if len(actuales) > len(previas):
+        return n
+
     _MAX[agent] = max(_MAX.get(agent, 0), n)
     anterior = _MIN.get(agent)
     _MIN[agent] = n if anterior is None else min(anterior, n)
