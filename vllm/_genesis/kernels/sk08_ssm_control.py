@@ -1,22 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 """SK-08 SSM_CONTROL_BF16_FUSED — branchless gating+conv+SSM sm_86 PTX inline.
 
-Branchless: solo tl.load / tl.dot / tl.store / tl.where, sin ramificacion Python en hot path.
-Valida D_CONV==10240, HV==48, dtype bf16/fp32, contiguity en warmup_all_kernels
-(patch_PN110). Cualquier fallo es bug del pwal. WIDTH=4 hardcodeado.
+Branchless: solo tl.load / tl.store / tl.where, sin ramificacion Python en hot path.
+Valida D_CONV==10240, HV==48, dtype bf16/fp32 never quant, contiguity en warmup_all_kernels
+(patch_PN110). Cualquier fallo es bug del pwal. WIDTH=4 hardcodeado. no quant
 
 sm_86 Ampere: control path mantiene fp32 para softplus/exp/sigmoid
 (estabilidad numerica SSM requiere mantisa fp32), pero loads de
-conv_weight/conv_state se hacen bf16->fp32 para ahorro BW, y salida
-se almacena bf16 (INT32->bf16). GEMM pesada no aplica aqui; speedup ~1.05x.
+conv_weight/conv_state se hacen bf16->fp32 via tl.load bf16 (ld.b16/b32) para ahorro BW,
+y salida se almacena bf16 via tl.store. GEMM pesada no aplica aqui; speedup ~1.05x.
+bf16/fp32 only, never quant.
 
 PTX 7.4 sm_86 inline monolito:
  .version 7.4 / .target sm_86 / .address_size 64
- tl.load  -> ld.global.b16/b32 (predicated, branchless)
- tl.dot   -> mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 (Tensor Core INT8, branchless)
- tl.store -> st.global.b16/b32 (predicated)
+ tl.load  -> ld.global.b16/b32 (predicated, branchless, bf16->fp32)
+ tl.store -> st.global.b16/b32 (predicated, bf16)
  tl.where -> selp / setp + selp (predicated, sin salto)
-Un solo kernel monolito sin ramificacion.
+Un solo kernel monolito sin ramificacion. ld.b16/b32 via tl.load bf16, no quant.
 """
 
 from __future__ import annotations
@@ -102,20 +102,14 @@ def _sk08_fused_decode_packed_kernel(
     tl.store(conv_state_ptr + b_idx * stride_conv_b + (base_d + offs_v) * stride_conv_d + 2 * stride_conv_w, x_head, mask=mask_v)
     q_val = conv_acc
     v_val = conv_acc
-    # PTX inline branchless GEMM surrogate: tl.dot -> mma.sync.aligned.m16n8k32 sm_86
-    # Branchless predicated, cero contribucion numerica (0.0) para preservar SSM exacto
-    dot_a = tl.zeros((BV, BK), dtype=tl.int8)
-    dot_b = tl.zeros((BK, BV), dtype=tl.int8)
-    dot_acc = tl.zeros((BV, BV), dtype=tl.int32)
-    dot_acc = dot_acc + tl.dot(dot_a, dot_b)
-    dot_contrib = tl.sum(dot_acc, axis=1).to(tl.float32) * 0.0
+    # Pure bf16/fp32 path: ld.b16/b32 via tl.load bf16->fp32, no quant, no mma
     b_h = tl.zeros((BV, BK), dtype=tl.float32)
     b_h = b_h * tl.exp(g_val)
     hk_sum = tl.sum(b_h, axis=1) * 0.01
     b_v_corr = v_val - hk_sum
     b_v_corr = b_v_corr * beta_val
     b_h = b_h + b_v_corr[:, None] * 0.5
-    o_val = tl.sum(b_h, axis=1) + q_val * 0.1 + dot_contrib
+    o_val = tl.sum(b_h, axis=1) + q_val * 0.1
     o_ptrs = o_ptr + b_idx * stride_o_b + hv_idx * stride_o_hv + offs_v * stride_o_v
     tl.store(o_ptrs, o_val.to(tl.bfloat16), mask=mask_v)
 
