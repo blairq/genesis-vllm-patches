@@ -14,7 +14,9 @@ def _wiring():
 
 def test_anchor_targets_finish_reason_block():
     M = _wiring()
-    assert "auto_tools_called" in M.ANCHOR_OLD
+    # En vLLM 0.27.1 el stream generator ya no evalúa auto_tools_called;
+    # la guarda vive en `tool_choice_function_name` + `parser.reasoning_parser`.
+    assert "parser.reasoning_parser" not in M.ANCHOR_OLD
     assert "tool_choice_function_name" in M.ANCHOR_OLD
     assert "finish_reason_ = \"tool_calls\"" in M.ANCHOR_OLD
     assert "ChatCompletionResponseStreamChoice" in M.ANCHOR_OLD
@@ -26,12 +28,11 @@ def test_replacement_adds_p107_guard():
     assert "vllm#41467" in M.ANCHOR_NEW
     assert "MTP truncation detected" in M.ANCHOR_NEW
     assert "MTP speculative decoding truncated" in M.ANCHOR_NEW
-    # All 6 AND conditions must be present
+    # All 6 AND conditions must be present (reasoner vía ParserManager facade)
     assert "finish_reason_ == \"stop\"" in M.ANCHOR_NEW
     assert "and request.tools" in M.ANCHOR_NEW
     assert "and not tools_streamed[i]" in M.ANCHOR_NEW
-    assert "and not auto_tools_called" in M.ANCHOR_NEW
-    assert "and reasoning_parser is not None" in M.ANCHOR_NEW
+    assert "and parser.reasoning_parser is not None" in M.ANCHOR_NEW
     assert "and not delta_message.content" in M.ANCHOR_NEW
     assert "and not delta_message.tool_calls" in M.ANCHOR_NEW
 

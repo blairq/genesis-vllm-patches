@@ -14,7 +14,9 @@ Wraps `NgramProposer.propose()`:
    - Query `AdaptiveNgramController.decide_K()` for the current optimal K
    - If K == 0: skip ngram entirely for this batch, return empty drafts
      (delivers ~no-spec baseline TPS — fastest path on low-acceptance workloads)
-   - If K > 0: temporarily override `self.k = K` for this propose() call
+   - If K > 0: clamp K to self.k (v0.27.1 asserts
+     num_speculative_tokens <= self.k) and pass it to `batch_propose`
+     for this propose() call
 
 2. After `batch_propose`:
    - Compute approx accepted_lens by diffing num_tokens_no_spec vs previous
@@ -91,10 +93,17 @@ GENESIS_P77_MARKER = "Genesis P77 adaptive ngram K controller v7.43"
 # Anchor on the FULL propose() function body. Replace with adaptive-aware
 # version that: gates on env, queries controller, optionally short-circuits,
 # and feeds back accepted_lens approximation.
+#
+# Re-anchored for v0.27.1: upstream added a leading
+# `num_speculative_tokens: int` parameter to propose() and batch_propose()
+# (k now flows through arguments instead of self.k; an assert pins
+# num_speculative_tokens <= self.k). The replacement passes the adaptive K
+# through that argument instead of mutating self.k.
 
 P77_OLD = (
     "    def propose(\n"
     "        self,\n"
+    "        num_speculative_tokens: int,\n"
     "        sampled_token_ids: list[list[int]],\n"
     "        num_tokens_no_spec: np.ndarray,\n"
     "        token_ids_cpu: np.ndarray,\n"
@@ -102,6 +111,8 @@ P77_OLD = (
     "        | list[dict[str, torch.Tensor]]\n"
     "        | None = None,  # unused\n"
     "    ) -> list[list[int]]:\n"
+    "        assert num_speculative_tokens <= self.k\n"
+    "\n"
     "        # find which requests need ngram proposals\n"
     "        valid_ngram_requests = []\n"
     "        for i, sampled_ids in enumerate(sampled_token_ids):\n"
@@ -122,6 +133,7 @@ P77_OLD = (
     "            valid_ngram_requests,\n"
     "            num_tokens_no_spec,\n"
     "            token_ids_cpu,\n"
+    "            num_speculative_tokens,\n"
     "        )\n"
     "\n"
     "        return draft_token_ids\n"
@@ -130,6 +142,7 @@ P77_OLD = (
 P77_NEW = (
     "    def propose(\n"
     "        self,\n"
+    "        num_speculative_tokens: int,\n"
     "        sampled_token_ids: list[list[int]],\n"
     "        num_tokens_no_spec: np.ndarray,\n"
     "        token_ids_cpu: np.ndarray,\n"
@@ -140,10 +153,10 @@ P77_NEW = (
     "        # ════════════════════════════════════════════════════════════\n"
     "        # [Genesis P77 v7.43] Adaptive K controller. EMA + hysteresis +\n"
     "        # auto-disable on low acceptance. Fast-path short-circuit when K=0.\n"
+    "        # v0.27.1: K flows through the num_speculative_tokens argument.\n"
     "        # ════════════════════════════════════════════════════════════\n"
     "        _genesis_p77_active = False\n"
-    "        _genesis_p77_K = self.k\n"
-    "        _genesis_p77_orig_k = self.k\n"
+    "        _genesis_p77_K = num_speculative_tokens\n"
     "        _genesis_p77_controller = None\n"
     "        try:\n"
     "            from vllm._genesis.kernels.adaptive_ngram_controller import (\n"
@@ -161,7 +174,7 @@ P77_NEW = (
     "            import logging as _genesis_p77_logmod\n"
     "            _genesis_p77_logmod.getLogger('genesis.kernels.p77').warning(\n"
     "                '[Genesis P77] init failed (%s); using upstream K=%d',\n"
-    "                _genesis_p77_init_err, self.k,\n"
+    "                _genesis_p77_init_err, num_speculative_tokens,\n"
     "            )\n"
     "\n"
     "        # K=0: short-circuit. Return empty drafts so verify pass becomes\n"
@@ -186,9 +199,11 @@ P77_NEW = (
     "                pass\n"
     "            return [[] for _ in range(len(sampled_token_ids))]\n"
     "\n"
-    "        # K > 0: temporarily override self.k for this propose call.\n"
-    "        if _genesis_p77_active and _genesis_p77_K != self.k:\n"
-    "            self.k = _genesis_p77_K\n"
+    "        # Never exceed the statically configured self.k — upstream asserts\n"
+    "        # num_speculative_tokens <= self.k as part of the propose contract.\n"
+    "        if _genesis_p77_active and _genesis_p77_K > self.k:\n"
+    "            _genesis_p77_K = self.k\n"
+    "        assert _genesis_p77_K <= self.k\n"
     "\n"
     "        # find which requests need ngram proposals\n"
     "        valid_ngram_requests = []\n"
@@ -210,11 +225,8 @@ P77_NEW = (
     "            valid_ngram_requests,\n"
     "            num_tokens_no_spec,\n"
     "            token_ids_cpu,\n"
+    "            _genesis_p77_K,\n"
     "        )\n"
-    "\n"
-    "        # Restore self.k AFTER batch_propose (so static config doesn't drift).\n"
-    "        if _genesis_p77_active and self.k != _genesis_p77_orig_k:\n"
-    "            self.k = _genesis_p77_orig_k\n"
     "\n"
     "        # Update controller with approximate acceptance signal.\n"
     "        if _genesis_p77_active and _genesis_p77_controller is not None:\n"

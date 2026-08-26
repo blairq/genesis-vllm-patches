@@ -109,11 +109,13 @@ INIT_OLD = (
     "        num_blocks: int,\n"
     "        mmap_region: SharedOffloadRegion,\n"
     '        cache_policy: str = "lru",\n'
+    "        cache_policy_module_path: str | None = None,\n"
     "        enable_events: bool = False,\n"
     "    ):\n"
     "        super().__init__(\n"
     "            num_blocks=num_blocks,\n"
-    "            cache_policy=cache_policy,  # type: ignore[arg-type]\n"
+    "            cache_policy=cache_policy,\n"
+    "            cache_policy_module_path=cache_policy_module_path,\n"
     "            enable_events=enable_events,\n"
     "        )\n"
 )
@@ -122,6 +124,7 @@ INIT_NEW = (
     "        num_blocks: int,\n"
     "        mmap_region: SharedOffloadRegion,\n"
     '        cache_policy: str = "lru",\n'
+    "        cache_policy_module_path: str | None = None,\n"
     "        enable_events: bool = False,\n"
     "        # " + GENESIS_PN96_MARKER + "\n"
     "        # Sin este parametro el filtro de admision de la clase base es\n"
@@ -130,7 +133,8 @@ INIT_NEW = (
     "    ):\n"
     "        super().__init__(\n"
     "            num_blocks=num_blocks,\n"
-    "            cache_policy=cache_policy,  # type: ignore[arg-type]\n"
+    "            cache_policy=cache_policy,\n"
+    "            cache_policy_module_path=cache_policy_module_path,\n"
     "            enable_events=enable_events,\n"
     "            store_threshold=store_threshold,\n"
     "        )\n"
@@ -141,8 +145,9 @@ INIT_NEW = (
 BUILD_OLD = (
     "            primary_tier = CPUPrimaryTierOffloadingManager(\n"
     "                num_blocks=self.num_blocks,\n"
-    "                cache_policy=self.eviction_policy,  # type: ignore[arg-type]\n"
-    "                enable_events=enable_events,\n"
+    "                cache_policy=self.eviction_policy,\n"
+    "                cache_policy_module_path=self.cache_policy_module_path,\n"
+    "                enable_events=self.kv_events_config.enable_kv_cache_events,\n"
     "                mmap_region=scheduler_mmap,\n"
     "            )\n"
 )
@@ -152,8 +157,9 @@ BUILD_NEW = (
     '            _g96_thr = int(self.extra_config.get("store_threshold", 1) or 1)\n'
     "            primary_tier = CPUPrimaryTierOffloadingManager(\n"
     "                num_blocks=self.num_blocks,\n"
-    "                cache_policy=self.eviction_policy,  # type: ignore[arg-type]\n"
-    "                enable_events=enable_events,\n"
+    "                cache_policy=self.eviction_policy,\n"
+    "                cache_policy_module_path=self.cache_policy_module_path,\n"
+    "                enable_events=self.kv_events_config.enable_kv_cache_events,\n"
     "                mmap_region=scheduler_mmap,\n"
     "                store_threshold=_g96_thr,\n"
     "            )\n"

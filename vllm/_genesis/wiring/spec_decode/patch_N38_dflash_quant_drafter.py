@@ -1,5 +1,13 @@
 """Wiring for PN38 — DFlash drafter quantization support (vllm PR #40425 backport).
 
+OBSOLETO desde el pin v0.27.1 (y ya también en v0.23.0): upstream absorbió
+el PR #40425 nativamente — qwen3_dflash.py importa `get_draft_quant_config`,
+propaga `quant_config` a DFlashQwen3DecoderLayer y usa `qkv, _ =
+self.qkv_proj(hidden_states)`; el fused-KV se refactorizó en
+`_build_context_kv_buffers`/`_project_context_kv`. Los anchors A/B/C ya no
+existen; si se fuerza GENESIS_ENABLE_PN38_DFLASH_QUANT_DRAFTER=1 el módulo
+falla cerrado (anchor ausente), sin aplicar nada.
+
 Backports vllm-project/vllm#40425 (infatoshi, OPEN 2026-04-XX) which
 enables quantized DFlash drafter checkpoints (FP8 W8A8, NVFP4, AWQ, etc.).
 

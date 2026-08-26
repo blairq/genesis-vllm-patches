@@ -40,11 +40,13 @@ def _wiring():
 def _compile_on_schedule_end():
     """Compila el `on_schedule_end` inyectado dentro de una clase de prueba.
 
-    `ANCHOR_NEW` termina re-emitiendo la cabecera de `shutdown` (es el ancla
-    que reemplaza), así que se corta ahí antes de compilar.
+    En vLLM 0.27.1 `ANCHOR_NEW` ES el metodo `on_schedule_end` completo
+    (antes re-emitia la cabecera de `shutdown` y se cortaba ahi). El metodo
+    recibe `context` (ScheduleEndContext) que este test no ejercita, asi que
+    se hace opcional para poder invocarlo sin el stack de vLLM.
     """
     src = textwrap.dedent(_wiring().ANCHOR_NEW)
-    src = src[: src.index("@override\ndef shutdown")]
+    src = src.replace("context: ScheduleEndContext", "context=None", 1)
     ns: dict = {"override": lambda f: f}
     exec("class T:\n" + textwrap.indent(src, "    "), ns)
     return ns["T"]
@@ -58,6 +60,8 @@ def tier(tmp_path, monkeypatch):
     obj.file_mapper = types.SimpleNamespace(
         base_path=str(tmp_path / "modelo_AAAA"), rank=0
     )
+    # vLLM 0.27.1: on_schedule_end() arranca con self._lookup_manager.flush().
+    obj._lookup_manager = types.SimpleNamespace(flush=lambda: None)
     monkeypatch.setenv("GENESIS_ENABLE_PN81_KV_DISK_QUOTA", "1")
     monkeypatch.setenv("GENESIS_KV_DISK_MAX_GB", "999")  # cuota fuera de juego
     monkeypatch.setenv("GENESIS_KV_DISK_CHECK_SECS", "0")

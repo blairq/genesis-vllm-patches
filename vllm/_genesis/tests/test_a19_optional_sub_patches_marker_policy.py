@@ -91,6 +91,12 @@ _KNOWN_SAFE_OPTIONAL_SHARING = frozenset({
     # P83 — empirically DISPROVEN MTP keep-last-cached-block; kept as
     # opt-in research artifact for a workload we don't trigger.
     "spec_decode/patch_83_mtp_keep_last_cached_block.py",
+    # P100 — FlashInfer FULL CG for spec-decode. Tri-variant schema
+    # (dev714/dev748/v0.27.1) where each of the 7 drifted regions has
+    # >=1 variant that applies; partial-apply is graceful degradation by
+    # design (the migration re-anchored the uniform-drop sub to
+    # required=False so a single missing variant doesn't abort the rest).
+    "perf_hotfix/patch_100_flashinfer_full_cg_specdec.py",
 })
 
 

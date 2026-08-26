@@ -73,6 +73,14 @@ Expected impact
   -0% en prefill (no aplica). Compone con PN77/PN108 (B7 no pisa su dtype).
 
 Author: Genesis CK-4.4 (B7) — Sander Barzov Aleksandr, Odessa, Ukraine.
+
+Migración pin v0.27.1 (2026-08-26): los anchors decorativos de
+vocab_parallel_embedding (tie + fused-forward) ya no matchean — upstream movió
+el cómputo de logits a `LogitsProcessor._get_logits` (Anchor C re-anclado a
+ese sitio único) y `v1/sample/logits_processor.py` desapareció como archivo
+(fallback eliminado de `_make_patcher`). Todos los subs siguen siendo
+required=False + hook runtime de respaldo, así que el contrato de apply() no
+cambia.
 """
 from __future__ import annotations
 
@@ -132,6 +140,10 @@ B7_TIE_NEW = (
 #     def forward(self, x: torch.Tensor) -> torch.Tensor:
 #         return F.linear(x, self.weight, bias=self.bias if hasattr(self, "bias") else None)
 # Si no existe, el sub-patch es soft (required=False) y cae al hook runtime.
+# Migración v0.27.1: upstream vació ParallelLMHead.forward (hoy sólo hace
+# `raise RuntimeError("LMHead's weights should be used in the sampler.")`) —
+# el matmul vive en LogitsProcessor._get_logits (ver Anchor C). El sub-patch
+# queda soft-miss por diseño y el hook runtime mantiene la vía activa.
 B7_FUSED_OLD = (
     "    def forward(self, x: torch.Tensor) -> torch.Tensor:\n"
     "        return F.linear(x, self.weight, bias=self.bias if hasattr(self, \"bias\") else None)\n"
@@ -153,27 +165,30 @@ B7_FUSED_NEW = (
     "        return F.linear(x, self.weight, bias=self.bias if hasattr(self, \"bias\") else None)\n"
 )
 
-# Anchor C: LogitsProcessor (v1/sample/logits_processor.py o
-# model_executor/layers/logits_processor.py). Patrón:
-#     logits = self.lm_head(hidden_states)
-# Lo envolvemos con try/gather.
+# Anchor C: LogitsProcessor central (model_executor/layers/logits_processor.py).
+# En 0.23.x el matmul de vocab vivía en cada modelo como
+# `logits = self.lm_head(hidden_states)`; desde 0.27.x los modelos delegan en
+# `model.compute_logits()` → `LogitsProcessor._get_logits`, cuyo sitio único es
+# la llamada a `_apply_head`. Re-anclado 2026-08-26 (pin v0.27.1). Lo envolvemos
+# con try/gather.
 B7_LOGITS_OLD = (
-    "        logits = self.lm_head(hidden_states)\n"
+    "        # Get the logits for the next tokens.\n"
+    "        logits = self._apply_head(lm_head, hidden_states, embedding_bias)\n"
 )
 
 B7_LOGITS_NEW = (
+    "        # Get the logits for the next tokens.\n"
     "        # [Genesis B7 CK-4.4] fused sampled — gathered matmul cuando sea posible\n"
     "        try:\n"
     "            _b7_meta = getattr(self, \"_genesis_b7_fused\", False)\n"
     "            _b7_ids = getattr(hidden_states, \"_genesis_b7_sampled_ids\", None)\n"
     "            if _b7_meta and _b7_ids is not None:\n"
-    "                import torch.nn.functional as _b7_F\n"
-    "                _w = self.lm_head.weight[_b7_ids]\n"
-    "                logits = _b7_F.linear(hidden_states, _w)\n"
+    "                _w = lm_head.weight[_b7_ids]\n"
+    "                logits = F.linear(hidden_states, _w)\n"
     "            else:\n"
-    "                logits = self.lm_head(hidden_states)\n"
+    "                logits = self._apply_head(lm_head, hidden_states, embedding_bias)\n"
     "        except Exception:\n"
-    "            logits = self.lm_head(hidden_states)\n"
+    "            logits = self._apply_head(lm_head, hidden_states, embedding_bias)\n"
 )
 
 # Drift markers — si upstream aterriza fusión o cuantización nativa, retire.
@@ -204,6 +219,10 @@ def _make_patcher() -> TextPatcher | None:
     Devuelve el primer patcher cuyo archivo existe. Si ninguno existe
     (entorno de test sin vllm), devuelve None y apply() cae al hook
     runtime de monkey-patch.
+
+    Nota migración v0.27.1 (2026-08-26): el fallback v1/sample/logits_processor.py
+    se eliminó — upstream unificó el cómputo en LogitsProcessor._get_logits
+    (model_executor/layers/logits_processor.py), que ya cubre la cadena.
     """
     # 1. vocab_parallel_embedding.py — fused + tie markers
     p = _make_patcher_for_file(
@@ -226,22 +245,7 @@ def _make_patcher() -> TextPatcher | None:
     if p is not None:
         return p
 
-    # 2. fallback: logits_processor (v1)
-    p = _make_patcher_for_file(
-        "v1/sample/logits_processor.py",
-        sub_patches=[
-            TextPatch(
-                name="b7_logits_fused",
-                anchor=B7_LOGITS_OLD,
-                replacement=B7_LOGITS_NEW,
-                required=False,
-            ),
-        ],
-    )
-    if p is not None:
-        return p
-
-    # 3. fallback: legacy logits_processor
+    # 2. fallback: logits_processor central (compute de logits unificado)
     p = _make_patcher_for_file(
         "model_executor/layers/logits_processor.py",
         sub_patches=[
@@ -256,7 +260,7 @@ def _make_patcher() -> TextPatcher | None:
     if p is not None:
         return p
 
-    # 4. tie en modelo qwen (si vocab_embedding no existe en este pin)
+    # 3. tie en modelo qwen (si vocab_embedding no existe en este pin)
     p = _make_patcher_for_file(
         "model_executor/models/qwen3_5.py",
         sub_patches=[

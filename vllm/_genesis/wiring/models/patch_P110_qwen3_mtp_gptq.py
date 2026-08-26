@@ -111,6 +111,16 @@ P110_PREDICTOR_ANCHOR = (
     "            prefix=f\"{prefix}.fc\",\n"
     "        )\n"
     "\n"
+    "        # GPTQ: quantized checkpoints may exclude MTP from quantization via\n"
+    "        # quantization_config.dynamic with \"-:pattern\" entries. When detected,\n"
+    "        # disable quantization for MTP layers so they use unquantized params.\n"
+    "        original_quant = vllm_config.quant_config\n"
+    "        if quant_config and quant_config.get_name() not in (\"modelopt_fp4\",):\n"
+    "            hf_qc = getattr(model_config.hf_config, \"quantization_config\", None)\n"
+    "            if isinstance(hf_qc, dict):\n"
+    "                dynamic = hf_qc.get(\"dynamic\", {})\n"
+    "                if any(k.startswith(\"-:\") and \"mtp\" in k for k in dynamic):\n"
+    "                    vllm_config.quant_config = None\n"
     "        self.layers = torch.nn.ModuleList(\n"
     "            Qwen3_5DecoderLayer(\n"
     "                vllm_config,\n"
@@ -119,6 +129,7 @@ P110_PREDICTOR_ANCHOR = (
     "            )\n"
     "            for idx in range(self.num_mtp_layers)\n"
     "        )\n"
+    "        vllm_config.quant_config = original_quant\n"
 )
 
 P110_PREDICTOR_REPLACEMENT = (
@@ -129,8 +140,14 @@ P110_PREDICTOR_REPLACEMENT = (
     "        # right below). Building `self.layers` with the real quant_config\n"
     "        # makes the MoE experts expect GPTQ-packed weights that never\n"
     "        # arrive -> silently skipped at load -> MTP head stays randomly\n"
-    "        # initialized -> 0% spec-decode acceptance. Reuse the same\n"
-    "        # bypass condition as the outer Qwen3_5MTP.quant_config patch.\n"
+    "        # initialized -> 0% spec-decode acceptance.\n"
+    "        # v0.27.1 re-anchor: upstream added a dynamic(\"-:\")-only bypass\n"
+    "        # (mutate vllm_config.quant_config=None around self.layers, then\n"
+    "        # restore). We reuse that exact mechanism but EXTEND the predicate\n"
+    "        # to the quant-name family (gptq/awq/marlin/compressed-tensors...)\n"
+    "        # for checkpoints shipping unquantized MTP WITHOUT dynamic entries,\n"
+    "        # and also reach fc_quant. Only MTP predictor layers are affected —\n"
+    "        # the main model keeps full quantization untouched.\n"
     "        _genesis_p110_bypass_mtp_quant = False\n"
     "        if quant_config and quant_config.get_name() not in (\"modelopt_fp4\",):\n"
     "            _genesis_p110_hf_qc = getattr(\n"
@@ -171,27 +188,21 @@ P110_PREDICTOR_REPLACEMENT = (
     "            prefix=f\"{prefix}.fc\",\n"
     "        )\n"
     "\n"
-    "        # [Genesis P110 extended] Same bypass for the decoder block: build\n"
-    "        # it from a shallow-copied VllmConfig with quant_config cleared, so\n"
-    "        # Qwen3_5DecoderLayer's attention + MoE submodules match the\n"
-    "        # checkpoint's actual (unquantized) MTP weights. Only this local\n"
-    "        # copy is affected — the main model's real layers keep their own\n"
-    "        # untouched vllm_config/quant_config.\n"
-    "        _genesis_p110_mtp_vllm_config = vllm_config\n"
+    "        # GPTQ: quantized checkpoints may exclude MTP from quantization via\n"
+    "        # quantization_config.dynamic with \"-:pattern\" entries. When detected,\n"
+    "        # disable quantization for MTP layers so they use unquantized params.\n"
+    "        original_quant = vllm_config.quant_config\n"
     "        if _genesis_p110_bypass_mtp_quant:\n"
-    "            import copy as _genesis_p110_copy\n"
-    "\n"
-    "            _genesis_p110_mtp_vllm_config = _genesis_p110_copy.copy(vllm_config)\n"
-    "            _genesis_p110_mtp_vllm_config.quant_config = None\n"
-    "\n"
+    "            vllm_config.quant_config = None\n"
     "        self.layers = torch.nn.ModuleList(\n"
     "            Qwen3_5DecoderLayer(\n"
-    "                _genesis_p110_mtp_vllm_config,\n"
+    "                vllm_config,\n"
     "                layer_type=\"full_attention\",\n"
     "                prefix=f\"{prefix}.layers.{idx}\",\n"
     "            )\n"
     "            for idx in range(self.num_mtp_layers)\n"
     "        )\n"
+    "        vllm_config.quant_config = original_quant\n"
 )
 
 
@@ -214,7 +225,12 @@ def _make_patcher() -> TextPatcher | None:
                 name="p110_mtp_gptq_guard",
                 anchor=P110_GUARD_ANCHOR,
                 replacement=P110_GUARD_REPLACEMENT,
-                required=True,
+                # v0.27.1 drift: Qwen3_5MultiTokenPredictor.load_weights now
+                # delegates to AutoWeightsLoader (the manual is_fused_expert/
+                # name_mapped loop was removed upstream), so this KeyError-
+                # guard site no longer exists. Soft-skip when absent — must
+                # NOT abort the two still-alive bypass sub-patches.
+                required=False,
             ),
             TextPatch(
                 name="p110_mtp_gptq_predictor_bypass",

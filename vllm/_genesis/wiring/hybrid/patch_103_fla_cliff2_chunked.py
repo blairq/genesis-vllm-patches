@@ -46,7 +46,8 @@ Why this survives:
 PROBLEM
 ================================================================
 
-`vllm/model_executor/layers/fla/ops/chunk_delta_h.py:301` defines
+`vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py:352`
+defines
 `chunk_gated_delta_rule_fwd_h` which allocates a recurrent hidden-state
 tensor:
 
@@ -68,9 +69,9 @@ SOLUTION (Option C+ — chained fwd_h + fwd_o per sub-prompt)
 ================================================================
 
 Wrap the high-level orchestrator
-`vllm.model_executor.layers.fla.ops.chunk.chunk_gated_delta_rule_fwd`
+`vllm.third_party.flash_linear_attention.ops.chunk.chunk_gated_delta_rule_fwd`
 which is the function that calls BOTH `fwd_h` and `fwd_o` adjacent
-(chunk.py:60 + chunk.py:64). For prompts with T > MAX_T, split along the
+(chunk.py:61 + chunk.py:72). For prompts with T > MAX_T, split along the
 T dim, call fwd_h on each sub-T slice (small `h_sub`), feed straight into
 fwd_o to produce `o_sub`, drop `h_sub` (no need to retain), chain
 `final_state` between sub-calls. Concat all `o_sub` along T → final `o`.
@@ -102,8 +103,8 @@ SAFETY MODEL
   - T <= MAX_T (no benefit from splitting)
   - SUPPRESS_LEVEL >= 3 (caller wants raw h tensor — incompatible with chunking)
 - Module-level monkey-patch on `chunk.py::chunk_gated_delta_rule_fwd`
-  + rebind on caller in same module (chunk.py:110)
-- KDA path (kda.py:1205 calls fwd_h directly) NOT covered — KDA is a
+  + rebind on caller in same module (chunk.py:113)
+- KDA path (kda.py:1377 calls fwd_h directly) NOT covered — KDA is a
   separate model class, Qwen3.6 GDN uses the chunk.py orchestrator path
 - Numerical correctness: chained final_state propagation preserves the
   recurrent state. Tested via tiny-tensor unit test (synthetic dims).
@@ -123,7 +124,7 @@ log = logging.getLogger("genesis.wiring.p103_fla_cliff2_chunked")
 
 _GENESIS_P103_MARKER_ATTR = "_genesis_p103_chunked_wrap"
 
-_TARGET_MODULE = "vllm.model_executor.layers.fla.ops.chunk"
+_TARGET_MODULE = "vllm.third_party.flash_linear_attention.ops.chunk"
 _FN_NAME = "chunk_gated_delta_rule_fwd"
 
 
@@ -373,7 +374,8 @@ def _genesis_p103_install_at_import(module_globals: Any) -> bool:
 
 # ─── v7.69 text-patch: append self-install hook to chunk.py ──────────
 #
-# Inserted at end of `vllm/model_executor/layers/fla/ops/chunk.py`.
+# Inserted at end of
+# `vllm/third_party/flash_linear_attention/ops/chunk.py`.
 # Anchor is the last line of the file's last function definition; we
 # append after it. The hook runs every time chunk.py is imported (in
 # main process, in spawn workers, in any child interpreter) — so the
@@ -423,12 +425,13 @@ _P103_SELF_INSTALL_ANCHOR = (
     "        scale,\n"
     "        initial_state,\n"
     "        output_final_state,\n"
-    "        cu_seqlens,\n"
-    "        chunk_indices,\n"
-    "        chunk_offsets,\n"
-    "        use_qk_l2norm_in_kernel,\n"
-    "    )\n"
-    "    return o, final_state\n"
+        "        cu_seqlens,\n"
+        "        chunk_indices,\n"
+        "        chunk_offsets,\n"
+        "        use_qk_l2norm_in_kernel,\n"
+        "        core_attn_out,\n"
+        "    )\n"
+        "    return o, final_state\n"
 )
 
 _P103_SELF_INSTALL_REPLACEMENT = (
@@ -447,13 +450,14 @@ def _make_self_install_text_patcher():
     from vllm._genesis.wiring.text_patch import TextPatch, TextPatcher
 
     target = resolve_vllm_file(
-        "model_executor/layers/fla/ops/chunk.py"
+        "third_party/flash_linear_attention/ops/chunk.py"
     )
     if target is None:
         return None
     return TextPatcher(
         patch_name=(
-            "P103 model_executor/layers/fla/ops/chunk.py — self-install "
+            "P103 third_party/flash_linear_attention/ops/chunk.py — "
+            "self-install "
             "hook (v7.69, club-3090#19 finding 2)"
         ),
         target_file=str(target),

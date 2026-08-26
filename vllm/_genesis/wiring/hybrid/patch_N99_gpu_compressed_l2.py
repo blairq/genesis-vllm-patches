@@ -61,7 +61,7 @@ QUE TOCA
 LIMITES Y SEGURIDAD
 ================================================================
 
-- Solo se activa con `block_size_factor == 1` (mapeo 1:1 de bloques). Con
+- Solo se activa con `blocks_per_chunk == 1` (mapeo 1:1 de bloques). Con
   sub-bloques la aritmetica de punteros es otra y no vale la pena el riesgo.
 - Solo si el tamano comprimido queda alineado a pagina.
 - **OFF por defecto**: `GENESIS_ENABLE_PN99_GPU_COMPRESSED_L2=1` para
@@ -87,8 +87,8 @@ GENESIS_PN99_MARKER = "_GENESIS_PN99_GPU_COMPRESSED_L2"
 # ─────────── 1. el bloque offloadeado mide el tamano comprimido ───────────
 
 SPEC_OLD = (
-    "            aligned_kv_bytes_per_offloaded_block = round_up(\n"
-    "                kv_bytes_per_offloaded_block, self.BLOCK_SIZE_ALIGNMENT\n"
+    "            aligned_kv_bytes_per_chunk = round_up(\n"
+    "                kv_bytes_per_chunk, self.BLOCK_SIZE_ALIGNMENT\n"
     "            )\n"
 )
 
@@ -102,11 +102,11 @@ SPEC_NEW = (
     "                from vllm._genesis import kv_gpu_codec as _g99\n"
     "                from vllm._genesis import pn99_gate as _g99g\n"
     "\n"
-    "                if _g99g.habilitado() and self.block_size_factor == 1:\n"
-    "                    _g99_w = kv_bytes_per_offloaded_block // world_size\n"
+    "                if _g99g.habilitado() and self.blocks_per_chunk == 1:\n"
+    "                    _g99_w = kv_bytes_per_chunk // num_copies\n"
     "                    _g99_c = _g99.tamano_comprimido(_g99_w)\n"
     "                    if _g99_c % 4096 == 0:\n"
-    "                        kv_bytes_per_offloaded_block = _g99_c * world_size\n"
+    "                        kv_bytes_per_chunk = _g99_c * num_copies\n"
     "                        self.cpu_page_size_per_worker = _g99_c\n"
     "                        _g99g.activar(_g99_w, _g99_c)\n"
     "                    else:\n"
@@ -114,19 +114,19 @@ SPEC_NEW = (
     "                            'el tamano comprimido %d no cae en pagina' % _g99_c\n"
     "                        )\n"
     "                elif _g99g.habilitado():\n"
-    "                    _g99g.desactivar('block_size_factor != 1')\n"
+    "                    _g99g.desactivar('blocks_per_chunk != 1')\n"
     "            except Exception as _g99_exc:\n"
     "                from vllm._genesis import pn99_gate as _g99g\n"
     "\n"
     "                _g99g.desactivar('error al dimensionar: %s' % _g99_exc)\n"
-    "            aligned_kv_bytes_per_offloaded_block = round_up(\n"
-    "                kv_bytes_per_offloaded_block, self.BLOCK_SIZE_ALIGNMENT\n"
+    "            aligned_kv_bytes_per_chunk = round_up(\n"
+    "                kv_bytes_per_chunk, self.BLOCK_SIZE_ALIGNMENT\n"
     "            )\n"
 )
 
 # ─────────── 2. el assert de tamanos deja de valer ───────────
 
-ASSERT_OLD = "            assert cpu_page_size == gpu_page_size * block_size_factor\n"
+ASSERT_OLD = "            assert cpu_page_size == gpu_page_size * blocks_per_chunk\n"
 
 ASSERT_NEW = (
     "            # " + GENESIS_PN99_MARKER + "\n"
@@ -138,14 +138,14 @@ ASSERT_NEW = (
     "                from vllm._genesis import kv_gpu_codec as _g99\n"
     "\n"
     "                _g99_esp = _g99.tamano_comprimido(\n"
-    "                    gpu_page_size * block_size_factor\n"
+    "                    gpu_page_size * blocks_per_chunk\n"
     "                )\n"
     "                assert cpu_page_size == _g99_esp, (\n"
     "                    'PN99: la pagina CPU tiene que medir el comprimido '\n"
     "                    '(%d), mide %d' % (_g99_esp, cpu_page_size)\n"
     "                )\n"
     "            else:\n"
-    "                assert cpu_page_size == gpu_page_size * block_size_factor\n"
+    "                assert cpu_page_size == gpu_page_size * blocks_per_chunk\n"
 )
 
 # ─────────── 2b. las vistas del mmap se crean con el tamano comprimido ───────────
@@ -158,11 +158,11 @@ ASSERT_NEW = (
 # suma de las paginas comprimidas es el area comprimida.
 
 VIEW_OLD = (
-    "            cpu_page_size_bytes = gpu_page_size_bytes * block_size_factor\n"
+    "            cpu_page_size_bytes = gpu_page_size_bytes * blocks_per_chunk\n"
 )
 
 VIEW_NEW = (
-    "            cpu_page_size_bytes = gpu_page_size_bytes * block_size_factor\n"
+    "            cpu_page_size_bytes = gpu_page_size_bytes * blocks_per_chunk\n"
     "            # " + GENESIS_PN99_MARKER + "\n"
     "            from vllm._genesis import pn99_gate as _g99g\n"
     "\n"

@@ -130,10 +130,11 @@ def apply() -> tuple[str, str]:
 
 def is_applied() -> bool:
     target = resolve_vllm_file("v1/attention/backends/turboquant_attn.py")
-    if target is None or not target.exists():
+    if target is None:
         return False
     try:
-        return GENESIS_P44_MARKER in target.read_text()
+        with open(target, encoding="utf-8") as fh:
+            return GENESIS_P44_MARKER in fh.read()
     except Exception:
         return False
 

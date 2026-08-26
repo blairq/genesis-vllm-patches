@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """Wiring for Patch N13 — CUDAGraphWrapper gc.collect/empty_cache lambda arity fix.
 
+OBSOLETO en v0.27.1: upstream absorbió el fix de vllm#41235 — vanilla ya
+usa `lambda *args, **kwargs: None` para `gc.collect` y `empty_cache`
+(compilation/cuda_graph.py:294-301). El anchor (version 0-arg) ya no
+calza y apply() termina en no-op limpio; el modulo queda como registro
+historico.
+
 ================================================================
 Source PR
 ================================================================

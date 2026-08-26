@@ -65,6 +65,15 @@ def test_p103_apply_fails_soft_when_module_missing(monkeypatch):
     monkeypatch.setenv("GENESIS_ENABLE_P103", "1")
     with mock.patch.object(p103, "is_nvidia_cuda", return_value=True), \
          mock.patch.object(p103, "is_sm_at_least", return_value=True):
+        # Sandbox the vllm tree: with a REAL vllm installed, the v7.69
+        # text-patch step would land on the live chunk.py before reaching
+        # the setattr step (and correctly report "applied"). Force no
+        # install root so the text-patch step is skipped and this test
+        # exercises exactly the FLA-module-missing soft-fail path — same
+        # sandbox pattern as
+        # test_p103_self_install_text_patcher_builds_with_specific_drift_marker.
+        import vllm._genesis.guards as guards
+        monkeypatch.setattr(guards, "vllm_install_root", lambda: None)
         # Simulate FLA missing
         import importlib
         original_import = importlib.import_module
@@ -256,7 +265,7 @@ def test_p103_self_install_text_patcher_builds_with_specific_drift_marker():
 
     with tempfile.TemporaryDirectory() as td:
         ops_dir = os.path.join(
-            td, "model_executor", "layers", "fla", "ops"
+            td, "third_party", "flash_linear_attention", "ops"
         )
         os.makedirs(ops_dir)
         with open(os.path.join(ops_dir, "chunk.py"), "w") as f:

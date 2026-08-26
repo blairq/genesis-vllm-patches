@@ -4,10 +4,11 @@
 Contrato
 --------
 - Ubicación de referencia: assets/vllm/vllm/v1/worker/gpu_model_runner.py
-  línea ~6546 (custom all-reduce dispatch). En el pin actual v0.23.0 ese
+  línea ~6546 (custom all-reduce dispatch). En v0.27.1 ese
   despacho vive en ``vllm.distributed.device_communicators.cuda_communicator``
-  (``CudaCommunicator.all_reduce``) que delega a
-  ``CustomAllreduce.should_custom_ar / custom_all_reduce``. El runner lo
+  (``CudaCommunicator.all_reduce``, cuda_communicator.py:275) que delega a
+  ``CustomAllreduce.should_custom_ar / custom_all_reduce``
+  (custom_all_reduce.py:348/:382). El runner lo
   invoca indirectamente vía ``get_tp_group().all_reduce`` / capas TP.
   Este wiring lo envuelve de forma robusta.
 

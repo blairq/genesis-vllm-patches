@@ -130,8 +130,10 @@ _NEW = (
 
 
 def _make_patcher() -> TextPatcher | None:
+    # [v0.27.1] fused_marlin_moe.py → fused_moe/experts/marlin_moe.py
+    # (anchor text unchanged — verified count==1 in the new file).
     target = resolve_vllm_file(
-        "model_executor/layers/fused_moe/fused_marlin_moe.py"
+        "model_executor/layers/fused_moe/experts/marlin_moe.py"
     )
     if target is None:
         return None

@@ -1,0 +1,12 @@
+# requirements-dev.txt — entorno de pruebas LOCAL de Genesis (worktree update/v0.27.1)
+#
+# El pin principal es vLLM 0.27.1: su wheel ya trae el torch/CUDA pinneados
+# (torch 2.13.0+cu130), NO instalar torch aparte.
+# Las demás dependencias son implícitas del wheel y no se listan aquí.
+# Solo se añade pytest para correr vllm/_genesis/tests/.
+#
+# Uso:
+#   python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+#   PYTHONPATH=. .venv/bin/python -m pytest vllm/_genesis/tests/ -q
+vllm==0.27.1
+pytest

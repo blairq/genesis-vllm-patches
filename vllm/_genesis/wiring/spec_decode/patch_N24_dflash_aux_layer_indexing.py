@@ -7,6 +7,10 @@ Backport of [vllm#40727](https://github.com/vllm-project/vllm/pull/40727)
 DFlash's `target_layer_ids` to convert the DFlash aux-layer-id semantics
 to the 1-indexed semantics expected downstream.
 
+OBSOLETO desde el pin v0.27.1 (y ya también en v0.23.0): upstream absorbió
+el fix; `_get_eagle3_aux_layers_from_config` contiene el shift `+1`
+nativamente, por lo que el módulo se auto-desactiva vía drift marker.
+
 ================================================================
 WHY THIS IS NEEDED
 ================================================================
@@ -106,7 +110,8 @@ def apply() -> tuple[str, str]:
         ],
         upstream_drift_markers=[
             "[Genesis PN24]",
-            "i + 1 for i in dflash_config.get",
+            # Upstream merge de vllm#40727 (ya presente desde <= v0.23.0):
+            "i + 1 for i in (dflash_config.get",
         ],
     )
     result, failure = patcher.apply()

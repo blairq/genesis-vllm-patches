@@ -37,7 +37,11 @@ log = logging.getLogger("genesis.wiring.p39a_fla_kkt")
 _GENESIS_P39A_MARKER_ATTR = "_genesis_p39a_wrapped"
 
 # Module paths we target. Primary + candidates for future renames.
+# [v0.27.1] FLA ops moved out of the model-executor tree into
+# `vllm.third_party.flash_linear_attention.ops`; the old path is kept as a
+# fallback so the wiring still resolves on ≤0.23.x pins.
 _CANDIDATE_MODULE_PATHS = (
+    "vllm.third_party.flash_linear_attention.ops.chunk_scaled_dot_kkt",
     "vllm.model_executor.layers.fla.ops.chunk_scaled_dot_kkt",
 )
 _FN_NAME = "chunk_scaled_dot_kkt_fwd"
@@ -290,11 +294,15 @@ def apply() -> tuple[str, str]:
     # and siblings if they imported it.
     import sys as _sys
     rebound_callers = []
-    fla_ops_prefix = "vllm.model_executor.layers.fla.ops"
+    # [v0.27.1] derive the sibling-walk prefix from the resolved candidate
+    # paths (FLA ops moved to vllm.third_party.flash_linear_attention.ops).
+    fla_ops_prefixes = tuple(
+        p.rsplit(".", 1)[0] for p in _CANDIDATE_MODULE_PATHS
+    )
     for mod_name, caller_mod in list(_sys.modules.items()):
         if caller_mod is None:
             continue
-        if not mod_name.startswith(fla_ops_prefix):
+        if not mod_name.startswith(fla_ops_prefixes):
             continue
         if mod_name == _CANDIDATE_MODULE_PATHS[0]:
             continue

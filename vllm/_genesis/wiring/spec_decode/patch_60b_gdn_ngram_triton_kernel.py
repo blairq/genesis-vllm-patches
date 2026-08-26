@@ -27,9 +27,11 @@ and applies it to:
 Also modifies `causal_conv1d_fn` Python wrapper to accept and pass through
 `num_accepted_tokens` parameter.
 
-And modifies `gdn_linear_attn.py` call sites to actually pass the parameter
-(currently they don't even though the kernel parameter is there from P60
-Phase 1).
+And modifies the GDN linear-attention call sites to actually pass the
+parameter (currently they don't even though the kernel parameter is there
+from P60 Phase 1). On v0.27.1 those call sites live in
+`gdn/qwen_gdn_linear_attn.py` (the former monolithic gdn_linear_attn.py
+was split per-model upstream).
 
 Risk acknowledged
 -----------------
@@ -250,7 +252,9 @@ def _make_kernel_patcher() -> TextPatcher | None:
     )
 
 
-# ─── File 2: gdn_linear_attn.py — pass num_accepted_tokens to call sites ──
+# ─── File 2: gdn/qwen_gdn_linear_attn.py — pass num_accepted_tokens ────────
+# (v0.27.1: the former gdn_linear_attn.py was split per-model upstream;
+# the Qwen GDN hybrid layers — Genesis prod target — live in gdn/.)
 
 # Sub-patch 2a: causal_conv1d_fn call (prefill path)
 GDN_CONV_FN_OLD = (
@@ -291,13 +295,13 @@ GDN_CONV_FN_NEW = (
 
 
 def _make_gdn_caller_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/mamba/gdn_linear_attn.py")
+    target = resolve_vllm_file("model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py")
     if target is None:
         return None
     return TextPatcher(
-        patch_name="P60b gdn_linear_attn.py — pass num_accepted to conv_fn",
+        patch_name="P60b qwen_gdn_linear_attn.py — pass num_accepted to conv_fn",
         target_file=str(target),
-        marker=GENESIS_P60B_MARKER + " :: gdn_linear_attn.py",
+        marker=GENESIS_P60B_MARKER + " :: qwen_gdn_linear_attn.py",
         sub_patches=[
             TextPatch(name="p60b_gdn_conv_fn", anchor=GDN_CONV_FN_OLD,
                       replacement=GDN_CONV_FN_NEW, required=True),

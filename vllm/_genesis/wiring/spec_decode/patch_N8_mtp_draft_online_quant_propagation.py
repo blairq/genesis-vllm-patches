@@ -87,17 +87,16 @@ GENESIS_PN8_MARKER = (
 
 
 # ─── Sub-patch 1: imports — add OnlineQuantizationConfig ─────────────────
-
+# v0.27.1: el import runtime de QuantizationConfig se movió dentro del
+# bloque `if TYPE_CHECKING:`; el ancla pasa a ser `logger = init_logger`
+# (primer punto a nivel de módulo tras los imports).
 PN8_IMPORTS_OLD = (
-    "from vllm.model_executor.layers.quantization.base_config import (\n"
-    "    QuantizationConfig,\n"
-    ")\n"
+    "logger = init_logger(__name__)\n"
 )
 
 PN8_IMPORTS_NEW = (
-    "from vllm.model_executor.layers.quantization.base_config import (\n"
-    "    QuantizationConfig,\n"
-    ")\n"
+    "logger = init_logger(__name__)\n"
+    "\n"
     "# [Genesis PN8 vllm#40849 backport] OnlineQuantizationConfig import\n"
     "# Wrapped in try/except — older vllm builds without the online subpkg\n"
     "# silently fall back to vanilla behavior (no inheritance).\n"

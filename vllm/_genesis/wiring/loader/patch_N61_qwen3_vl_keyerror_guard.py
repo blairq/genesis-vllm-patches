@@ -170,10 +170,12 @@ def apply() -> tuple[str, str]:
         )
 
     # Find the for-causal-lm class — name varies across vllm pins.
+    # v0.27.1 renamed to Qwen3VLForConditionalGeneration (no CausalLM alias).
     candidate_class_names = (
         "Qwen3VLForCausalLM",
         "Qwen3_VLForCausalLM",
         "Qwen3VLConditionalGeneration",
+        "Qwen3VLForConditionalGeneration",
     )
     target_cls = None
     for name in candidate_class_names:

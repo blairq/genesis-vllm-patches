@@ -59,10 +59,12 @@ Ocho sub-parches sobre cuatro archivos:
                         D3 observe    /
 
 EL CANAL. El tier de disco corre en el proceso **scheduler** y /metrics lo
-sirve el proceso de la API. Lo único que los une es `KVConnectorStats`. Por
-eso C abre la rama que hoy dice literalmente *"We only emit stats from the
-worker-side"*, y D1/D2/D3 enseñan a los tres puntos que asumen
-`isinstance(ops, list)` a reconocer el bucket Genesis.
+sirve el proceso de la API. Lo único que los une es `KVConnectorStats`. Hasta
+0.26 el conector devolvía None en el scheduler (*"We only emit stats from
+the worker-side"*); desde 0.27 `get_kv_connector_stats()` delega en
+`connector_scheduler.get_stats()`, así que C drena el sink ahí y lo agrega
+al payload, y D1/D2/D3 enseñan a los tres puntos que asumen claves tipadas
+a reconocer el bucket Genesis.
 
 ⚠️ `v1/core/sched/scheduler.py:1363` solo llama a
 `self.connector.get_kv_connector_stats()` **si el worker ya produjo stats
@@ -124,8 +126,7 @@ _IMPORT = "from vllm._genesis import kv_tier_metrics as _g88"
 # ─────────────────────────── fs/manager.py ───────────────────────────
 
 A1_OLD = (
-    "        self._pool.enqueue_store(job_metadata.job_id, "
-    "len(job_metadata.keys), tasks)\n"
+    "        self._pool.enqueue_store(job_metadata.job_id, 1, [task])\n"
 )
 A1_NEW = (
     "        # " + GENESIS_PN88_MARKER + "\n"
@@ -135,8 +136,7 @@ A1_NEW = (
 )
 
 A2_OLD = (
-    "        self._pool.enqueue_load(job_metadata.job_id, "
-    "len(job_metadata.keys), tasks)\n"
+    "        self._pool.enqueue_load(job_metadata.job_id, 1, [task])\n"
 )
 A2_NEW = (
     "        " + _IMPORT + "\n"
@@ -145,49 +145,56 @@ A2_NEW = (
 )
 
 A3_OLD = (
-    "        return (\n"
-    "            JobResult(job_id=job_id, success=success)\n"
-    "            for job_id, success in self._pool.get_finished()\n"
-    "        )\n"
+    "            results.append(JobResult(job_id=job_id, success=success))\n"
 )
 A3_NEW = (
-    "        " + _IMPORT + "\n"
-    "        return (\n"
-    "            _g88.finish_job(self, JobResult(job_id=job_id, success=success))\n"
-    "            for job_id, success in self._pool.get_finished()\n"
-    "        )\n"
+    "            # " + GENESIS_PN88_MARKER + "\n"
+    "            " + _IMPORT + "\n"
+    "            results.append(\n"
+    "                _g88.finish_job(self, JobResult(job_id=job_id, success=success))\n"
+    "            )\n"
 )
 
 
 # ───────────────────────── tiering/manager.py ─────────────────────────
 
+# lookup() devuelve LookupResult desde 0.27; note_lookup clasifica
+# True/None/False, asi que el codigo inyectado traduce el enum.
+_G88_LOOKUP = (
+    "True if {r} is LookupResult.HIT"
+    " else (None if {r} is LookupResult.HIT_PENDING else False)"
+)
+
 B1_OLD = (
     "        primary_hit = self.primary_tier.lookup(key, req_context)\n"
-    "        if primary_hit is True:\n"
+    "        if primary_hit is LookupResult.HIT:\n"
 )
 B1_NEW = (
     "        # " + GENESIS_PN88_MARKER + "\n"
     "        " + _IMPORT + "\n"
     "        primary_hit = self.primary_tier.lookup(key, req_context)\n"
-    "        _g88.note_lookup('ram', primary_hit, key)\n"
-    "        if primary_hit is True:\n"
+    "        _g88.note_lookup('ram', " + _G88_LOOKUP.format(r="primary_hit") +
+    ", key)\n"
+    "        if primary_hit is LookupResult.HIT:\n"
 )
 
 B2_OLD = (
     "            result = tier.lookup(key, req_context)\n"
-    "            if result is True:\n"
-    "                if not self._initiate_promotion(tier, key, req_context):\n"
-    "                    return False  # primary full, block unavailable\n"
+    "            if result is LookupResult.HIT:\n"
+    "                promoted = self._initiate_promotion(tier, key, req_context)\n"
 )
 B2_NEW = (
     "            result = tier.lookup(key, req_context)\n"
     "            _g88.note_lookup(\n"
-    "                getattr(tier, 'tier_type', 'secondary'), result, key)\n"
-    "            if result is True:\n"
-    "                if not self._initiate_promotion(tier, key, req_context):\n"
+    "                getattr(tier, 'tier_type', 'secondary'),\n"
+    "                " + _G88_LOOKUP.format(r="result") + ",\n"
+    "                key,\n"
+    "            )\n"
+    "            if result is LookupResult.HIT:\n"
+    "                promoted = self._initiate_promotion(tier, key, req_context)\n"
+    "                if not promoted:\n"
     "                    _g88.note_promotion_refused(\n"
     "                        getattr(tier, 'tier_type', 'secondary'))\n"
-    "                    return False  # primary full, block unavailable\n"
 )
 
 
@@ -195,87 +202,113 @@ B2_NEW = (
 
 C_OLD = (
     "    def get_kv_connector_stats(self) -> KVConnectorStats | None:\n"
-    "        if self.connector_worker is None:\n"
-    "            return None  # We only emit stats from the worker-side\n"
-    "        return self.connector_worker.get_kv_connector_stats()\n"
+    "        if self.connector_scheduler is not None:\n"
+    "            return self.connector_scheduler.get_stats()\n"
+    "        return None\n"
 )
 C_NEW = (
     "    # " + GENESIS_PN88_MARKER + "\n"
-    "    # El tier de disco vive en el proceso scheduler, donde connector_worker\n"
-    "    # es None y upstream devolvia None sin mas. Se drena el sink de PN88 y\n"
-    "    # se manda por el mismo canal de stats que ya viaja a /metrics.\n"
+    "    # El tier de disco vive en el proceso scheduler. Se drena el sink de\n"
+    "    # PN88 y se manda por el mismo canal de stats que ya viaja a /metrics,\n"
+    "    # dentro del formato tipado que 0.27 espera (TYPES/DATA).\n"
     "    def get_kv_connector_stats(self) -> KVConnectorStats | None:\n"
-    "        if self.connector_worker is None:\n"
-    "            " + _IMPORT + "\n"
-    "            if not _g88.enabled():\n"
-    "                return None\n"
+    "        " + _IMPORT + "\n"
+    "        _g88_stats = (\n"
+    "            self.connector_scheduler.get_stats()\n"
+    "            if self.connector_scheduler is not None\n"
+    "            else None\n"
+    "        )\n"
+    "        if _g88.enabled():\n"
     "            _payload = _g88.sink().drain()\n"
-    "            if _payload is None:\n"
-    "                return None\n"
-    "            return OffloadingConnectorStats(\n"
-    "                data={_g88.GENESIS_BUCKET: _payload})\n"
-    "        return self.connector_worker.get_kv_connector_stats()\n"
+    "            if _payload is not None:\n"
+    "                _bucket = OffloadingConnectorStats(data={\n"
+    "                    'types': {_g88.GENESIS_BUCKET: 'genesis'},\n"
+    "                    'data': {_g88.GENESIS_BUCKET: {'': _payload}},\n"
+    "                })\n"
+    "                if _g88_stats is None:\n"
+    "                    _g88_stats = _bucket\n"
+    "                else:\n"
+    "                    _g88_stats.aggregate(_bucket)\n"
+    "        return _g88_stats\n"
 )
 
 
 # ────────────────────── offloading/metrics.py ──────────────────────
 
 D1_OLD = (
-    "                if k not in self.data:\n"
-    "                    self.data[k] = v\n"
-    "                else:\n"
-    "                    accumulator = self.data[k]\n"
-    "                    assert isinstance(accumulator, list)\n"
-    "                    accumulator.extend(v)\n"
+    "        for key, other_label_values in other_values.items():\n"
+    "            type_str = other_types.get(key)\n"
+    "            if type_str is None:\n"
+    "                raise AssertionError(f\"Unknown offloading stats key: {key}\")\n"
 )
 D1_NEW = (
-    "                # " + GENESIS_PN88_MARKER + "\n"
-    "                if k not in self.data:\n"
-    "                    self.data[k] = v\n"
-    "                elif k == _G88_BUCKET:\n"
-    "                    from vllm._genesis import kv_tier_metrics as _g88m\n"
-    "                    _g88m.merge(self.data[k], v)\n"
-    "                else:\n"
-    "                    accumulator = self.data[k]\n"
-    "                    assert isinstance(accumulator, list)\n"
-    "                    accumulator.extend(v)\n"
+    "        if _G88_BUCKET in other_values:\n"
+    "            # " + GENESIS_PN88_MARKER + "\n"
+    "            # El payload Genesis no es {labelvalues: valor} tipado: es el\n"
+    "            # dict crudo de drain() ({counters,hist,gauges}). Se fusiona con\n"
+    "            # merge() y se registra su tipo para que reduce()/observe()\n"
+    "            # lo ruteen sin chocar con los asserts.\n"
+    "            from vllm._genesis import kv_tier_metrics as _g88m\n"
+    "\n"
+    "            self._types.setdefault(_G88_BUCKET, 'genesis')\n"
+    "            _g88_dst = self._values.setdefault(_G88_BUCKET, {})\n"
+    "            for _lv, _payload in other_values[_G88_BUCKET].items():\n"
+    "                _g88_dst[_lv] = _g88m.merge(_g88_dst.get(_lv) or {}, _payload)\n"
+    "        for key, other_label_values in other_values.items():\n"
+    "            if key == _G88_BUCKET:\n"
+    "                continue\n"
+    "            type_str = other_types.get(key)\n"
+    "            if type_str is None:\n"
+    "                raise AssertionError(f\"Unknown offloading stats key: {key}\")\n"
 )
 
 D2_OLD = (
-    "        for transfer_type, ops_list in self.data.items():\n"
-    "            assert isinstance(ops_list, list)\n"
+    "        for key, label_value_map in self._values.items():\n"
+    "            type_str = self._types.get(key)\n"
+    "            if type_str is None:\n"
+    "                raise AssertionError(f\"Unknown offloading stats key: {key}\")\n"
 )
 D2_NEW = (
-    "        for transfer_type, ops_list in self.data.items():\n"
-    "            if transfer_type == _G88_BUCKET:\n"
+    "        for key, label_value_map in self._values.items():\n"
+    "            if key == _G88_BUCKET:\n"
+    "                # " + GENESIS_PN88_MARKER + "\n"
     "                from vllm._genesis import kv_tier_metrics as _g88m\n"
-    "                return_dict.update(_g88m.reduce_for_log(ops_list))\n"
+    "\n"
+    "                for _payload in label_value_map.values():\n"
+    "                    return_dict.update(_g88m.reduce_for_log(_payload))\n"
     "                continue\n"
-    "            assert isinstance(ops_list, list)\n"
+    "            type_str = self._types.get(key)\n"
+    "            if type_str is None:\n"
+    "                raise AssertionError(f\"Unknown offloading stats key: {key}\")\n"
 )
 
 D3_OLD = (
-    "        for transfer_type, ops in transfer_stats_data.items():\n"
-    "            # Cache:\n"
+    "        for key, label_value_map in metric_data.items():\n"
+    "            type_str = metric_types.get(key)\n"
 )
 D3_NEW = (
-    "        for transfer_type, ops in transfer_stats_data.items():\n"
-    "            if transfer_type == _G88_BUCKET:\n"
+    "        for key, label_value_map in metric_data.items():\n"
+    "            if key == _G88_BUCKET:\n"
+    "                # " + GENESIS_PN88_MARKER + "\n"
     "                from vllm._genesis import kv_tier_metrics as _g88m\n"
-    "                _g88m.observe_bucket(self, ops, engine_idx)\n"
+    "\n"
+    "                for _payload in label_value_map.values():\n"
+    "                    _g88m.observe_bucket(self, _payload, engine_idx)\n"
     "                continue\n"
-    "            # Cache:\n"
+    "            type_str = metric_types.get(key)\n"
 )
 
 # La constante del bucket se define una vez a nivel de modulo para que las
 # tres ramas de arriba no dependan de importar Genesis solo para comparar.
-D0_OLD = "logger = init_logger(__name__)\n"
+D0_OLD = (
+    "from vllm.v1.kv_offload.factory import OffloadingSpecFactory\n"
+)
 D0_NEW = (
-    "logger = init_logger(__name__)\n"
+    "from vllm.v1.kv_offload.factory import OffloadingSpecFactory\n"
     "\n"
     "# " + GENESIS_PN88_MARKER + "\n"
-    "# Clave del bucket de telemetria de tiers. Empieza con guion bajo para no\n"
-    "# chocar con un transfer_type real, que siempre es '<SRC>_to_<DST>'.\n"
+    "# Clave del bucket de telemetria de tiers dentro de OffloadingConnectorStats.\n"
+    "# Empieza con guion bajo para no chocar con una metrica real.\n"
     "_G88_BUCKET = \"_genesis_tiers\"\n"
 )
 

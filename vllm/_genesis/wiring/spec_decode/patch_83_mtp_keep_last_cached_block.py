@@ -97,36 +97,40 @@ GENESIS_P83_MARKER = "Genesis P83 MTP keep-last-cached-block (vllm#38182 mitigat
 
 
 # ─── Site 1: FullAttentionManager.find_longest_cache_hit ───────────────────
+#
+# Re-anchored for v0.27.1: FullAttentionManager no longer pops the last
+# matched block; the eagle drop is now expressed as a `hit_length`
+# reduction gated on `drop_eagle_block` (the old `use_eagle` flag was
+# renamed/replaced upstream). Intent preserved: skip the drop for MTP
+# when GENESIS_ENABLE_P83=1.
 
 P83_SITE1_OLD = (
-    "        if use_eagle and computed_blocks[0]:\n"
-    "            # Need to drop the last matched block if eagle is enabled.\n"
-    "            for computed in computed_blocks:\n"
-    "                computed.pop()\n"
+    "        if drop_eagle_block and hit_length > 0:\n"
+    "            hit_length -= min(alignment_tokens, block_size)"
 )
 
 P83_SITE1_NEW = (
-    "        if use_eagle and computed_blocks[0]:\n"
-    "            # Need to drop the last matched block if eagle is enabled.\n"
-    "            # ════════════════════════════════════════════════════════════════\n"
-    "            # [Genesis P83 vllm#38182 mitigation] Skip pop() when GENESIS_ENABLE_P83=1\n"
-    "            # MTP drafter reads KV directly (not pre-materialised hidden states),\n"
-    "            # so pop() is overly conservative for method='mtp'. Do NOT enable\n"
-    "            # for true Eagle/Eagle3 — those drafters genuinely need the drop.\n"
-    "            # ════════════════════════════════════════════════════════════════\n"
-    "            import os as _genesis_p83_os\n"
-    "            _genesis_p83_skip = _genesis_p83_os.environ.get(\n"
-    "                'GENESIS_ENABLE_P83', '').strip().lower() in ('1', 'true', 'yes', 'on')\n"
-    "            if not _genesis_p83_skip:\n"
-    "                for computed in computed_blocks:\n"
-    "                    computed.pop()\n"
+    "        # ════════════════════════════════════════════════════════════════\n"
+    "        # [Genesis P83 vllm#38182 mitigation] Skip eagle-drop when GENESIS_ENABLE_P83=1\n"
+    "        # MTP drafter reads KV directly (not pre-materialised hidden states),\n"
+    "        # so dropping the last matched block is overly conservative for\n"
+    "        # method='mtp'. Do NOT enable for true Eagle/Eagle3 — those drafters\n"
+    "        # genuinely need the drop.\n"
+    "        # ════════════════════════════════════════════════════════════════\n"
+    "        import os as _genesis_p83_os\n"
+    "        _genesis_p83_skip = _genesis_p83_os.environ.get(\n"
+    "            'GENESIS_ENABLE_P83', '').strip().lower() in ('1', 'true', 'yes', 'on')\n"
+    "        if drop_eagle_block and hit_length > 0 and not _genesis_p83_skip:\n"
+    "            hit_length -= min(alignment_tokens, block_size)"
 )
 
 
 # ─── Site 2: SlidingWindowManager.find_longest_cache_hit ───────────────────
+#
+# Re-anchored for v0.27.1: gate flag renamed `use_eagle` → `drop_eagle_block`.
 
 P83_SITE2_OLD = (
-    "        if use_eagle and computed_blocks[0]:\n"
+    "        if drop_eagle_block and computed_blocks[0]:\n"
     "            for computed in computed_blocks:\n"
     "                computed.pop()\n"
     "            # Re-align after eagle pop: the pop may break the alignment\n"
@@ -137,30 +141,29 @@ P83_SITE2_OLD = (
     "                and len(computed_blocks[0]) * block_size % alignment_tokens != 0\n"
     "            ):\n"
     "                for computed in computed_blocks:\n"
-    "                    computed.pop()\n"
+    "                    computed.pop()"
 )
 
 P83_SITE2_NEW = (
-    "        if use_eagle and computed_blocks[0]:\n"
-    "            # ════════════════════════════════════════════════════════════════\n"
-    "            # [Genesis P83 vllm#38182 mitigation] Skip pop() when GENESIS_ENABLE_P83=1\n"
-    "            # See P83 wiring docstring. MTP-only safe.\n"
-    "            # ════════════════════════════════════════════════════════════════\n"
-    "            import os as _genesis_p83_os\n"
-    "            _genesis_p83_skip = _genesis_p83_os.environ.get(\n"
-    "                'GENESIS_ENABLE_P83', '').strip().lower() in ('1', 'true', 'yes', 'on')\n"
-    "            if not _genesis_p83_skip:\n"
+    "        # ════════════════════════════════════════════════════════════════\n"
+    "        # [Genesis P83 vllm#38182 mitigation] Skip pop() when GENESIS_ENABLE_P83=1\n"
+    "        # See P83 wiring docstring. MTP-only safe.\n"
+    "        # ════════════════════════════════════════════════════════════════\n"
+    "        import os as _genesis_p83_os\n"
+    "        _genesis_p83_skip = _genesis_p83_os.environ.get(\n"
+    "            'GENESIS_ENABLE_P83', '').strip().lower() in ('1', 'true', 'yes', 'on')\n"
+    "        if drop_eagle_block and computed_blocks[0] and not _genesis_p83_skip:\n"
+    "            for computed in computed_blocks:\n"
+    "                computed.pop()\n"
+    "            # Re-align after eagle pop: the pop may break the alignment\n"
+    "            # when block_size != alignment_tokens (hybrid models with\n"
+    "            # different page sizes, e.g. Gemma4).\n"
+    "            while (\n"
+    "                block_size != alignment_tokens\n"
+    "                and len(computed_blocks[0]) * block_size % alignment_tokens != 0\n"
+    "            ):\n"
     "                for computed in computed_blocks:\n"
-    "                    computed.pop()\n"
-    "                # Re-align after eagle pop: the pop may break the alignment\n"
-    "                # when block_size != alignment_tokens (hybrid models with\n"
-    "                # different page sizes, e.g. Gemma4).\n"
-    "                while (\n"
-    "                    block_size != alignment_tokens\n"
-    "                    and len(computed_blocks[0]) * block_size % alignment_tokens != 0\n"
-    "                ):\n"
-    "                    for computed in computed_blocks:\n"
-    "                        computed.pop()\n"
+    "                    computed.pop()"
 )
 
 
@@ -190,16 +193,18 @@ def _make_patcher_kv_cache_manager() -> TextPatcher | None:
         "        # We skip finding the prefix cache hit when prefix caching is\n"
     )
 
-    # Also instrument the AFTER-call to log how many tokens hit
+    # Also instrument the AFTER-call to log how many tokens hit.
+    # Re-anchored for v0.27.1: find_longest_cache_hit now returns a third
+    # element (`num_uncached`).
     after_anchor = (
-        "        computed_blocks, num_new_computed_tokens = (\n"
+        "        computed_blocks, num_new_computed_tokens, num_uncached = (\n"
         "            self.coordinator.find_longest_cache_hit(\n"
         "                request.block_hashes, max_cache_hit_length\n"
         "            )\n"
         "        )\n"
     )
     after_replacement = (
-        "        computed_blocks, num_new_computed_tokens = (\n"
+        "        computed_blocks, num_new_computed_tokens, num_uncached = (\n"
         "            self.coordinator.find_longest_cache_hit(\n"
         "                request.block_hashes, max_cache_hit_length\n"
         "            )\n"

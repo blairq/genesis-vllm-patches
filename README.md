@@ -7,7 +7,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/Sandermage/genesis-vllm-patches?style=social)](https://github.com/Sandermage/genesis-vllm-patches/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/Sandermage/genesis-vllm-patches?style=social)](https://github.com/Sandermage/genesis-vllm-patches/network/members)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![vLLM pin](https://img.shields.io/badge/vllm-0.20.2rc1.dev9-orange.svg)](https://github.com/vllm-project/vllm)
+[![vLLM pin](https://img.shields.io/badge/vllm-0.27.1-orange.svg)](https://github.com/vllm-project/vllm)
 [![Patches](https://img.shields.io/badge/patches-123-green.svg)](docs/PATCHES.md)
 [![Tests](https://img.shields.io/badge/tests-1958%20pass-brightgreen.svg)](vllm/_genesis/tests/)
 [![GPU](https://img.shields.io/badge/GPU-RTX%203090%20%7C%204090%20%7C%205090%20%7C%20A5000%20%7C%20H20%20%7C%20R6000%20Blackwell-purple.svg)](docs/HARDWARE.md)
@@ -52,7 +52,7 @@ underlying fix (10+ Genesis patches have already retired this way).
 
 ## ⚡ Live PROD benchmarks (2026-05-05)
 
-_2× RTX A5000 24 GB · vLLM `0.20.2rc1.dev9+g01d4d1ad3` · Genesis v7.72 · 45 of 78 unique patches APPLY (per structured boot summary) · MTP K=3 spec-decode · TurboQuant k8v4 KV · TP=2_
+_2× RTX A5000 24 GB · vLLM `0.20.2rc1.dev9+g01d4d1ad3` (pin histórico; actual: v0.27.1) · Genesis v7.72 · 45 of 78 unique patches APPLY (per structured boot summary) · MTP K=3 spec-decode · TurboQuant k8v4 KV · TP=2_
 
 | Model | Sustained TPS | CV% | TPS range | Latency | Tool-call | Multi-turn 10/10 | VRAM steady |
 |:------|--------------:|----:|----------:|--------:|:---------:|:----------------:|------------:|
@@ -624,7 +624,7 @@ GENESIS_MODEL=qwen3.6-27b python3 tests/bench/comprehensive_bench.py
 ### Path C — bare metal (no Docker)
 
 ```bash
-# Prereqs: vLLM 0.20.2rc1.dev9+g01d4d1ad3 installed, Genesis cloned
+# Prereqs: vLLM 0.27.1 installed, Genesis cloned
 cd genesis-vllm-patches
 pip install --no-deps -e tools/genesis_vllm_plugin
 python3 -m vllm._genesis.patches.apply_all   # apply all text-patches in-place

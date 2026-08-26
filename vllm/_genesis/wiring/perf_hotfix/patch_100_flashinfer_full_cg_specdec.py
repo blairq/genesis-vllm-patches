@@ -72,8 +72,9 @@ SAFETY MODEL
 
 - Default OFF; opt-in via `GENESIS_ENABLE_P100=1`
 - Idempotent via marker
-- 11 sub-patches; the 6 refactor-drifted ones are dual-variant (dev714 +
-  dev748), apply() enforces at-least-one per pair — drift detection on each
+- 17 sub-patches; drifted regions carry multi-pin anchor variants (dev714 /
+  dev748 / v0271), apply() enforces at-least-one variant per region — drift
+  detection on each
 - DCP guard preserved (BatchDCPPrefillWrapper not wired for CG spec-decode)
 
 ================================================================
@@ -98,10 +99,34 @@ API may differ. P100 is opt-in and NOT on PROD (TQ backend), so a wrong guess
 cannot regress PROD, but a 27B-FlashInfer + spec-decode boot-smoke is a HARD gate
 before enabling P100 on dev748.
 
+2026-08-26 — pin bump to v0.27.1: flashinfer.py drifted past BOTH legacy
+variants. Re-audit against the v0.27.1 tree: 6 regions still match the dev748
+shape verbatim (FISpecDecode insertion point between FIDecode and
+FlashInferDecodeKernel, metadata decode union, __init__ wrapper fields,
+qo_indptr buffer anchor, _get_spec_decode_prefill_wrapper method slot, build()
+decode block). 4 regions drifted further and gained dedicated v0271 variants:
+(1) imports block gained `KVCacheSpec`; (2) get_cudagraph_support gained an
+upstream non-causal gate — PRESERVED in the replacement because the FISpecDecode
+path plans causal=True; (3) _init_reorder_batch_threshold gained
+supports_dcp_with_varlen=False + a DCP-correctness comment (kept untouched — we
+only OR-in the native non-DCP flag at the assignment); (4) forward() renamed
+kv_cache_permute → kv_cache_for_fi (+ kv_cache_tuple fallback for non-NVFP4)
+and threads q_scale/kv_cache_sf through decode run(). vllm#41127 is still NOT
+merged natively on 0.27.1 (no FISpecDecode upstream). The same runtime-
+unvalidated caveat applies to the FISpecDecode run() signature mirror here.
+
 Author backport: Sandermage (Sander) Barzov Aleksandr, Ukraine, Odessa.
 Original PR: vllm#41127. Cross-reference: SGLang flashinfer_backend.py.
 """
+
 from __future__ import annotations
+
+# A-19 audit exemption: P100 uses a tri-variant schema (dev714/dev748/v0.27.1)
+# where each of the 7 drifted regions has >=1 variant that applies; partial
+# application is graceful degradation by design (the migration re-anchored the
+# uniform-drop sub to required=False so a single missing variant doesn't abort
+# the rest). Both-apply-or-both-stay-unmarked is acceptable here.
+_AUDIT_A19_EXEMPT = True
 
 import logging
 import os
@@ -941,9 +966,202 @@ P100_FORWARD_DEV748_NEW = (
     "                elif use_dcp:\n"
 )
 
-# Logical drifted sub-patches that carry a (dev714, dev748) anchor pair. apply()
-# asserts at least one variant of each fired — a total miss means the pin moved
-# to a NEW flashinfer.py shape neither anchor covers (re-derive before promoting).
+# ═════════════════════════════════════════════════════════════════════════
+# v0.27.1 (target-pin) anchor variants — re-anchored 2026-08-26. Same scheme
+# as the dev748 set: exactly one variant of each drifted region matches on a
+# given pin; the others soft-skip (required=False) and apply() enforces
+# at-least-one per region (see _P100_DUAL_VARIANT_BASES).
+# ═════════════════════════════════════════════════════════════════════════
+
+# Sub-1 (imports): 0.27.1 added KVCacheSpec to the kv_cache_interface import
+# block. UniformTypeKVCacheSpecs is still imported upstream — its last use
+# sits inside get_cudagraph_support, which our cgsupport_v0271 replacement
+# removes; the enforcement gate guarantees both variants fire together.
+P100_IMPORTS_V0271_OLD = (
+    "from vllm.v1.kv_cache_interface import (\n"
+    "    AttentionSpec,\n"
+    "    KVCacheSpec,\n"
+    "    KVQuantMode,\n"
+    "    UniformTypeKVCacheSpecs,\n"
+    ")\n"
+)
+P100_IMPORTS_V0271_NEW = (
+    "from vllm.v1.kv_cache_interface import (\n"
+    "    AttentionSpec,\n"
+    "    KVCacheSpec,\n"
+    "    KVQuantMode,\n"
+    ")\n"
+)
+
+# Sub-4 (get_cudagraph_support): 0.27.1 kept the SM90 early-return + trtllm
+# probe but gated UNIFORM_BATCH behind `not use_non_causal` (trtllm-gen only
+# supports causal attention). That gate is PRESERVED: the FISpecDecode path
+# plans the prefill wrapper with causal=True, so non-causal configs must
+# still downgrade to UNIFORM_SINGLE_TOKEN_DECODE.
+P100_CGSUPPORT_V0271_OLD = (
+    '        """Get the cudagraph support level for FlashInfer attention.\n'
+    "\n"
+    "        The SM90 XQA integration only enables single-token decode today. Keep\n"
+    "        specdec CUDA graphs limited to trtllm-gen until vLLM wires the XQA\n"
+    "        specdec mask.\n"
+    '        """\n'
+    "        if current_platform.is_device_capability(90):\n"
+    "            return AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE\n"
+    "\n"
+    "        # For UniformTypeKVCacheSpecs, check all contained specs\n"
+    "        kv_specs = (\n"
+    "            kv_cache_spec.kv_cache_specs.values()\n"
+    "            if isinstance(kv_cache_spec, UniformTypeKVCacheSpecs)\n"
+    "            else [kv_cache_spec]\n"
+    "        )\n"
+    "        num_qo_heads = vllm_config.model_config.get_num_attention_heads(\n"
+    "            vllm_config.parallel_config\n"
+    "        )\n"
+    "        has_trtllm_support: bool = len(kv_specs) > 0\n"
+    "        for spec in kv_specs:\n"
+    "            if not isinstance(spec, AttentionSpec):\n"
+    "                # FlashInfer only applies to attention, so we don't consider other types\n"
+    "                # of KV spec (e.g. Mamba) here. This is mostly for type checking.\n"
+    "                continue\n"
+    "            if not can_use_trtllm_attention(\n"
+    "                num_qo_heads=num_qo_heads,\n"
+    "                num_kv_heads=spec.num_kv_heads,\n"
+    "                is_prefill=False,\n"
+    "            ):\n"
+    "                has_trtllm_support = False\n"
+    "                break\n"
+    "\n"
+    "        # trtllm-gen only supports causal attention.\n"
+    "        if has_trtllm_support and not vllm_config.attention_config.use_non_causal:\n"
+    "            return AttentionCGSupport.UNIFORM_BATCH\n"
+    "        else:\n"
+    "            return AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE\n"
+)
+P100_CGSUPPORT_V0271_NEW = (
+    '        """Get the cudagraph support level for FlashInfer attention.\n'
+    "\n"
+    "        [Genesis P100 vllm#41127 backport]\n"
+    "        Native FlashInfer captures UNIFORM_BATCH full cudagraphs for\n"
+    "        spec-decode by routing uniform query_len > 1 batches through the\n"
+    "        prefill wrapper in cudagraph mode (verified zero_rows padding yields\n"
+    "        bit-identical real-row numerics). TRTLLM decode attention is not\n"
+    "        required for this path. SM90 keeps upstream's single-token\n"
+    "        restriction (XQA specdec mask not wired); DCP uses\n"
+    "        BatchDCPPrefillWrapper which is not wired for CG spec-decode; and\n"
+    "        upstream's non-causal gate is preserved because the FISpecDecode\n"
+    "        path plans the prefill wrapper with causal=True.\n"
+    '        """\n'
+    "        if current_platform.is_device_capability(90):\n"
+    "            return AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE\n"
+    "        if vllm_config.parallel_config.decode_context_parallel_size > 1:\n"
+    "            return AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE\n"
+    "        if vllm_config.attention_config.use_non_causal:\n"
+    "            return AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE\n"
+    "        return AttentionCGSupport.UNIFORM_BATCH\n"
+)
+
+# Sub for reorder threshold: 0.27.1 kept the dev748 assignment shape but the
+# _init_reorder_batch_threshold call gained a supports_dcp_with_varlen=False
+# kwarg + DCP-correctness comment. Anchor ONLY the assignment and OR-in the
+# native flag inside the parenthesized expression so the upstream call site
+# stays untouched.
+P100_INIT_REORDER_V0271_OLD = (
+    "        supports_spec_as_decode = (\n"
+    "            self.flashinfer_trtllm_api_decode_kernel\n"
+    "            == FlashInferDecodeKernel.TRTLLM_GEN\n"
+    "        )\n"
+)
+P100_INIT_REORDER_V0271_NEW = (
+    "        supports_spec_as_decode = (\n"
+    "            self.flashinfer_trtllm_api_decode_kernel\n"
+    "            == FlashInferDecodeKernel.TRTLLM_GEN\n"
+    "            # [Genesis P100 vllm#41127 backport] Non-DCP native FlashInfer\n"
+    "            # can also route spec-decode through the decode bucket via the\n"
+    "            # prefill wrapper in cudagraph mode with zero_rows padding.\n"
+    "            # Under DCP the upstream supports_dcp_with_varlen=False below\n"
+    "            # keeps threshold=1 (BatchDCPPrefillWrapper is not wired for\n"
+    "            # CG spec-decode).\n"
+    "            or self.dcp_world_size <= 1\n"
+    "        )\n"
+)
+
+# Sub-8 (forward): vs dev748, 0.27.1 renamed kv_cache_permute →
+# kv_cache_for_fi with a kv_cache_tuple fallback for non-NVFP4 KV, and the
+# decode run() now threads q_scale/k_scale/v_scale/kv_cache_sf. The
+# FISpecDecode branch mirrors that sibling signature.
+P100_FORWARD_V0271_OLD = (
+    "            if not decode_with_flashinfer_trtllm_api:\n"
+    "                assert isinstance(attn_metadata.decode, FIDecode)\n"
+    "                decode_wrapper = attn_metadata.decode.wrapper\n"
+    "                assert decode_wrapper is not None\n"
+    "                assert decode_wrapper._window_left == self.window_left\n"
+    "                assert decode_wrapper._logits_soft_cap == (self.logits_soft_cap or 0.0)\n"
+    "                assert decode_wrapper._sm_scale == self.scale\n"
+    "\n"
+    "                if self.is_kvcache_nvfp4:\n"
+    "                    kv_cache_for_fi = nvfp4_kv_data\n"
+    "                else:\n"
+    "                    kv_cache_for_fi = kv_cache_tuple\n"
+    "                kv_cache_sf = nvfp4_kv_block_scales if self.is_kvcache_nvfp4 else None\n"
+    "\n"
+    "                # NVFP4 kernel only supports FP8 output.\n"
+    "                # Use a pre-allocated FP8 buffer and dequantize afterwards.\n"
+    "                needs_fp8_out = self.is_kvcache_nvfp4 and output.dtype != FP8_DTYPE\n"
+    "                if needs_fp8_out:\n"
+    "                    out_decode = self._nvfp4_fp8_out[:num_decode_tokens]\n"
+    "                else:\n"
+    "                    out_decode = output[:num_decode_tokens]\n"
+    "\n"
+    "                if use_dcp:\n"
+)
+P100_FORWARD_V0271_NEW = (
+    "            if not decode_with_flashinfer_trtllm_api:\n"
+    "                # [Genesis P100 vllm#41127 backport] Allow FISpecDecode too\n"
+    "                assert isinstance(attn_metadata.decode, (FIDecode, FISpecDecode))\n"
+    "                decode_wrapper = attn_metadata.decode.wrapper\n"
+    "                assert decode_wrapper is not None\n"
+    "                assert decode_wrapper._window_left == self.window_left\n"
+    "                assert decode_wrapper._logits_soft_cap == (self.logits_soft_cap or 0.0)\n"
+    "                assert decode_wrapper._sm_scale == self.scale\n"
+    "\n"
+    "                if self.is_kvcache_nvfp4:\n"
+    "                    kv_cache_for_fi = nvfp4_kv_data\n"
+    "                else:\n"
+    "                    kv_cache_for_fi = kv_cache_tuple\n"
+    "                kv_cache_sf = nvfp4_kv_block_scales if self.is_kvcache_nvfp4 else None\n"
+    "\n"
+    "                # NVFP4 kernel only supports FP8 output.\n"
+    "                # Use a pre-allocated FP8 buffer and dequantize afterwards.\n"
+    "                needs_fp8_out = self.is_kvcache_nvfp4 and output.dtype != FP8_DTYPE\n"
+    "                if needs_fp8_out:\n"
+    "                    out_decode = self._nvfp4_fp8_out[:num_decode_tokens]\n"
+    "                else:\n"
+    "                    out_decode = output[:num_decode_tokens]\n"
+    "\n"
+    "                if isinstance(attn_metadata.decode, FISpecDecode):\n"
+    "                    # [Genesis P100] Spec-decode verification through the\n"
+    "                    # prefill wrapper. Non-DCP only. run() mirrors the sibling\n"
+    "                    # decode signature (q_scale + kv_cache_sf on this pin).\n"
+    "                    assert not use_dcp, (\n"
+    "                        \"FISpecDecode is not supported under DCP\"\n"
+    "                    )\n"
+    "                    assert decode_wrapper._causal\n"
+    "                    decode_wrapper.run(\n"
+    "                        decode_query,\n"
+    "                        kv_cache_for_fi,\n"
+    "                        q_scale=layer._q_scale_float,\n"
+    "                        k_scale=layer._k_scale_float,\n"
+    "                        v_scale=layer._v_scale_float,\n"
+    "                        out=out_decode,\n"
+    "                        kv_cache_sf=kv_cache_sf,\n"
+    "                    )\n"
+    "                elif use_dcp:\n"
+)
+
+# Logical drifted sub-patches that carry multi-pin anchor variants (dev714,
+# dev748, v0271). apply() asserts at least one variant of each fired — a total
+# miss means the pin moved to a NEW flashinfer.py shape no anchor covers
+# (re-derive before promoting).
 _P100_DUAL_VARIANT_BASES = (
     "p100_fispecdecode_dataclass",
     "p100_metadata_decode_union",
@@ -965,11 +1183,19 @@ def _make_patcher() -> TextPatcher | None:
         sub_patches=[
             # Intact on both dev714 + dev748 (regions untouched by the refactor)
             # — kept single-anchor required=True.
+            # Drifted sub since v0.27.1 (import block gained KVCacheSpec) —
+            # now tri-variant like the rest; at-least-one enforced in apply().
             TextPatch(
                 name="p100_imports_drop_uniform",
                 anchor=P100_IMPORTS_OLD,
                 replacement=P100_IMPORTS_NEW,
-                required=True,
+                required=False,
+            ),
+            TextPatch(
+                name="p100_imports_drop_uniform_v0271",
+                anchor=P100_IMPORTS_V0271_OLD,
+                replacement=P100_IMPORTS_V0271_NEW,
+                required=False,
             ),
             # Drifted subs — dual-variant (dev714 + dev748), required=False each;
             # exactly one matches per pin, apply() enforces at-least-one.
@@ -1010,6 +1236,12 @@ def _make_patcher() -> TextPatcher | None:
                 required=False,
             ),
             TextPatch(
+                name="p100_cgsupport_uniform_batch_v0271",
+                anchor=P100_CGSUPPORT_V0271_OLD,
+                replacement=P100_CGSUPPORT_V0271_NEW,
+                required=False,
+            ),
+            TextPatch(
                 name="p100_init_decode_wrap_field",
                 anchor=P100_INIT_DECODE_WRAP_OLD,
                 replacement=P100_INIT_DECODE_WRAP_NEW,
@@ -1031,6 +1263,12 @@ def _make_patcher() -> TextPatcher | None:
                 name="p100_init_reorder_threshold_dev748",
                 anchor=P100_INIT_REORDER_DEV748_OLD,
                 replacement=P100_INIT_REORDER_DEV748_NEW,
+                required=False,
+            ),
+            TextPatch(
+                name="p100_init_reorder_threshold_v0271",
+                anchor=P100_INIT_REORDER_V0271_OLD,
+                replacement=P100_INIT_REORDER_V0271_NEW,
                 required=False,
             ),
             TextPatch(
@@ -1067,6 +1305,12 @@ def _make_patcher() -> TextPatcher | None:
                 name="p100_forward_fispecdecode_case_dev748",
                 anchor=P100_FORWARD_DEV748_OLD,
                 replacement=P100_FORWARD_DEV748_NEW,
+                required=False,
+            ),
+            TextPatch(
+                name="p100_forward_fispecdecode_case_v0271",
+                anchor=P100_FORWARD_V0271_OLD,
+                replacement=P100_FORWARD_V0271_NEW,
                 required=False,
             ),
         ],
@@ -1136,22 +1380,27 @@ def apply() -> tuple[str, str]:
 
     result, failure = patcher.apply()
 
-    # [dev748 re-anchor 2026-07-02] At-least-one-per-pair enforcement. The 6
-    # drifted subs each carry a (dev714, dev748) anchor pair, both required=False
-    # so the non-matching variant soft-skips. If BOTH variants miss for any pair,
-    # the pin moved to a flashinfer.py shape neither anchor covers — fail loudly
-    # rather than emit an incoherent partial patch (5 required subs applied but a
-    # load-bearing dual-variant sub silently absent).
+    # [dev748 re-anchor 2026-07-02 / v0271 re-anchor 2026-08-26] At-least-one-
+    # per-region enforcement. The drifted subs each carry multi-pin anchor
+    # variants (dev714 / dev748 / v0271), all required=False so non-matching
+    # variants soft-skip. If EVERY variant misses for a region, the pin moved
+    # to a flashinfer.py shape no anchor covers — fail loudly rather than emit
+    # an incoherent partial patch (5 required subs applied but a load-bearing
+    # drifted sub silently absent).
     from vllm._genesis.wiring.text_patch import TextPatchResult
     if result == TextPatchResult.APPLIED:
         applied = set(patcher.applied_sub_patches)
         for base in _P100_DUAL_VARIANT_BASES:
-            if base not in applied and f"{base}_dev748" not in applied:
-                return "failed", (
-                    f"P100 FAILED — neither the dev714 nor the dev748 anchor of "
-                    f"{base!r} matched. flashinfer.py drifted past a NEW pin shape "
-                    f"neither variant covers — re-derive before promoting."
-                )
+            if any(
+                f"{base}{suffix}" in applied
+                for suffix in ("", "_dev748", "_v0271")
+            ):
+                continue
+            return "failed", (
+                f"P100 FAILED — none of the dev714/dev748/v0271 anchors of "
+                f"{base!r} matched. flashinfer.py drifted past a NEW pin shape "
+                f"no variant covers — re-derive before promoting."
+            )
 
     # Audit P1 fix 2026-05-05: multi-subpatch hotfix MUST surface SKIPPED honestly
     # — was the highest-blast-radius silent-mask in the original 35-file set.
@@ -1159,14 +1408,14 @@ def apply() -> tuple[str, str]:
     return result_to_wiring_status(
         result, failure,
         applied_message=(
-            "P100 v7.62.17 applied (dual-variant, spans dev714 + dev748) on "
-            "flashinfer.py for native FULL CUDA graph + spec-decode without "
+            "P100 v7.62.17 applied (multi-pin: spans dev714 + dev748 + v0.27.1) "
+            "on flashinfer.py for native FULL CUDA graph + spec-decode without "
             "TRTLLM. 27B FlashInfer variants get UNIFORM_BATCH cudagraph (was "
             "PIECEWISE) for K+1 spec-verify. Expected: +5-10% TPS on Ampere SM 8.6. "
-            "NO-OP for PROD (TQ backend). ⚠ dev748 spec-decode path is "
-            "RUNTIME-UNVALIDATED (FISpecDecode prefill-wrapper run() signature is "
+            "NO-OP for PROD (TQ backend). ⚠ FISpecDecode spec-decode path is "
+            "RUNTIME-UNVALIDATED on dev748/v0.27.1 (prefill-wrapper run() signature is "
             "a best-guess mirror of the refactored decode run) — a 27B-FlashInfer "
-            "+ spec-decode boot-smoke is a HARD gate before enabling P100 on dev748."
+            "+ spec-decode boot-smoke is a HARD gate before enabling P100."
         ),
         patch_name=patcher.patch_name,
     )

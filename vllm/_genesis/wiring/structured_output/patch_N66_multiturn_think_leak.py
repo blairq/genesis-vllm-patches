@@ -38,8 +38,9 @@ Two-step text-patch (matches upstream PR #41696 exactly):
      from `StreamState` dataclass (line ~57)
   2. Remove the 4-line short-circuit block in `parse_delta` (lines ~654-661)
 
-Both anchors are unique in the current pin (`0.20.2rc1.dev9+g01d4d1ad3`)
-and exact-match against the upstream PR diff.
+Both anchors are unique in the current pin (`0.27.1`; re-anclado
+2026-08-26, antes validado contra `0.20.2rc1.dev9+g01d4d1ad3`) and
+exact-match against the upstream PR diff.
 
 ================================================================
 RELATIONSHIP TO OTHER GENESIS PATCHES
@@ -119,6 +120,12 @@ PN66_FIELD_NEW = (
 # fundamentally unchanged — `prompt_token_ids` walk still incorrectly
 # sets `reasoning_ended` from PRIOR turn's `</think>`. Updated anchor to
 # match dev93+ wrapped form.
+# Re-anclado 2026-08-26 para pin v0.27.1: upstream añadió una rama `else`
+# que llama `adjust_initial_state_from_prompt(prompt_token_ids)` cuando el
+# razonamiento sigue abierto al final del prompt. La nueva variante conserva
+# esa rama: sólo sustituye la detección full-prompt por el scan acotado por
+# im_start_id; si el `</think>` pertenece al turno actual (prompt con bloque
+# de reasoning pre-cocinado), reasoning_ended se marca igual que antes.
 PN66_BLOCK_OLD = (
     "        state = self._stream_state\n"
     "\n"
@@ -128,8 +135,13 @@ PN66_BLOCK_OLD = (
     "                prompt_token_ids\n"
     "            ):\n"
     "                state.reasoning_ended = True\n"
-    "\n"
-    "        current_text = state.previous_text + delta_text\n"
+    "            else:\n"
+    "                # Reasoning is still open at the end of the prompt; let the\n"
+    "                # reasoning parser adjust its initial parsing state so the\n"
+    "                # first generated tokens are classified correctly.\n"
+    "                self._reasoning_parser.adjust_initial_state_from_prompt(\n"
+    "                    prompt_token_ids\n"
+    "                )\n"
 )
 PN66_BLOCK_NEW = (
     "        state = self._stream_state\n"
@@ -141,20 +153,43 @@ PN66_BLOCK_NEW = (
     "        # already ended reasoning' — wrong on multi-turn chat.\n"
     "        # [Fix] Scan reversed prompt_token_ids for end_token_id but stop\n"
     "        # if we hit im_start_id (which starts the current assistant turn).\n"
-    "        if not getattr(self, \"_prompt_reasoning_checked\", False) and prompt_token_ids is not None:\n"
+    "        if not getattr(\n"
+    "            self, \"_prompt_reasoning_checked\", False\n"
+    "        ) and prompt_token_ids is not None:\n"
     "            self._prompt_reasoning_checked = True\n"
-    "            if self._reasoning_parser is not None:\n"
-    "                end_token_id = self._reasoning_parser.end_token_id\n"
-    "                im_start_id = self._reasoning_parser.vocab.get(\"<|im_start|>\")\n"
-    "                if end_token_id is not None:\n"
+    "            if self._reasoning_parser is None:\n"
+    "                state.reasoning_ended = True\n"
+    "            else:\n"
+    "                _pn66_end_id = getattr(\n"
+    "                    self._reasoning_parser, \"end_token_id\", None\n"
+    "                )\n"
+    "                _pn66_im_start_id = self._reasoning_parser.vocab.get(\n"
+    "                    \"<|im_start|>\"\n"
+    "                )\n"
+    "                _pn66_open_in_current_turn = False\n"
+    "                if _pn66_end_id is not None:\n"
     "                    for token_id in reversed(prompt_token_ids):\n"
-    "                        if token_id == end_token_id:\n"
-    "                            state.reasoning_ended = True\n"
+    "                        if token_id == _pn66_end_id:\n"
+    "                            # </think> after the last turn boundary:\n"
+    "                            # current turn's prompt already closed its\n"
+    "                            # reasoning (pre-baked empty think block).\n"
+    "                            _pn66_open_in_current_turn = True\n"
     "                            break\n"
-    "                        if im_start_id is not None and token_id == im_start_id:\n"
+    "                        if (\n"
+    "                            _pn66_im_start_id is not None\n"
+    "                            and token_id == _pn66_im_start_id\n"
+    "                        ):\n"
     "                            break\n"
-    "\n"
-    "        current_text = state.previous_text + delta_text\n"
+    "                if _pn66_open_in_current_turn:\n"
+    "                    state.reasoning_ended = True\n"
+    "                else:\n"
+    "                    # Reasoning is still open at the end of the prompt;\n"
+    "                    # let the reasoning parser adjust its initial parsing\n"
+    "                    # state so the first generated tokens are classified\n"
+    "                    # correctly.\n"
+    "                    self._reasoning_parser.adjust_initial_state_from_prompt(\n"
+    "                        prompt_token_ids\n"
+    "                    )\n"
 )
 
 

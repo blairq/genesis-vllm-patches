@@ -2,8 +2,8 @@ version: '3.8'
 
 services:
   vllm-server:
-    # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.8
-    image: vllm/vllm-openai:v0.23.0
+    # Imagen oficial de vLLM v0.27.1 fijada para compatibilidad con parches Genesis y Qwen 3.8
+    image: vllm/vllm-openai:v0.27.1
     container_name: genesis-27b-qwen38-ektome
     # SIN restart automatico a proposito: con `restart: unless-stopped` un crash
     # por OOM se relevanta solo y el contenedor aparece "Up" a los segundos,

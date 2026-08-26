@@ -96,14 +96,22 @@ UPSTREAM_DRIFT_MARKERS = [
 # (commit a62ad78, 2026-05-01). Applied preventively to P7b.
 
 # Sub-patch 1: insert import-time registration at module top.
-# Anchor: the import of GatedDeltaNet's surrounding helpers.
+# Anchor: a stable module-top import.
+#
+# [v0.27.1 migration] gdn_linear_attn.py was split into
+# mamba/gdn/qwen_gdn_linear_attn.py, which no longer imports
+# `get_tensor_model_parallel_world_size` at top level; re-anchored to the
+# `vllm.distributed` package import (unique in the file). Intent unchanged.
 _P7B_IMPORT_ANCHOR = (
-    "from vllm.distributed import get_tensor_model_parallel_world_size\n"
-    "\n"
+    "from vllm.distributed import (\n"
+    "    divide,\n"
+    ")\n"
 )
 
 _P7B_IMPORT_REPLACEMENT = (
-    "from vllm.distributed import get_tensor_model_parallel_world_size\n"
+    "from vllm.distributed import (\n"
+    "    divide,\n"
+    ")\n"
     "\n"
     "# [Genesis P7b v7.68] Register/cache the dual-stream custom op at\n"
     "# module import time, BEFORE any cudagraph/torch.compile context.\n"
@@ -125,33 +133,44 @@ _P7B_IMPORT_REPLACEMENT = (
 # Matches the ORIGINAL upstream text (NOT the P7-patched variant —
 # if P7 is already applied, P7b will not find its anchor and will
 # skip with a clear reason).
+#
+# [v0.27.1 migration] call site now sits in forward_cuda at 8-space indent,
+# preceded by the "Part 1: Input Projection" banner (disambiguates from the
+# identical pair in forward_cpu). Re-anchored; intent unchanged.
 _OLD_INPROJ = (
+    "        # ============================================================\n"
+    "        # Part 1: Input Projection\n"
+    "        # ============================================================\n"
+    "        mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)\n"
+    "        ba, _ = self.in_proj_ba(hidden_states)"
+)
+
+_NEW_INPROJ = (
+    "        # ============================================================\n"
+    "        # Part 1: Input Projection\n"
+    "        # ============================================================\n"
+    "        # [Genesis P7b v7.68] Dual GEMM through opaque op cached at\n"
+    "        # module import time (no registration inside forward — fixes\n"
+    "        # spawn-worker dynamo trace bug class). Falls back to serial\n"
+    "        # in_proj if op cache is None (CPU build / op disabled).\n"
+    "        if _GENESIS_P7B_DUAL_LINEAR_OP is not None:\n"
+    "            mixed_qkvz, ba = _GENESIS_P7B_DUAL_LINEAR_OP(\n"
+    "                hidden_states,\n"
+    "                self.in_proj_qkvz.weight,\n"
+    "                getattr(self.in_proj_qkvz, 'bias', None),\n"
+    "                self.in_proj_ba.weight,\n"
+    "                getattr(self.in_proj_ba, 'bias', None),\n"
+    "            )\n"
+    "        else:\n"
     "            mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)\n"
     "            ba, _ = self.in_proj_ba(hidden_states)"
 )
 
-_NEW_INPROJ = (
-    "            # [Genesis P7b v7.68] Dual GEMM through opaque op cached at\n"
-    "            # module import time (no registration inside forward — fixes\n"
-    "            # spawn-worker dynamo trace bug class). Falls back to serial\n"
-    "            # in_proj if op cache is None (CPU build / op disabled).\n"
-    "            if _GENESIS_P7B_DUAL_LINEAR_OP is not None:\n"
-    "                mixed_qkvz, ba = _GENESIS_P7B_DUAL_LINEAR_OP(\n"
-    "                    hidden_states,\n"
-    "                    self.in_proj_qkvz.weight,\n"
-    "                    getattr(self.in_proj_qkvz, 'bias', None),\n"
-    "                    self.in_proj_ba.weight,\n"
-    "                    getattr(self.in_proj_ba, 'bias', None),\n"
-    "                )\n"
-    "            else:\n"
-    "                mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)\n"
-    "                ba, _ = self.in_proj_ba(hidden_states)"
-)
-
 
 def _make_patcher() -> TextPatcher | None:
+    # [v0.27.1] gdn_linear_attn.py → mamba/gdn/qwen_gdn_linear_attn.py
     target = resolve_vllm_file(
-        "model_executor/layers/mamba/gdn_linear_attn.py"
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
     )
     if target is None:
         return None
@@ -244,12 +263,13 @@ def apply() -> tuple[str, str]:
 def is_applied() -> bool:
     """True iff the target file contains the P7b marker."""
     target = resolve_vllm_file(
-        "model_executor/layers/mamba/gdn_linear_attn.py"
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
     )
-    if target is None or not target.exists():
+    if target is None:
         return False
     try:
-        return GENESIS_P7B_MARKER in target.read_text()
+        with open(target, encoding="utf-8") as fh:
+            return GENESIS_P7B_MARKER in fh.read()
     except Exception:
         return False
 

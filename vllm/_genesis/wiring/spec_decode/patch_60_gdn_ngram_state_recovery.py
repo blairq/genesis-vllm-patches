@@ -41,7 +41,8 @@ locations after a spec decode step accepted multiple tokens:
 
 This patch (P60 Phase 1) backports the PYTHON-ONLY portions:
   - File 1 gdn_attn.py: add spec_decode_src_indices field + build() logic
-  - File 2 gdn_linear_attn.py: SSM state pre-copy in _forward_core +
+  - File 2 gdn/qwen_gdn_linear_attn.py (v0.27.1 split of the former
+    monolithic gdn_linear_attn.py): SSM state pre-copy in _forward_core +
     _forward_core_decode_non_spec
   - File 3 gpu_model_runner.py: passthrough num_accepted_tokens on
     non-spec steps when speculative_config is set
@@ -217,7 +218,9 @@ def _make_gdn_attn_patcher() -> TextPatcher | None:
     )
 
 
-# ─── File 2 anchors: vllm/model_executor/layers/mamba/gdn_linear_attn.py ───
+# ─── File 2 anchors: vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py ───
+# (v0.27.1 split the former gdn_linear_attn.py into per-model files; the
+# Qwen3.5/3.6 GDN hybrid layers — Genesis prod target — now live here.)
 
 # Sub-patch 2a: SSM pre-copy in _forward_core
 GDN_LINATTN_CORE_OLD = (
@@ -296,13 +299,13 @@ GDN_LINATTN_DEC_NEW = (
 
 
 def _make_gdn_linattn_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/mamba/gdn_linear_attn.py")
+    target = resolve_vllm_file("model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py")
     if target is None:
         return None
     return TextPatcher(
-        patch_name="P60 gdn_linear_attn.py — SSM state pre-copy",
+        patch_name="P60 qwen_gdn_linear_attn.py — SSM state pre-copy",
         target_file=str(target),
-        marker=GENESIS_P60_MARKER + " :: gdn_linear_attn.py",
+        marker=GENESIS_P60_MARKER + " :: qwen_gdn_linear_attn.py",
         sub_patches=[
             TextPatch(name="p60_core", anchor=GDN_LINATTN_CORE_OLD,
                       replacement=GDN_LINATTN_CORE_NEW, required=True),
@@ -320,33 +323,67 @@ def _make_gdn_linattn_patcher() -> TextPatcher | None:
 
 
 # ─── File 3 anchors: vllm/v1/worker/gpu_model_runner.py ────────────────────
+#
+# Re-anchored for v0.27.1: the isinstance tuple gained
+# BailingLinearAttentionMetadataBuilder, the assert message changed, and a
+# Mamba-only `prev_last_scheduled_idx` block was appended inside the spec
+# branch. The anchor captures the full upstream block (verified unique) so
+# the Genesis elif stays attached to the same `if` statement.
 
 GMR_OLD = (
     "            extra_attn_metadata_args = {}\n"
     "            if use_spec_decode and isinstance(\n"
-    "                builder, (Mamba2AttentionMetadataBuilder, GDNAttentionMetadataBuilder)\n"
+    "                builder,\n"
+    "                (\n"
+    "                    Mamba2AttentionMetadataBuilder,\n"
+    "                    GDNAttentionMetadataBuilder,\n"
+    "                    BailingLinearAttentionMetadataBuilder,\n"
+    "                ),\n"
     "            ):\n"
-    "                assert ubid is None, \"UBatching not supported with GDN yet\"\n"
-    "                extra_attn_metadata_args = dict(\n"
-    "                    num_accepted_tokens=self.num_accepted_tokens.gpu[:num_reqs_padded],\n"
-    "                    num_decode_draft_tokens_cpu=self.num_decode_draft_tokens.cpu[\n"
-    "                        :num_reqs_padded\n"
-    "                    ],\n"
-    "                )"
-)
-
-GMR_NEW = (
-    "            extra_attn_metadata_args = {}\n"
-    "            if use_spec_decode and isinstance(\n"
-    "                builder, (Mamba2AttentionMetadataBuilder, GDNAttentionMetadataBuilder)\n"
-    "            ):\n"
-    "                assert ubid is None, \"UBatching not supported with GDN yet\"\n"
+    "                assert ubid is None, (\n"
+    "                    \"UBatching not supported with GDN or linear attn yet\"\n"
+    "                )\n"
     "                extra_attn_metadata_args = dict(\n"
     "                    num_accepted_tokens=self.num_accepted_tokens.gpu[:num_reqs_padded],\n"
     "                    num_decode_draft_tokens_cpu=self.num_decode_draft_tokens.cpu[\n"
     "                        :num_reqs_padded\n"
     "                    ],\n"
     "                )\n"
+    "                if (\n"
+    "                    isinstance(builder, Mamba2AttentionMetadataBuilder)\n"
+    "                    and self.mamba_prev_last_scheduled_idx is not None\n"
+    "                ):\n"
+    "                    extra_attn_metadata_args[\"prev_last_scheduled_idx\"] = (\n"
+    "                        self.mamba_prev_last_scheduled_idx.gpu[:num_reqs_padded]\n"
+    "                    )"
+)
+
+GMR_NEW = (
+    "            extra_attn_metadata_args = {}\n"
+    "            if use_spec_decode and isinstance(\n"
+    "                builder,\n"
+    "                (\n"
+    "                    Mamba2AttentionMetadataBuilder,\n"
+    "                    GDNAttentionMetadataBuilder,\n"
+    "                    BailingLinearAttentionMetadataBuilder,\n"
+    "                ),\n"
+    "            ):\n"
+    "                assert ubid is None, (\n"
+    "                    \"UBatching not supported with GDN or linear attn yet\"\n"
+    "                )\n"
+    "                extra_attn_metadata_args = dict(\n"
+    "                    num_accepted_tokens=self.num_accepted_tokens.gpu[:num_reqs_padded],\n"
+    "                    num_decode_draft_tokens_cpu=self.num_decode_draft_tokens.cpu[\n"
+    "                        :num_reqs_padded\n"
+    "                    ],\n"
+    "                )\n"
+    "                if (\n"
+    "                    isinstance(builder, Mamba2AttentionMetadataBuilder)\n"
+    "                    and self.mamba_prev_last_scheduled_idx is not None\n"
+    "                ):\n"
+    "                    extra_attn_metadata_args[\"prev_last_scheduled_idx\"] = (\n"
+    "                        self.mamba_prev_last_scheduled_idx.gpu[:num_reqs_padded]\n"
+    "                    )\n"
     "            elif (\n"
     "                # [Genesis P60 vllm#40738] non-spec steps with spec_config: pass num_accepted\n"
     "                not use_spec_decode\n"

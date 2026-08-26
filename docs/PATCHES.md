@@ -4,7 +4,7 @@ This file is the **single source of truth** for every Genesis runtime patch.
 For each patch you get: ID, title, what it does, status (ON / opt-in / deprecated),
 env flag to toggle, upstream PR (if backported), and credit.
 
-**Total PATCH_REGISTRY entries:** 152 (range P1–P107 + PN8–PN67 + PN70 + sub-patches P5b/P7b/P15B/P18b/P38B/P39a/P67b/P67c/PN26b/PN40-classifier + library/diagnostic P51/P79d/P102). The dispatcher's `PATCH_REGISTRY` is the schema-validated, lifecycle-tracked, opt-in surface — `genesis self-test` and the schema validator gate this set on every commit.
+**Total PATCH_REGISTRY entries:** 163 (range P1–P107 + PN8–PN67 + PN70 + sub-patches P5b/P7b/P15B/P18b/P38B/P39a/P67b/P67c/PN26b/PN40-classifier + library/diagnostic P51/P79d/P102 + CK-4.x B2/B3/B5/B7 + PN77–PN89 + P110/P112 + PN106/PN108/PN109/PN110/PN348). The dispatcher's `PATCH_REGISTRY` is the schema-validated, lifecycle-tracked, opt-in surface — `genesis self-test` and the schema validator gate this set on every commit.
 
 **Total apply_all `@register_patch`:** 140 entries. P68/P69 share one `apply_patch_68_long_ctx_tool_adherence` function but are registered as two `PATCH_REGISTRY` entries; that's the reason for the 1-entry delta. As of v7.65 (2026-05-02) all legacy P1–P46 patches are first-class registry entries with `lifecycle: legacy` — historical pre-dispatcher patches with minimal metadata, kept default-on for compatibility.
 
@@ -338,4 +338,38 @@ DFlash combine_hidden_states + SWA + aux-layer indexing fixes for spec-decode + 
    - Container: `docker compose down && docker compose up -d` (NOT `stop/start` — see [`CONFIGURATION.md`](../docs/CONFIGURATION.md) Container R/W layer note)
    - Empirical: blue/green sweep with `genesis_quality_harness.py` + `genesis_bench_v3.py`. SHIP gate: ≥30/31 quality + ≥+5% TPS (or whatever the patch targets).
 7. **Credit upstream** in the patch docstring + `CREDITS.md` if backporting from someone else's PR / project.
+
+---
+
+## Patches registered after the v0.27.1 pin migration (2026-08-25)
+
+The following `PATCH_REGISTRY` entries were added by the CK-4.x super-kernel
+series and the KV-offload / INT8-W8A8 work (commits leading to `update/v0.27.1`)
+and were missing from this table. Listed here in one place for traceability;
+each is wired in `vllm/_genesis/wiring/` under the category noted in
+`dispatcher.py`.
+
+| ID | Title | Status | Env Flag | Upstream | Credit |
+|:---|:------|:------:|:--------:|:-------:|:------|
+| **B2** | B2 FULL cudagraph for long prefill (force FULL CG even on long prefill) | opt-in | `GENESIS_ENABLE_B2_FULL_CG` | — | Genesis-original CK-4.1 B2 — text-patch que fuerza CUDAGraphMode.FULL incluso en prefill largo. |
+| **B3** | Custom all-reduce TP=2 fast path + robust fallback (gpu_model_runner:6546) | opt-in | `GENESIS_ENABLE_B3_CUSTOM_AR` | — | Genesis-original CK-4.2 (B3) — wraps CustomAllreduce / CudaCommunicator with TP=2 fast path and exception fallback. |
+| **B5** | Rejection sampler vectorized early-exit + cache (CK-4.3 B5) | opt-in | `GENESIS_ENABLE_B5_REJECTION_SAMPLER` | — | Genesis-original CK-4.3 B5 — optimiza rejection_sampler.py: early-exit para batch trivial. |
+| **B7** | B7 lm_head restante — fused sampled + tie_word_embeddings (CK-4.4) | opt-in | `GENESIS_ENABLE_B7_LM_HEAD` | — | Genesis CK-4.4 (B7) — cubre el lm_head que PN77/PN108 dejan sin optimizar. |
+| **P110** | Qwen3 MTP compressed-tensors unquantized bypass | default ON | `GENESIS_ENABLE_P110_MTP_GPTQ_FIX` | [#47828](https://github.com/vllm-project/vllm/pull/47828) | Allows unquantized FP16 MTP draft layers to bypass compressed-tensors marlin weight loaders when main model is W4A16/W8A16. |
+| **P112** | Qwen3 MTP Quant Disk Cache (fingerprinted INT8 atomic storage) | default ON | `GENESIS_ENABLE_MTP_QUANT_CACHE` | — | Cryptographic SHA256 disk caching for quantized MTP draft layers, enabling 0% CPU startup and instant memory mapping. |
+| **PN106** | Cache en disco del repack FP8→Marlin (saltea el repack de ~27B en cada boot) | opt-in | `GENESIS_ENABLE_PN106_MARLIN_REPACK_CACHE` | — | Genesis-original 2026-08-24. vLLM v0.23.0 repackea los pesos FP8 a Marlin en cada arranque sin caché en disco. |
+| **PN108** | FP8 lm_head del DRAFT MTP — extiende el swap de PN77 al drafter (~636 MB/rank) | opt-in | `GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD` | — | Genesis-original 2026-08-24 (CK-1.1). Rebindea SpecDecodeBaseProposer.load_model para aplicar FP8 al lm_head del drafter. |
+| **PN109** | PN109 spec-decode persistent metadata | opt-in | `GENESIS_ENABLE_PN109_SPEC_DECODE_PERSISTENT_METADATA` | — | Genesis-original 2026-08-24. Preasigna buffers persistentes pinned+GPU para los 5 tensores de spec-decode. |
+| **PN110** | PN110 INT8 phase dispatch (prefill W8A8) | opt-in | `GENESIS_ENABLE_PN110_INT8_PHASE_DISPATCH` | — | Genesis-original 2026-08-24. Requantiza Linears FP8→INT8 y despacha por fase (prefill cutlass INT8, decode Marlin). |
+| **PN348** | Qwen3 MTP backbone dedup — skip embed/lm_head duplicados (~1 GiB/rank) | default ON | `GENESIS_ENABLE_PN348_MTP_BACKBONE_DEDUP` | [#44644](https://github.com/vllm-project/vllm/pull/44644) | Ported 2026-07-04 from sndr_core_engine; skip de embed_tokens + lm_head duplicados en el MTP backbone. |
+| **PN77** | FP8 lm_head compression — BF16→E4M3 + escala por canal (~606 MiB/rank) | opt-in | `GENESIS_ENABLE_PN77_FP8_LM_HEAD` | — | Genesis Phase E.5 — comprime el lm_head BF16→FP8 e4m3 con escala per-channel (~606 MiB/rank). |
+| **PN80** | GDN h budget probe + headroom projection (observabilidad de VRAM) | opt-in | `GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE` | — | Genesis-original 2026-08-15. Emite el cálculo de h y proyecta tokens/forward con VRAM libre. |
+| **PN81** | KV disk tier quota + poda por antiguedad (el tier fs de vLLM no tiene ninguna) | opt-in | `GENESIS_ENABLE_PN81_KV_DISK_QUOTA` | — | Genesis-original 2026-08-15. Añade cuota y poda por antigüedad al FileSystemTierManager. |
+| **PN82** | Limpia el error pegajoso de CUDA que deja un cudaHostRegister fallido | default ON | `GENESIS_ENABLE_PN82_HOST_REGISTER_STICKY` | — | Genesis-original 2026-08-15. Consume el error de cudaHostRegister con cudaGetLastError para no latchiar el contexto. |
+| **PN83** | Informe de arranque en lenguaje humano (VRAM, capacidad, riesgos, flags) | default ON | `GENESIS_ENABLE_PN83_ANALISIS_ARRANQUE` | — | Genesis-original 2026-08-15. Traduce ~700 líneas de log de arranque a un informe legible. |
+| **PN84** | Hit de prefijo inconsistente entre grupos en hibrido + MTP (mata el engine) | default ON | `GENESIS_ENABLE_PN84_HYBRID_EAGLE_HIT` | — | Genesis-original 2026-08-16. Corrige find_longest_cache_hit que descarta el candidato en grupos eagle+MTP. |
+| **PN85** | Mensaje inyectado al agotarse el presupuesto de thinking | default ON | `GENESIS_ENABLE_PN85_THINKING_BUDGET_MESSAGE` | — | Genesis-original 2026-08-17. Agrega thinking_budget_message POR REQUEST al cortar el razonamiento. |
+| **PN87** | OffloadingConnector boundary fix para grupos hibridos/Mamba | default ON | `GENESIS_ENABLE_PN87_OFFLOAD_HYBRID_BOUNDARY` | — | Genesis-original 2026-08-17. Evita AssertionError en update_state_after_alloc con capas GDN/Mamba. |
+| **PN88** | KV tier metrics (el tier de disco de vLLM no publica una sola metrica) | opt-in | `GENESIS_ENABLE_PN88_KV_TIER_METRICS` | — | Genesis-original 2026-08-21. Mide bytes, latencia y errores del tier fs de KV offload. |
+| **PN89** | Endpoint nativo de actividad KV offload (/v1/kv-offload/requests) | default ON | `GENESIS_ENABLE_PN89_KV_OFFLOAD_REQUESTS_ENDPOINT` | — | Genesis-original. Registra el endpoint /v1/kv-offload/requests en api_router para inspeccionar offloading. |
 

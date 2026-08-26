@@ -21,7 +21,8 @@ Platform compatibility: graceful degradation
   - AMD ROCm            → best-effort HIP stream (may serialize)
   - Intel XPU / CPU     → sequential fallback
 
-Wiring strategy: TEXT-PATCH on gdn_linear_attn.py. Class-method rebind is
+Wiring strategy: TEXT-PATCH on mamba/gdn/qwen_gdn_linear_attn.py
+(v0.27.1 split of gdn_linear_attn.py). Class-method rebind is
 not viable because the two GEMMs are buried inside a conditional branch
 (`if hasattr(self, "in_proj_qkv"):` vs `else:`) — we only want to patch
 the `else` branch (non-LoRA Qwen3.5 / Qwen3-Next path where both GEMMs
@@ -53,26 +54,41 @@ UPSTREAM_DRIFT_MARKERS = [
 
 
 # Anchor: the back-to-back in_proj calls in the non-LoRA branch of
-# GatedDeltaNet.forward_cuda. The first line has leading 12-space indent
-# (inside `else:` of `if hasattr(self, "in_proj_qkv")`).
+# GatedDeltaNet.forward_cuda.
+#
+# [v0.27.1 migration] `gdn_linear_attn.py` was split into
+# `mamba/gdn/qwen_gdn_linear_attn.py` and the call site moved out of the
+# `if hasattr(self, "in_proj_qkv"):` conditional into `forward_cuda` at
+# 8-space indent, preceded by the "Part 1: Input Projection" banner (which
+# disambiguates from forward_cpu's identical pair). Re-anchored 2026-08-26;
+# intent (parallel dual-GEMM via DualStreamDispatcher) unchanged.
 _OLD_INPROJ = (
-    "            mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)\n"
-    "            ba, _ = self.in_proj_ba(hidden_states)"
+    "        # ============================================================\n"
+    "        # Part 1: Input Projection\n"
+    "        # ============================================================\n"
+    "        mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)\n"
+    "        ba, _ = self.in_proj_ba(hidden_states)"
 )
 
 _NEW_INPROJ = (
-    "            # [Genesis P7] Dispatch in_proj_qkvz and in_proj_ba in parallel on\n"
-    "            # an auxiliary CUDA stream (SM≥8.0); sequential fallback elsewhere.\n"
-    "            from vllm._genesis.kernels.gdn_dual_stream import DualStreamDispatcher\n"
-    "            (mixed_qkvz, _), (ba, _) = DualStreamDispatcher.maybe_parallel(\n"
-    "                lambda: self.in_proj_qkvz(hidden_states),\n"
-    "                lambda: self.in_proj_ba(hidden_states),\n"
-    "            )"
+    "        # ============================================================\n"
+    "        # Part 1: Input Projection\n"
+    "        # ============================================================\n"
+    "        # [Genesis P7] Dispatch in_proj_qkvz and in_proj_ba in parallel on\n"
+    "        # an auxiliary CUDA stream (SM≥8.0); sequential fallback elsewhere.\n"
+    "        from vllm._genesis.kernels.gdn_dual_stream import DualStreamDispatcher\n"
+    "        (mixed_qkvz, _), (ba, _) = DualStreamDispatcher.maybe_parallel(\n"
+    "            lambda: self.in_proj_qkvz(hidden_states),\n"
+    "            lambda: self.in_proj_ba(hidden_states),\n"
+    "        )"
 )
 
 
 def _make_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/mamba/gdn_linear_attn.py")
+    # [v0.27.1] gdn_linear_attn.py → mamba/gdn/qwen_gdn_linear_attn.py
+    target = resolve_vllm_file(
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+    )
     if target is None:
         return None
     return TextPatcher(

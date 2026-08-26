@@ -41,30 +41,43 @@ from vllm._genesis.wiring.text_patch import (
 
 GENESIS_PN104_MARKER = "_GENESIS_PN104_EXACT_TIER_ATTRIBUTION"
 
-PRIM_OLD = "        if primary_hit is True:\n            return True\n"
+# v0.27.1: lookup() devuelve el enum LookupResult y la rama del secundario
+# inicia la promocion inline (sin return None temprano).
+PRIM_OLD = (
+    "        if primary_hit is LookupResult.HIT:\n"
+    "            return LookupResult.HIT\n"
+)
 
 PRIM_NEW = (
-    "        if primary_hit is True:\n"
+    "        if primary_hit is LookupResult.HIT:\n"
     "            # " + GENESIS_PN104_MARKER + "\n"
     "            from vllm._genesis import kv_tier_attribution as _g104\n"
     "\n"
     "            _g104.anotar(req_context, 'ram')\n"
-    "            return True\n"
+    "            return LookupResult.HIT\n"
 )
 
-SEC_OLD = "                return None  # promotion started, retry later\n"
+SEC_OLD = (
+    "            result = tier.lookup(key, req_context)\n"
+    "            if result is LookupResult.HIT:\n"
+    "                promoted = self._initiate_promotion(tier, key, req_context)\n"
+)
 
 SEC_NEW = (
+    "            result = tier.lookup(key, req_context)\n"
+    "            if result is LookupResult.HIT:\n"
+    "                promoted = self._initiate_promotion(tier, key, req_context)\n"
     "                # " + GENESIS_PN104_MARKER + "\n"
     "                # El bloque estaba en un secundario: se le atribuye a ese\n"
     "                # tier aunque la lectura efectiva ocurra despues de la\n"
-    "                # promocion, porque es el tier que lo TENIA.\n"
+    "                # promocion, porque es el tier que lo TENIA. Solo si la\n"
+    "                # promocion llego a iniciar.\n"
     "                from vllm._genesis import kv_tier_attribution as _g104\n"
     "\n"
-    "                _g104.anotar(\n"
-    "                    req_context, getattr(tier, 'tier_type', 'secondary')\n"
-    "                )\n"
-    "                return None  # promotion started, retry later\n"
+    "                if promoted:\n"
+    "                    _g104.anotar(\n"
+    "                        req_context, getattr(tier, 'tier_type', 'secondary')\n"
+    "                    )\n"
 )
 
 SCHED_OLD = "        num_hit_tokens = self._lookup(req_status)\n"

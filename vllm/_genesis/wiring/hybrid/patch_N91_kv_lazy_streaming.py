@@ -33,56 +33,44 @@ GENESIS_PN91_MARKER = "[Genesis PN91: bounded promotion deferral]"
 # ─────────── 1. _maximal_prefix_lookup ───────────
 
 PREFIX_LOOKUP_OLD = (
-    "        for key in keys:\n"
-    "            result = self.manager.lookup(key, req_context)\n"
-    "            if result is None:\n"
-    "                defer_lookup = True\n"
-    "                # continue lookup to allow manager to kick-off async lookups\n"
-    "                # for all blocks (until a miss is detected)\n"
-    "                result = True\n"
+    "                case LookupResult.HIT_PENDING:\n"
+    "                    defer_lookup = True\n"
+    "                    hit_count += 1\n"
 )
 
 PREFIX_LOOKUP_NEW = (
-    "        for key in keys:\n"
-    "            result = self.manager.lookup(key, req_context)\n"
-    "            if result is None:\n"
-    "                # " + GENESIS_PN91_MARKER + "\n"
-    "                # En modo estricto un bloque en vuelo corta el prefijo: lo que\n"
-    "                # se devuelve contiene SOLO bloques listos, que es lo que\n"
-    "                # prepare_load exige (assert block.is_ready).\n"
-    "                from vllm._genesis import kv_lazy_streaming as _g91\n"
-    "                if _g91.is_strict(req_context.req_id):\n"
-    "                    result = False\n"
-    "                else:\n"
+    "                case LookupResult.HIT_PENDING:\n"
+    "                    # " + GENESIS_PN91_MARKER + "\n"
+    "                    # En modo estricto un bloque en vuelo corta el prefijo: lo que\n"
+    "                    # se devuelve contiene SOLO bloques listos, que es lo que\n"
+    "                    # prepare_load exige (assert block.is_ready).\n"
+    "                    from vllm._genesis import kv_lazy_streaming as _g91\n"
+    "                    if _g91.is_strict(req_context.req_id):\n"
+    "                        break\n"
     "                    defer_lookup = True\n"
-    "                    # continue lookup to allow manager to kick-off async lookups\n"
-    "                    # for all blocks (until a miss is detected)\n"
-    "                    result = True\n"
+    "                    hit_count += 1\n"
 )
 
 # ─────────── 2. _sliding_window_lookup ───────────
 
 SLIDING_LOOKUP_OLD = (
-    "            result = self.manager.lookup(keys[idx], req_context)\n"
-    "            if result is None:\n"
-    "                defer_lookup = True\n"
-    "                # continue lookup to allow manager to kick-off async lookups\n"
-    "                # for all blocks (until a hit is detected)\n"
-    "                result = False\n"
+    "                case LookupResult.HIT_PENDING:\n"
+    "                    # Block is in cache, just not readable yet — counts\n"
+    "                    # as hit for the consecutive streak. Don't break:\n"
+    "                    # keep scanning to let manager kick off async lookups.\n"
+    "                    defer_lookup = True\n"
+    "                    consecutive_hits += 1\n"
 )
 
 SLIDING_LOOKUP_NEW = (
-    "            result = self.manager.lookup(keys[idx], req_context)\n"
-    "            if result is None:\n"
-    "                # " + GENESIS_PN91_MARKER + "\n"
-    "                from vllm._genesis import kv_lazy_streaming as _g91\n"
-    "                if _g91.is_strict(req_context.req_id):\n"
-    "                    result = False\n"
-    "                else:\n"
-    "                    defer_lookup = True\n"
-    "                    # continue lookup to allow manager to kick-off async lookups\n"
-    "                    # for all blocks (until a hit is detected)\n"
-    "                    result = False\n"
+    "                case LookupResult.HIT_PENDING:\n"
+    "                    # " + GENESIS_PN91_MARKER + "\n"
+    "                    from vllm._genesis import kv_lazy_streaming as _g91\n"
+    "                    if _g91.is_strict(req_context.req_id):\n"
+    "                        consecutive_hits = 0\n"
+    "                    else:\n"
+    "                        defer_lookup = True\n"
+    "                        consecutive_hits += 1\n"
 )
 
 # ─────────── 3. contabilidad del deferral ───────────
@@ -111,20 +99,18 @@ DEFER_NEW = (
 # ─────────── 4. limpieza por request ───────────
 
 CLEANUP_OLD = (
-    "        req_context = (\n"
-    "            req_status.req_context if req_status else _create_req_context(request)\n"
-    "        )\n"
-    "        self.manager.on_request_finished(req_context)\n"
+    "        req_status = self._req_status.get(request.request_id)\n"
+    "\n"
+    "        if req_status is None:\n"
 )
 
 CLEANUP_NEW = (
-    "        req_context = (\n"
-    "            req_status.req_context if req_status else _create_req_context(request)\n"
-    "        )\n"
-    "        self.manager.on_request_finished(req_context)\n"
     "        # " + GENESIS_PN91_MARKER + "\n"
     "        from vllm._genesis import kv_lazy_streaming as _g91\n"
     "        _g91.clear_request(request.request_id)\n"
+    "        req_status = self._req_status.get(request.request_id)\n"
+    "\n"
+    "        if req_status is None:\n"
 )
 
 

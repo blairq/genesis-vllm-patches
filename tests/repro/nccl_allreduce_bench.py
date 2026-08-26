@@ -24,7 +24,7 @@ Si el P2P funciona, la primera tiene que ser sensiblemente mas rapida. Si dan
 igual, NCCL no lo esta aprovechando aunque el driver diga `topo -p2p: OK`.
 
     docker run --rm --gpus all --ipc=host --shm-size=2gb \
-      -v $PWD/tests:/tests --entrypoint python3 vllm/vllm-openai:v0.23.0 \
+      -v $PWD/tests:/tests --entrypoint python3 vllm/vllm-openai:v0.27.1 \
       /tests/repro/nccl_allreduce_bench.py
 
 busbw: ancho de banda de bus para ring all-reduce = algbw * 2*(n-1)/n.

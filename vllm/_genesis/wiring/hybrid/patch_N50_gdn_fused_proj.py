@@ -2,18 +2,20 @@
 """Wiring for PN50 — SGLang #21019 GDN projection fusion backport.
 
 Replaces the unfused split/reshape/cat/.contiguous() chain in the
-Qwen3.5/3.6 contiguous projection branch of `gdn_linear_attn.py`
+Qwen3.5/3.6 contiguous projection branch of
+`mamba/gdn/qwen_gdn_linear_attn.py`
 with the Genesis-ported Triton kernel `pn50_gdn_fused_proj`.
 
 Affects only the `gqa_interleaved_layout=False` branch (Qwen3.5/3.6
-contiguous-loaded weights). Qwen3-Next (interleaved layout) and the LoRA
-path (`hasattr(in_proj_qkv)`) are unaffected.
+contiguous-loaded weights). Qwen3-Next (interleaved layout) and the
+Marlin replicated-ba path (`disable_tp_for_ba_proj`, where v0.27.1's
+split_ba() slices per TP rank) are unaffected.
 
 Anchor stability
 ----------------
 Anchor is the entire 9-line `else:` block of the Qwen3.5 branch in
-`mamba/gdn_linear_attn.py`. Verified against pristine upstream + live
-container — both match (see test_pn50_*.py).
+`mamba/gdn/qwen_gdn_linear_attn.py` (v0.27.1). Verified against the
+v0.27.1 tree — matches exactly once (see test_pn50_*.py).
 
 Models affected (per Genesis 7-config matrix):
   * 27B Lorbus INT4 (TQ k8v4, FP8 short, FP8 long, NGRAM, DFlash) — APPLIES
@@ -49,31 +51,45 @@ def _is_enabled() -> bool:
 
 
 # Pristine upstream anchor — Qwen3.5/3.6 contiguous-projection branch
+# (v0.27.1: forward_cuda in mamba/gdn/qwen_gdn_linear_attn.py; b/a now
+# come from self.split_ba(ba), which adds TP-rank slicing for Marlin).
 ANCHOR_OLD = (
-    "            else:\n"
-    "                # Qwen3.5: weights are already in [q, k, v, z] and [b, a] order\n"
-    "                qkv_size = (self.key_dim * 2 + self.value_dim) // self.tp_size\n"
-    "                z_size = self.value_dim // self.tp_size\n"
-    "                mixed_qkv, z = mixed_qkvz.split([qkv_size, z_size], dim=-1)\n"
-    "                z = z.reshape(z.size(0), -1, self.head_v_dim)\n"
-    "                b, a = ba.chunk(2, dim=-1)\n"
-    "                b = b.contiguous()\n"
-    "                a = a.contiguous()"
+    "        else:\n"
+    "            # Qwen3.5: weights are already in [q, k, v, z] and [b, a] order\n"
+    "            qkv_size = (self.key_dim * 2 + self.value_dim) // self.tp_size\n"
+    "            z_size = self.value_dim // self.tp_size\n"
+    "            mixed_qkv, z = mixed_qkvz.split([qkv_size, z_size], dim=-1)\n"
+    "            z = z.reshape(z.size(0), -1, self.head_v_dim)\n"
+    "            b, a = self.split_ba(ba)\n"
+    "            b = b.contiguous()\n"
+    "            a = a.contiguous()"
 )
 
 ANCHOR_NEW = (
+    "        else:\n"
+    "            # Qwen3.5: weights are already in [q, k, v, z] and [b, a] order\n"
+    "            qkv_size = (self.key_dim * 2 + self.value_dim) // self.tp_size\n"
+    "            z_size = self.value_dim // self.tp_size\n"
+    "            mixed_qkv, z = mixed_qkvz.split([qkv_size, z_size], dim=-1)\n"
+    "            z = z.reshape(z.size(0), -1, self.head_v_dim)\n"
+    "            # [Genesis PN50 SGLang#21019] fused Triton kernel for\n"
+    "            # split/reshape/cat/.contiguous(); replaces 5-6 launches +\n"
+    "            # 2 explicit copies. Wrapper falls through to original\n"
+    "            # PyTorch chain on any constraint violation (non-contig,\n"
+    "            # non-pow2 head_dim, kernel failure, etc.) — strict no-regression.\n"
+    "            from vllm._genesis.kernels.pn50_gdn_fused_proj import (\n"
+    "                fused_qkvzba_split_reshape_cat_contiguous as _pn50_fused,\n"
+    "            )\n"
+    "            _pn50_num_heads_qk = (self.key_dim // self.head_k_dim) // self.tp_size\n"
+    "            _pn50_num_heads_v = (self.value_dim // self.head_v_dim) // self.tp_size\n"
+    "            if self.disable_tp_for_ba_proj and self.tp_size > 1:\n"
+    "                # v0.27.1 split_ba() slices b/a per TP rank (Marlin\n"
+    "                # replicated ba_proj); the fused kernel assumes a local\n"
+    "                # ba — keep the reference chain on that path.\n"
+    "                b, a = self.split_ba(ba)\n"
+    "                b = b.contiguous()\n"
+    "                a = a.contiguous()\n"
     "            else:\n"
-    "                # Qwen3.5: weights are already in [q, k, v, z] and [b, a] order\n"
-    "                # [Genesis PN50 SGLang#21019] fused Triton kernel for\n"
-    "                # split/reshape/cat/.contiguous(); replaces 5-6 launches +\n"
-    "                # 2 explicit copies. Wrapper falls through to original\n"
-    "                # PyTorch chain on any constraint violation (non-contig,\n"
-    "                # non-pow2 head_dim, kernel failure, etc.) — strict no-regression.\n"
-    "                from vllm._genesis.kernels.pn50_gdn_fused_proj import (\n"
-    "                    fused_qkvzba_split_reshape_cat_contiguous as _pn50_fused,\n"
-    "                )\n"
-    "                _pn50_num_heads_qk = (self.key_dim // self.head_k_dim) // self.tp_size\n"
-    "                _pn50_num_heads_v = (self.value_dim // self.head_v_dim) // self.tp_size\n"
     "                mixed_qkv, z, b, a = _pn50_fused(\n"
     "                    mixed_qkvz, ba,\n"
     "                    num_heads_qk=_pn50_num_heads_qk,\n"
@@ -85,11 +101,16 @@ ANCHOR_NEW = (
 
 
 def _make_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/mamba/gdn_linear_attn.py")
+    target = resolve_vllm_file(
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+    )
     if target is None:
         return None
     return TextPatcher(
-        patch_name="PN50 GDN fused proj (SGLang#21019)",
+        patch_name=(
+            "PN50 mamba/gdn/qwen_gdn_linear_attn.py GDN fused proj "
+            "(SGLang#21019)"
+        ),
         target_file=str(target),
         marker=GENESIS_PN50_MARKER,
         sub_patches=[
@@ -120,7 +141,7 @@ def apply() -> tuple[str, str]:
 
     patcher = _make_patcher()
     if patcher is None:
-        return "skipped", "gdn_linear_attn.py not found"
+        return "skipped", "qwen_gdn_linear_attn.py not found"
 
     result, failure = patcher.apply()
     if result == TextPatchResult.APPLIED:
@@ -136,6 +157,6 @@ def apply() -> tuple[str, str]:
         return (
             "skipped",
             f"{msg} — likely upstream merged an equivalent fusion or "
-            "anchor drifted (check gdn_linear_attn.py Qwen3.5 branch)",
+            "anchor drifted (check qwen_gdn_linear_attn.py Qwen3.5 branch)",
         )
     return "failed", failure.reason if failure else "unknown failure"

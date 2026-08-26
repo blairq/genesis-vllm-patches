@@ -1,6 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Wiring for Patch N30 — DS conv state layout + spec-decode AL>1 fix.
 
+OBSOLETO desde el pin v0.27.1: upstream absorbió el fix nativamente.
+`get_conv_copy_spec` ya no lanza NotImplementedError (hace assert
+offset==0) y el manejo DS+offset>0 vive en `postprocess_mamba_fused_kernel`
+(v1/worker/mamba_utils.py, rama CONV_STATE_DIM_FIRST que copia por fila
+de dim preservando el row stride del destino) — la misma semántica que
+implementaba PN30 part3 en Python. El módulo falla cerrado si se fuerza
+GENESIS_ENABLE_PN30_DS_LAYOUT_SPEC_DECODE=1 (anchor part1 ausente).
+
 ================================================================
 Issue
 ================================================================
@@ -524,6 +532,26 @@ def apply() -> tuple[str, str]:
 
     if vllm_install_root() is None:
         return "skipped", "vllm install root not discoverable"
+
+    # v0.27.1: PN30 quedó OBSOLETO — upstream absorbió el fix nativamente
+    # (get_conv_copy_spec ya no lanza NotImplementedError: hace assert
+    # offset==0, y DS+offset>0 lo resuelve postprocess_mamba_fused_kernel,
+    # rama CONV_STATE_DIM_FIRST). Detección de absorción → skip benigno
+    # en lugar del fail-closed heredado de cuando el parche estaba vivo.
+    _p1_path = resolve_vllm_file(
+        "model_executor/layers/mamba/mamba_utils.py"
+    )
+    if _p1_path:
+        with open(_p1_path, encoding="utf-8") as _fh:
+            _mu_src = _fh.read()
+        if (
+            "Genesis PN30" not in _mu_src
+            and PN30_PART1_ANCHOR not in _mu_src
+        ):
+            return "skipped", (
+                "upstream_merged — vLLM >=0.27 maneja el DS layout "
+                "nativamente; PN30 retirado en este pin"
+            )
 
     # All three coordinated patches must be present.
     p1 = _make_patcher_part1()

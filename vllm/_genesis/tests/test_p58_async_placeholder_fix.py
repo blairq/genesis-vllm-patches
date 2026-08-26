@@ -39,7 +39,6 @@ REQUEST_PY_OLD_NUM_TOKENS = (
 )
 
 ASYNC_SCHED_PY_OLD = (
-    "            request.num_output_placeholders += 1 + cur_num_spec_tokens\n"
     "            # Add placeholders for the new draft/spec tokens.\n"
     "            # We will update the actual spec token ids in the worker process.\n"
     "            request.spec_token_ids = self._spec_token_placeholders"
@@ -57,8 +56,8 @@ SCHED_PY_OLD_SPEC_BLOCK = (
 )
 
 SCHED_PY_OLD_PREEMPT = (
-    "        if request.spec_token_ids:\n"
-    "            request.spec_token_ids = []\n"
+    "        request.num_stale_output_tokens = request.num_in_flight_tokens\n"
+    "        request.num_output_placeholders = 0\n"
     "        request.num_preemptions += 1"
 )
 
@@ -199,7 +198,7 @@ class TestP58AsyncSchedulerPyPatch:
         )
         assert ASYNC_SCHED_OLD in content
         # Critical: confirm the buggy line is exactly what we expect.
-        assert "request.spec_token_ids = self._spec_token_placeholders" in content
+        assert "# Add placeholders for the new draft/spec tokens." in content
 
     def test_apply_replaces_list_assignment_with_counter(self, fake_async_sched_py):
         from vllm._genesis.wiring.text_patch import (
@@ -223,7 +222,7 @@ class TestP58AsyncSchedulerPyPatch:
         assert result == TextPatchResult.APPLIED, failure
         modified = Path(fake_async_sched_py).read_text()
         assert "request.spec_token_ids = self._spec_token_placeholders" not in modified
-        assert "request.num_pending_async_spec_placeholders = self.num_spec_tokens" in modified
+        assert "request.num_pending_async_spec_placeholders = (" in modified
 
 
 class TestP58SchedulerPyPatch:

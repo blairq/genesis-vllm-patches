@@ -2813,6 +2813,8 @@ def should_apply(patch_id: str) -> tuple[bool, str]:
 
     The decision rule:
 
+      0. If env flag is explicitly set to a non-truthy value ("0", "false",
+         ...) → hard skip (operator kill-switch, wins over default_on).
       1. If env flag is truthy AND patch is opt-in (default_on=False) → apply,
          operator override wins over applies_to (logged as override).
       2. If env flag is unset/falsy AND patch is `default_on=False` → skip (opt-in)
@@ -2837,6 +2839,14 @@ def should_apply(patch_id: str) -> tuple[bool, str]:
     env_flag = meta.get("env_flag")
     env_value = os.environ.get(env_flag, "") if env_flag else ""
     env_truthy = env_value.strip().lower() in ("1", "true", "yes", "on")
+
+    # Operator kill-switch: an EXPLICITLY set but non-truthy value ("0",
+    # "false", "off", "no") disables the patch regardless of default_on.
+    # Unset or empty means "auto" — fall through to the decision rule below.
+    if env_flag and env_value.strip() and not env_truthy:
+        return False, (
+            f"{env_flag}={env_value!r} explicitly set — operator disable"
+        )
 
     # Operator override: env truthy = always apply (subject to anchor presence)
     if env_truthy:

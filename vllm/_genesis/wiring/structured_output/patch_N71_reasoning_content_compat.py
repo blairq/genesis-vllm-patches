@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Wiring for PN71 — reasoning_content field compatibility for OpenWebUI.
 
-vLLM 0.23.0 internally renamed the `reasoning_content` field to `reasoning`.
-However, clients like OpenWebUI expect `reasoning_content` in the OpenAI spec.
+vLLM >= 0.23.0 (incl. pin 0.27.1) internally renamed the `reasoning_content`
+field to `reasoning`. However, clients like OpenWebUI expect
+`reasoning_content` in the OpenAI spec.
 This patch adds `reasoning_content` back to DeltaMessage and ChatMessage and
 populates it automatically via a Pydantic model validator.
 """

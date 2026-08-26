@@ -16,7 +16,7 @@ others require deeper kernel rewrites and are out of scope here.
 WHAT IT DOES
 ================================================================
 
-In `vllm/model_executor/layers/fla/ops/chunk_o.py`, the
+In `vllm/third_party/flash_linear_attention/ops/chunk_o.py`, the
 `chunk_fwd_kernel_o` Triton kernel computes the final accumulator update
 as:
 
@@ -106,12 +106,14 @@ PN29_REPLACEMENT = (
 
 
 def _make_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/fla/ops/chunk_o.py")
+    target = resolve_vllm_file(
+        "third_party/flash_linear_attention/ops/chunk_o.py"
+    )
     if target is None:
         return None
     return TextPatcher(
         patch_name=(
-            "PN29 model_executor/layers/fla/ops/chunk_o.py — "
+            "PN29 third_party/flash_linear_attention/ops/chunk_o.py — "
             "scale-fold in chunk_fwd_kernel_o (vllm#41446 pattern c)"
         ),
         target_file=str(target),

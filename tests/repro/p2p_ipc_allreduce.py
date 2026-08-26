@@ -20,7 +20,7 @@ hace el engine) y le pide un all-reduce de verdad, verificando el resultado
 numerico. No reimplementa nada: si esto anda, el camino de produccion anda.
 
     docker run --rm --gpus all --ipc=host --shm-size=2gb \\
-      -v $PWD/tests:/tests --entrypoint python3 vllm/vllm-openai:v0.23.0 \\
+      -v $PWD/tests:/tests --entrypoint python3 vllm/vllm-openai:v0.27.1 \\
       /tests/repro/p2p_ipc_allreduce.py --mib 32
 
 REQUIERE ForceP2P=529 en /etc/modprobe.d y los modulos recargados.

@@ -267,6 +267,8 @@ def _wiring_text_patch(name: str, wiring_module_name: str) -> PatchResult:
 
 @register_patch("P110 Qwen3 MTP compressed-tensors unquantized bypass (vllm#47828 backport)")
 def apply_patch_110_mtp_gptq() -> PatchResult:
+    if not _APPLY_MODE:
+        return _applied("P110", "dry-run: wiring ready (pass apply=True to execute)")
     from vllm._genesis.wiring.models import patch_P110_qwen3_mtp_gptq
     status, reason = patch_P110_qwen3_mtp_gptq.apply()
     if status == "applied":
@@ -276,6 +278,8 @@ def apply_patch_110_mtp_gptq() -> PatchResult:
 
 @register_patch("P112 Qwen3 MTP Quant Disk Cache (fingerprinted INT8 atomic storage)")
 def apply_patch_112_mtp_disk_quant_cache() -> PatchResult:
+    if not _APPLY_MODE:
+        return _applied("P112", "dry-run: wiring ready (pass apply=True to execute)")
     from vllm._genesis.wiring.models import patch_P112_mtp_disk_quant_cache
     status, reason = patch_P112_mtp_disk_quant_cache.apply()
     if status == "applied":

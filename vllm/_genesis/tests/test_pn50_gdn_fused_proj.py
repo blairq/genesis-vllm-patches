@@ -134,7 +134,9 @@ def test_anchor_contains_qwen35_branch_signature():
     assert "Qwen3.5: weights are already in [q, k, v, z]" in anchor_old
     assert "qkv_size = (self.key_dim * 2 + self.value_dim) // self.tp_size" in anchor_old
     assert "mixed_qkvz.split([qkv_size, z_size]" in anchor_old
-    assert "ba.chunk(2, dim=-1)" in anchor_old
+    # v0.27.1: b/a come from split_ba() (adds TP-rank slicing for Marlin);
+    # pre-0.27.1 trees used `ba.chunk(2, dim=-1)` here.
+    assert "b, a = self.split_ba(ba)" in anchor_old
 
 
 def test_replacement_wires_pn50_kernel():

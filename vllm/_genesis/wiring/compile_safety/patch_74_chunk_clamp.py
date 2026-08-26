@@ -78,9 +78,11 @@ log = logging.getLogger("genesis.wiring.p74_chunk_clamp")
 GENESIS_P74_MARKER = "Genesis P74 auto chunk-clamp via long_prefill_token_threshold v7.42"
 
 
-# ─── Sub-patch: inject auto-clamp BEFORE the existing partial_prefills branch ─
-# Anchor on `if self.max_num_partial_prefills > 1:` block which is unique
-# inside SchedulerConfig.__post_init__.
+# ─── Sub-patch: inject auto-clamp BEFORE verify_max_model_len ────────────────
+# v0.27.1 re-anchor: the old `if self.max_num_partial_prefills > 1:` block was
+# removed upstream from SchedulerConfig.__post_init__; the info_once chunked-
+# prefill banner followed by self.verify_max_model_len(max_model_len) is the
+# stable tail of __post_init__ (unique within the file).
 
 P74_OLD = (
     "        if self.enable_chunked_prefill:\n"
@@ -89,7 +91,7 @@ P74_OLD = (
     "                self.max_num_batched_tokens,\n"
     "            )\n"
     "\n"
-    "        if self.max_num_partial_prefills > 1:\n"
+    "        self.verify_max_model_len(max_model_len)\n"
 )
 
 P74_NEW = (
@@ -141,7 +143,7 @@ P74_NEW = (
     "                _genesis_p74_err,\n"
     "            )\n"
     "\n"
-    "        if self.max_num_partial_prefills > 1:\n"
+    "        self.verify_max_model_len(max_model_len)\n"
 )
 
 

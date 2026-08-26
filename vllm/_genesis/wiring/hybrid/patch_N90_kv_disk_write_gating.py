@@ -110,7 +110,7 @@ PRIMARY_STORE_NEW = (
     "            _g90.note_persistent_use(\n"
     "                k for k in keys if self._policy.get(k) is not None\n"
     "            )\n"
-    "        self._policy.touch(keys)\n"
+    "        self._policy.touch(keys, req_context)\n"
     "\n"
     "    # " + GENESIS_PN90_MARKER + "\n"
     "    @override\n"
@@ -219,8 +219,8 @@ TIER_PREPARE_NEW = (
 )
 
 TIER_SCHEDULE_END_OLD = (
-    "        self._maybe_process_finished_jobs()\n"
     "        self._processed_jobs_this_step = False\n"
+    "\n"
     "        self._flush_pending_promotions()\n"
 )
 
@@ -232,43 +232,32 @@ TIER_SCHEDULE_END_NEW = (
     "        # dejan snapshots que nadie drenaria.\n"
     "        from vllm._genesis import kv_disk_gate as _g90\n"
     "        _g90.submit_pending_demotions(self.secondary_tiers, None)\n"
-    "        self._maybe_process_finished_jobs()\n"
     "        self._processed_jobs_this_step = False\n"
+    "\n"
     "        self._flush_pending_promotions()\n"
 )
 
 TIER_COMPLETE_OLD = (
-    "        # Step 2: Cascade to ALL secondary tiers\n"
-    "        # For each secondary tier, call primary.prepare_read() to get the\n"
-    "        # LoadStoreSpec AND to increment ref_cnt (protecting blocks from\n"
-    "        # eviction during the async transfer). One prepare_read() call per\n"
-    "        # secondary tier.\n"
-    "        for tier in self.secondary_tiers:\n"
-    "            primary_blocks_spec = self.primary_tier.prepare_read(keys, req_context)\n"
-    "\n"
-    "            # Submit async store job: primary→secondary\n"
-    "            job_id = self._next_job_id()\n"
-    "\n"
-    "            # Track this store job\n"
-    "            assert isinstance(primary_blocks_spec, CPULoadStoreSpec)\n"
-    "            job_metadata = JobMetadata(\n"
-    "                job_id=job_id,\n"
-    "                keys=keys,\n"
-    "                block_ids=primary_blocks_spec.block_ids,\n"
-    "                is_promotion=False,\n"
-    "                req_context=req_context,\n"
-    "            )\n"
-    "            self._transfer_jobs[job_id] = job_metadata\n"
-    "\n"
-    "            tier.submit_store(job_metadata)\n"
+    "        if success:\n"
+    "            # Step 2: Cascade to ALL secondary tiers\n"
+    "            # For each secondary tier, call primary.prepare_read() to get the\n"
+    "            # LoadStoreSpec AND to increment ref_cnt (protecting blocks from\n"
+    "            # eviction during the async transfer). One prepare_read() call per\n"
+    "            # secondary tier.\n"
+    "            for tier in self.secondary_tiers:\n"
+    "                job_metadata = self.create_store_job(keys, req_context)\n"
+    "                tier.submit_store(job_metadata)\n"
 )
 
 TIER_COMPLETE_NEW = (
-    "        # " + GENESIS_PN90_MARKER + "\n"
-    "        # Democion por desalojo: NO hay cascada al guardar. El bloque baja a\n"
-    "        # L3 SSD unicamente cuando lo desalojan de L2 RAM (ver el override de\n"
-    "        # CPUPrimaryTierOffloadingManager.prepare_store).\n"
-    "        return\n"
+    "        if success:\n"
+    "            # " + GENESIS_PN90_MARKER + "\n"
+    "            # Democion por desalojo: NO hay cascada al guardar. El bloque baja\n"
+    "            # a L3 SSD unicamente cuando lo desalojan de L2 RAM (ver el override\n"
+    "            # de CPUPrimaryTierOffloadingManager.prepare_store). El cuerpo de la\n"
+    "            # cascada se elimina pero el metodo sigue: abajo queda la contabilidad\n"
+    "            # de pending_primary_stores y _maybe_finalize_request.\n"
+    "            pass\n"
 )
 
 FINISHED_JOBS_OLD = (
@@ -304,7 +293,9 @@ FINISHED_JOBS_NEW = (
 REQUEST_LEVEL_OLD = (
     "        # Filter out keys that are not ready in primary (e.g. in-flight)\n"
     "        ready_keys = tuple(\n"
-    "            k for k in keys if self.primary_tier.lookup(k, req_context) is True\n"
+    "            k\n"
+    "            for k in keys\n"
+    "            if self.primary_tier.lookup(k, req_context) is LookupResult.HIT\n"
     "        )\n"
 )
 
@@ -320,7 +311,9 @@ REQUEST_LEVEL_NEW = (
     "            return\n"
     "        # Filter out keys that are not ready in primary (e.g. in-flight)\n"
     "        ready_keys = tuple(\n"
-    "            k for k in keys if self.primary_tier.lookup(k, req_context) is True\n"
+    "            k\n"
+    "            for k in keys\n"
+    "            if self.primary_tier.lookup(k, req_context) is LookupResult.HIT\n"
     "        )\n"
 )
 

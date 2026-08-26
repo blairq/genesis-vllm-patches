@@ -16,11 +16,26 @@ loud-and-clear in the per-release notes.
 
 ## [Unreleased] — `v7.65 → v7.72` series
 
-> Pin: `0.20.2rc1.dev9+g01d4d1ad3` (validated 2026-05-04, allowlist-clean).
+> Pin: `0.27.1` (migración 2026-08-25; antes `0.20.2rc1.dev9+g01d4d1ad3`,
+> validated 2026-05-04, allowlist-clean).
 > Builds on v7.64 release with v7.65 hygiene + v7.66/v7.67/v7.68 patch
 > work + comprehensive audit pass + v7.69 cross-rig fix series + v7.72
 > sprint (PN59-PN67 + audit hardening). All on `dev` branch only (main
 > promotion deferred until cross-rig validation completes).
+
+### Migración de pin: vLLM v0.23.0 → v0.27.1 (2026-08-25)
+
+- Referencia upstream re-anclada: clon en `assets/vllm` movido al tag
+  `v0.27.1` (commit `6e448d0`); antes `v0.23.0` runtime sobre docs 0.20.x.
+- Wiring re-anclado por categorías (`vllm/_genesis/wiring/`) contra los
+  nuevos anchors de v0.27.1; los parches que no aplican quedan marcados
+  SKIP por `applies_to`, sin cambios de lógica.
+- Allowlist `KNOWN_GOOD_VLLM_PINS` (`vllm/_genesis/guards.py`) ampliada
+  con `0.27.1`; entradas históricas 0.20.x se conservan.
+- Composes (`compose/*.yml`) actualizados a la imagen
+  `vllm/vllm-openai:v0.27.1`.
+- Badge y prereqs de README + matriz de pins de
+  `docs/COMPATIBILITY.md` anclados a v0.27.1.
 
 ### v7.72.2 — PN70 tool schema subset filter + Proxmox VE installer caveat (2026-05-05 12:30 EEST)
 

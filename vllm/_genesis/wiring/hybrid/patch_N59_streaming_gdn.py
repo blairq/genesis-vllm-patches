@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Wiring for PN59 — streaming GDN orchestrator (Variant D Phase 2).
 
-Text-patches `vllm/model_executor/layers/fla/ops/chunk.py` to redirect
+Text-patches `vllm/third_party/flash_linear_attention/ops/chunk.py` to redirect
 `chunk_gated_delta_rule_fwd` through Genesis's window-iterative
 `streaming_chunk_gated_delta_rule_fwd` driver when eligible.
 
@@ -30,7 +30,7 @@ to vanilla path with WARNING log.
 Compatibility
 -------------
 - **PN50** GDN proj fusion — operates BEFORE chunk_gated_delta_rule
-  (in gdn_linear_attn.py); orthogonal, no conflict
+  (in mamba/gdn/qwen_gdn_linear_attn.py); orthogonal, no conflict
 - **PN54** GDN contiguous dedup — operates on ssm_state read; orthogonal
 - **P103** FLA Cliff2 chunked — operates AT outer-orchestrator level;
   PN59 supersedes when both ON (auto-fallthrough handles)
@@ -66,9 +66,10 @@ def _is_enabled() -> bool:
     ).strip().lower() in ("1", "true", "yes", "on")
 
 
-# Anchor on the entire `chunk_gated_delta_rule_fwd` function body.
-# Pristine upstream + post-Genesis state both have this signature
-# unchanged (Genesis P103 modifies a different orchestrator wrap).
+# Anchor on the entire `chunk_gated_delta_rule_fwd` function signature.
+# v0.27.1: file moved to third_party/flash_linear_attention/ops/chunk.py
+# and the signature gained the trailing `core_attn_out` buffer param.
+# Genesis P103 modifies a different orchestrator wrap.
 ANCHOR_OLD = (
     "def chunk_gated_delta_rule_fwd(\n"
     "    q: torch.Tensor,\n"
@@ -82,6 +83,7 @@ ANCHOR_OLD = (
     "    cu_seqlens: torch.Tensor | None = None,\n"
     "    chunk_indices: torch.Tensor | None = None,\n"
     "    chunk_offsets: torch.Tensor | None = None,\n"
+    "    core_attn_out: torch.Tensor | None = None,\n"
     "):\n"
 )
 
@@ -98,6 +100,7 @@ ANCHOR_NEW = (
     "    cu_seqlens: torch.Tensor | None = None,\n"
     "    chunk_indices: torch.Tensor | None = None,\n"
     "    chunk_offsets: torch.Tensor | None = None,\n"
+    "    core_attn_out: torch.Tensor | None = None,\n"
     "):\n"
     "    # [Genesis PN59 Variant D Phase 2] streaming-GDN dispatch.\n"
     "    # When GENESIS_ENABLE_PN59_STREAMING_GDN=1 AND eligible single-seq\n"
@@ -130,7 +133,9 @@ ANCHOR_NEW = (
 
 
 def _make_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/fla/ops/chunk.py")
+    target = resolve_vllm_file(
+        "third_party/flash_linear_attention/ops/chunk.py"
+    )
     if target is None:
         return None
     return TextPatcher(
@@ -167,7 +172,7 @@ def apply() -> tuple[str, str]:
         return "skipped", "vllm install root not discoverable"
     patcher = _make_patcher()
     if patcher is None:
-        return "skipped", "fla/ops/chunk.py not found"
+        return "skipped", "third_party/flash_linear_attention/ops/chunk.py not found"
     result, failure = patcher.apply()
     if result == TextPatchResult.APPLIED:
         return (

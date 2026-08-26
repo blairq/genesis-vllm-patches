@@ -38,19 +38,21 @@ _needs = pytest.mark.skipif(ROOT is None, reason="no hay arbol de vLLM")
 
 @_needs
 def test_el_bug_existe_upstream():
-    """La razon de ser del parche: la clase NO define reset_cache.
+    """La razon de ser del parche era que la clase NO definia reset_cache.
 
-    Si upstream lo agrega, este test falla y hay que revisar si PN105 sigue
-    haciendo falta.
+    En vLLM 0.27.1 upstream YA implementa `reset_cache()` (con drain_jobs),
+    asi que PN105 quedo OBSOLETO y debe auto-skipear. Este test verifica la
+    condicion de obsolescencia: la clase define reset_cache.
     """
     with open(os.path.join(ROOT, _REL), encoding="utf-8") as fh:
         txt = fh.read()
     P = _P()
     if P.GENESIS_PN105_MARKER in txt:
-        pytest.skip("PN105 ya aplicado")
+        pytest.skip("PN105 ya aplicado (marcador presente)")
     ini = txt.index("class TieringOffloadingManager")
-    assert "def reset_cache" not in txt[ini:], (
-        "upstream ahora implementa reset_cache: revisar si PN105 sigue siendo necesario"
+    assert "def reset_cache" in txt[ini:], (
+        "upstream debe implementar reset_cache en 0.27.1: PN105 ya no hace "
+        "falta y el wiring lo marca OBSOLETO"
     )
 
 
@@ -104,38 +106,33 @@ def test_limpia_tambien_el_estado_de_los_parches_genesis():
 
 @_needs
 def test_el_reset_del_connector_no_limpia_los_job_ids_por_request():
-    """REGRESION MEDIDA: con el reset funcionando, el engine moria.
+    """REGRESION MEDIDA (historica): con el reset funcionando, el engine moria.
 
-    `reset_cache()` del connector vacia `self._jobs` pero deja
-    `req_status.transfer_jobs` con ids viejos. En el paso siguiente:
-
-        any_jid = next(iter(req_status.transfer_jobs))
-        assert self._jobs[any_jid].is_store   -> KeyError: 110
-
-    y el EngineCore muere. Nunca se habia visto porque el reset era un no-op:
-    arreglarlo (PN105) fue lo que expuso este.
+    En vLLM 0.27.1 upstream YA limpia `transfer_jobs` dentro de `reset_cache`,
+    asi que el sub-parche PN105_clear_transfer_jobs quedo OBSOLETO. Este test
+    verifica la condicion de obsolescencia: el reset de upstream limpia los
+    job ids por request.
     """
     P = _P()
     rel = "distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py"
     with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
         txt = fh.read()
     if P.GENESIS_PN105_MARKER in txt:
-        pytest.skip("PN105 ya aplicado")
+        pytest.skip("PN105 ya aplicado (marcador presente)")
     ini = txt.index("    def reset_cache(self) -> None:")
     fin = txt.index("_stale_job_threshold", ini)
-    assert "transfer_jobs" not in txt[ini:fin], (
-        "upstream ahora limpia transfer_jobs: revisar si este sub-parche sigue "
-        "haciendo falta"
+    assert "transfer_jobs" in txt[ini:fin], (
+        "upstream debe limpiar transfer_jobs en 0.27.1: el sub-parche "
+        "PN105_clear_transfer_jobs queda OBSOLETO"
     )
-    assert txt.count(P.JOBS_OLD) == 1
-    out = txt.replace(P.JOBS_OLD, P.JOBS_NEW)
-    compile(out, rel, "exec")
-    assert "status.transfer_jobs.clear()" in out
 
 
 @_needs
 def test_los_dos_sub_parches_van_juntos(tmp_path, monkeypatch):
-    """Aplicar solo el de tiering deja el engine expuesto al crash."""
+    """En 0.27.1 PN105 debe auto-skipear (upstream ya implementa reset_cache).
+
+    El parche queda OBSOLETO y no debe aplicar ni marcar los archivos.
+    """
     import shutil
 
     tree = tmp_path / "vllm"
@@ -147,10 +144,12 @@ def test_los_dos_sub_parches_van_juntos(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "vllm_install_root", lambda: str(tree))
 
     status, reason = P.apply()
-    assert status == "applied", reason
-    assert P.is_applied() is True
-    # Los DOS archivos tienen que quedar marcados.
+    assert status in ("skipped", "upstream_merged"), (
+        f"PN105 debe skipear en 0.27.1 (upstream ya tiene reset_cache), "
+        f"pero apply() devolvio {status!r}: {reason}"
+    )
+    assert P.is_applied() is False
+    # Ningun archivo debe quedar marcado.
     for rel in (_REL, "distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py"):
         txt = (tree / rel).read_text()
-        assert P.GENESIS_PN105_MARKER in txt, rel
-        compile(txt, rel, "exec")
+        assert P.GENESIS_PN105_MARKER not in txt, rel

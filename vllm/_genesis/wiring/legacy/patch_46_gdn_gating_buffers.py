@@ -4,7 +4,8 @@
 Replaces two per-call `torch.empty(...)` allocations with persistent
 pool acquires (`GdnGatingBufferManager.acquire_g/acquire_beta`) at
 the helper `fused_gdn_gating` in
-`vllm/model_executor/layers/mamba/gdn_linear_attn.py`.
+`vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py`
+(v0.27.1: gdn_linear_attn.py was split into `mamba/gdn/`; path updated 2026-08-26).
 
 Strategy
 --------
@@ -77,7 +78,7 @@ _NEW_BETA = (
 
 def _make_patcher() -> TextPatcher | None:
     target = resolve_vllm_file(
-        "model_executor/layers/mamba/gdn_linear_attn.py"
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
     )
     if target is None:
         return None
@@ -153,12 +154,13 @@ def apply() -> tuple[str, str]:
 
 def is_applied() -> bool:
     target = resolve_vllm_file(
-        "model_executor/layers/mamba/gdn_linear_attn.py"
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
     )
-    if target is None or not target.exists():
+    if target is None:
         return False
     try:
-        return GENESIS_P46_MARKER in target.read_text()
+        with open(target, encoding="utf-8") as fh:
+            return GENESIS_P46_MARKER in fh.read()
     except Exception:
         return False
 

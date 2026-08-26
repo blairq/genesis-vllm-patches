@@ -3,7 +3,7 @@
 """Verifica que la transferencia GPU->GPU sea DIRECTA, no rebotando por el host.
 
     docker run --rm --gpus all -v $PWD/tests:/tests \
-      --entrypoint python3 vllm/vllm-openai:v0.23.0 /tests/repro/p2p_bandwidth.py
+      --entrypoint python3 vllm/vllm-openai:v0.27.1 /tests/repro/p2p_bandwidth.py
 
 POR QUE NO ALCANZA CON `nvidia-smi topo -p2p r`
 -----------------------------------------------

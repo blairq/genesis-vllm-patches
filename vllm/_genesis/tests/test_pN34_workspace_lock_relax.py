@@ -76,7 +76,9 @@ def test_pn34_register_in_apply_all():
         PATCH_REGISTRY as APPLY_REGISTRY,
     )
     names = [name for name, _ in APPLY_REGISTRY]
-    pn34 = [n for n in names if "PN34" in n]
+    # Match the exact patch id "PN34" (not "PN348", which also contains
+    # the substring "PN34" after the migration added the PN348 entry).
+    pn34 = [n for n in names if n.split()[0] == "PN34"]
     assert len(pn34) == 1, (
         f"PN34 not registered in apply_all, names: {names[:5]}"
     )

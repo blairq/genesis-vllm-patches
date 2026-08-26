@@ -401,7 +401,7 @@ def is_transformers_v55_plus() -> bool:
 def get_vllm_version_tuple() -> Optional[tuple[int, ...]]:
     """Returns (major, minor, patch) vllm version tuple, or None on failure.
 
-    Example: vllm 0.20.0 -> (0, 20, 0)
+    Example: vllm 0.20.0 -> (0, 20, 0), vllm 0.27.1 -> (0, 27, 1)
     """
     try:
         import vllm
@@ -429,6 +429,7 @@ def get_vllm_full_version_string() -> Optional[str]:
     Examples:
       "0.20.1rc1.dev16+g7a1eb8ac2"
       "0.20.2rc1.dev9+g01d4d1ad3"
+      "0.27.1"
 
     Returns None if vllm is not importable. This is the canonical pin
     identity used by `assert_vllm_pin_allowed` for protect-against-foot-gun
@@ -458,6 +459,9 @@ KNOWN_GOOD_VLLM_PINS: tuple[str, ...] = (
     "0.20.1rc1.dev16+g7a1eb8ac2",
     # v7.70 pin-bump target (validated 2026-05-04, Test 4 boot+smoke+tool-call clean)
     "0.20.2rc1.dev9+g01d4d1ad3",
+    # update/v0.27.1 migration target (validated 2026-08-25, assets/vllm @ tag
+    # v0.27.1 / commit 6e448d0, wiring re-anclado por categorías + composes a imagen v0.27.1)
+    "0.27.1",
 )
 
 

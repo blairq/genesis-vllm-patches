@@ -31,7 +31,7 @@ Uso (dentro de la imagen del engine, sin GPU real):
 
     docker run --rm --gpus all -e HF_HUB_OFFLINE=1 --shm-size=2gb \
       -v /home/usuario/Proyectos/models-cache:/root/.cache/huggingface \
-      -v $PWD/tests:/tests --entrypoint python3 vllm/vllm-openai:v0.23.0 \
+      -v $PWD/tests:/tests --entrypoint python3 vllm/vllm-openai:v0.27.1 \
       /tests/repro/offload_partial_hit_harness.py <modo> [...]
 
 Modos:

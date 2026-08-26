@@ -56,14 +56,14 @@ def test_pn32_v2_anchor_targets_forward_core_prefill_branch():
         PN32_ANCHOR,
     )
     # Must include the prefill branch entry comment
-    assert "# 2.2: Process the remaining part" in PN32_ANCHOR
+    assert "# 2.3: Process the remaining part (prefill chunk, or non-spec decode-only)" in PN32_ANCHOR
     assert "if attn_metadata.num_prefills > 0:" in PN32_ANCHOR
     # Must include the FLA call (chunk_gated_delta_rule) at this level
     assert "self.chunk_gated_delta_rule(" in PN32_ANCHOR
     # Must NOT match v1's wrong-level pattern (gdn_attention_core call)
     assert "torch.ops.vllm.gdn_attention_core" not in PN32_ANCHOR
     # Must include the cache update (anchor's full extent)
-    assert "ssm_state[non_spec_state_indices_tensor] = last_recurrent_state" in PN32_ANCHOR
+    assert "ssm_state[prefill_state_indices] = last_recurrent_state" in PN32_ANCHOR
 
 
 def test_pn32_v2_replacement_chunks_along_T_dim():
@@ -140,11 +140,11 @@ def test_pn32_v2_replacement_bypasses_for_multi_seq():
         PN32_REPLACEMENT,
     )
     # Single-seq detection: cu_seqlens shape == 2
-    assert "non_spec_query_start_loc.shape[0] == 2" in PN32_REPLACEMENT
+    assert "prefill_query_start_loc.shape[0] == 2" in PN32_REPLACEMENT
     # Else branch falls through to original FLA call
     assert "# ─── Original path" in PN32_REPLACEMENT
-    # Original call uses non_spec_query_start_loc + attn_metadata fields
-    assert "cu_seqlens=non_spec_query_start_loc," in PN32_REPLACEMENT
+    # Original call uses prefill_query_start_loc + attn_metadata fields
+    assert "cu_seqlens=attn_metadata.prefill_query_start_loc," in PN32_REPLACEMENT
     assert "chunk_indices=attn_metadata.chunk_indices," in PN32_REPLACEMENT
 
 
@@ -280,7 +280,7 @@ def test_pn32_v2_marker_bumped_to_v7_69():
 def test_pn32_v2_drift_marker_specific():
     """v2 drift markers must be SPECIFIC (NOT generic '[Genesis PN32'
     which would false-positive on any sibling Genesis insertion in
-    gdn_linear_attn.py)."""
+    qwen_gdn_linear_attn.py)."""
     import os
     import tempfile
 
@@ -289,10 +289,10 @@ def test_pn32_v2_drift_marker_specific():
 
     with tempfile.TemporaryDirectory() as td:
         mamba_dir = os.path.join(
-            td, "model_executor", "layers", "mamba"
+            td, "model_executor", "layers", "mamba", "gdn"
         )
         os.makedirs(mamba_dir)
-        with open(os.path.join(mamba_dir, "gdn_linear_attn.py"), "w") as f:
+        with open(os.path.join(mamba_dir, "qwen_gdn_linear_attn.py"), "w") as f:
             f.write("# placeholder\n")
 
         orig = guards.vllm_install_root

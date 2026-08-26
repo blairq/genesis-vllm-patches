@@ -64,6 +64,12 @@ UPSTREAM_DRIFT_MARKERS = [
     # PR #36701 signatures — removes the FA block-size restriction.
     "# FA block-size restriction removed (NaN fix via KVBlockZeroer, #35219)",
     "# block_size restriction removed for hybrid Mamba models",
+    # [v0.27.1] PR #39931 merged natively: interface.py carries its own
+    # `elif ...startswith("turboquant_")` branch (with an lcm() refinement)
+    # and imports TQFullAttentionSpec single-line right at the branch site.
+    # Our anchors still match on 0.27.1 and would inject a DEAD duplicate
+    # branch + duplicate import, so detect the native form and self-retire.
+    "from vllm.v1.kv_cache_interface import TQFullAttentionSpec",
 ]
 
 

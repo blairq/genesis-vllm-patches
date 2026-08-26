@@ -71,13 +71,15 @@ GENESIS_P6869_MARKER = "Genesis P68/P69 long-context tool-call adherence v7.13"
 # Anchor on the docstring closing + "# Streaming response" comment +
 # tokenizer fetch. Insert hook call AFTER docstring but BEFORE first action.
 #
-# Two anchor variants (re-anchored 2026-07-04 for 0.23.0):
+# Two anchor variants (re-anchored 2026-07-04 for 0.23.0; V023 verified
+# still exact-match en v0.27.1 — el split del método no cambió):
 #   V020 — pins 0.20.x: docstring + body live together in
 #          create_chat_completion.
-#   V023 — vllm 0.23.0: upstream split the method into a thin wrapper
-#          (docstring + _with_kv_transfer_rejection_cleanup) plus the real
-#          body in _create_chat_completion. Hook goes at the top of the body
-#          so the request mutation still precedes any rendering/streaming.
+#   V023 — vllm >= 0.23.0 (incl. 0.27.1): upstream split the method into a
+#          thin wrapper (docstring + _with_kv_transfer_rejection_cleanup)
+#          plus the real body in _create_chat_completion. Hook goes at the
+#          top of the body so the request mutation still precedes any
+#          rendering/streaming.
 # _make_patcher() picks whichever anchor exists in the target file.
 
 P6869_OLD = (
@@ -145,7 +147,7 @@ _P6869_HOOK_BLOCK = (
     "            ).debug('Genesis P68/P69 hook raised; ignored', exc_info=True)\n"
 )
 
-# vllm 0.23.0: hook at the top of the split-out body method.
+# vllm >= 0.23.0 (incl. 0.27.1): hook at the top of the split-out body method.
 P6869_OLD_V023 = (
     "    async def _create_chat_completion(\n"
     "        self,\n"
@@ -172,10 +174,11 @@ def _make_patcher() -> TextPatcher | None:
     target = resolve_vllm_file("entrypoints/openai/chat_completion/serving.py")
     if target is None:
         return None
-    # Anchor variant selection: prefer the 0.23.0 split-body anchor, fall
-    # back to the 0.20.x monolithic anchor. When neither matches (already
-    # patched or true drift) keep V023 — apply() resolves idempotency via
-    # the marker before the anchor pre-check.
+    # Anchor variant selection: prefer the >=0.23.0 split-body anchor
+    # (verified intact en 0.27.1), fall back to the 0.20.x monolithic
+    # anchor. When neither matches (already patched or true drift) keep
+    # V023 — apply() resolves idempotency via the marker before the anchor
+    # pre-check.
     anchor, replacement = P6869_OLD_V023, P6869_NEW_V023
     try:
         with open(target) as f:

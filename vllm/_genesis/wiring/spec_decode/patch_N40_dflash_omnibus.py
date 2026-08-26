@@ -17,6 +17,13 @@ Anchor target (qwen3_dflash.py, validated against pin 0.20.2rc1.dev9+g01d4d1ad3)
             self._rms_norm_eps,
         )
 
+OBSOLETO sub-A desde el pin v0.27.1: upstream absorbió la fusión
+nativamente — `_normalize_context_k` hace un único `ops.rms_norm`
+agrupado sobre [L, num_ctx, nkv, hd] con `_k_norm_weights` apilado en
+[num_layers, head_dim]. El anchor de sub-A ya no existe; el sub-patch
+falla cerrado si se fuerza. Sub-C+D (scheduler observe/k-trim) siguen
+vigentes y se migraron al bloque num_accepted de v0.27.1.
+
 Replacement uses PN40 fused_k_norm with strict no-regression fallback —
 on any eligibility failure or kernel error, falls through to the
 original per-layer loop (preserved verbatim under `else` branch).
@@ -154,18 +161,23 @@ GENESIS_PN40_SCHED_K_TRIM_MARKER = (
 )
 
 # Anchor: 4-line block where num_accepted is computed in update_from_output.
-# Stable since vllm 0.20.x. We insert the observe call AFTER num_accepted is
+# v0.27.1: num_accepted pasó de `len(generated_token_ids) - 1` a
+# `max(len(generated_token_ids) - num_sampled, 0)` con línea intermedia
+# `num_sampled = ...`; el anchor se actualiza al bloque completo.
+# We insert the observe call AFTER num_accepted is
 # computed but BEFORE make_spec_decoding_stats so any sentinel-trip flag is
 # visible to subsequent code paths in the same step.
 PN40_SCHED_ANCHOR = (
     "                num_draft_tokens = len(scheduled_spec_token_ids)\n"
-    "                num_accepted = len(generated_token_ids) - 1\n"
+    "                num_sampled = self.num_sampled_tokens_per_step\n"
+    "                num_accepted = max(len(generated_token_ids) - num_sampled, 0)\n"
     "                num_rejected = num_draft_tokens - num_accepted\n"
 )
 
 PN40_SCHED_REPLACEMENT = (
     "                num_draft_tokens = len(scheduled_spec_token_ids)\n"
-    "                num_accepted = len(generated_token_ids) - 1\n"
+    "                num_sampled = self.num_sampled_tokens_per_step\n"
+    "                num_accepted = max(len(generated_token_ids) - num_sampled, 0)\n"
     "                num_rejected = num_draft_tokens - num_accepted\n"
     "                # [Genesis PN40 sub-C+D] universal observability hook\n"
     "                # Feeds accepted_len to adaptive K controller + stability\n"

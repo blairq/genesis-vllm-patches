@@ -101,6 +101,13 @@ UPSTREAM_DRIFT_MARKERS = [
     # per-group block pools — would skip page unification entirely.
     "_has_mixed_mamba_attention",
     "mamba_num_blocks",
+    # [v0.27.1] Native pad-smaller-to-max landed in
+    # `unify_kv_cache_spec_page_size` (MambaSpec → page_size_padded, plus
+    # opt-in attention backends via indexes_kv_by_block_stride): the exact
+    # algorithm this wiring used to provide (P5 v2 / P5b). Self-retire so
+    # the leftover get_uniform_page_size relaxation sub-patch does not
+    # modify a file whose core patch is already upstream.
+    "Mamba layers, whose page size comes from state shapes",
 ]
 
 

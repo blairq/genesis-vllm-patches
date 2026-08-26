@@ -25,8 +25,9 @@ v7.69 v2 DESIGN
 Patch `_forward_core` directly. Wrap the prefill branch's
 `self.chunk_gated_delta_rule(...)` call with a chunk-aware loop that:
 
-1. Detects single-sequence prefill (`non_spec_query_start_loc.shape[0]
-   == 2`, i.e. one [0, T] entry). Multi-sequence prefill bypasses to
+1. Detects single-sequence prefill
+   (`attn_metadata.prefill_query_start_loc.shape[0] == 2`, i.e. one
+   [0, T] entry). Multi-sequence prefill bypasses to
    original (correct chunking would require slicing across sequence
    boundaries — out of scope).
 
@@ -166,18 +167,26 @@ GENESIS_PN32_MARKER = (
 )
 
 
-# ─── Anchor: prefill branch in _forward_core (v0.20.1rc1.dev16) ─────
-# Matches the EXACT 27-line block of the prefill `if
-# attn_metadata.num_prefills > 0:` branch from
-# `model_executor/layers/mamba/gdn_linear_attn.py:_forward_core`.
+# ─── Anchor: prefill branch in _forward_core (v0.27.1) ──────────────
+# Matches the EXACT prefill `if attn_metadata.num_prefills > 0:` block
+# of `_forward_core` in
+# `model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py` (v0.27.1:
+# state indices, initial-state mask and cu_seqlens are precomputed by
+# the metadata builder).
 
 PN32_ANCHOR = (
-    "        # 2.2: Process the remaining part\n"
+    "        # 2.3: Process the remaining part (prefill chunk, or non-spec decode-only)\n"
     "        if attn_metadata.num_prefills > 0:\n"
-    "            assert non_spec_state_indices_tensor is not None\n"
-    "            initial_state = ssm_state[non_spec_state_indices_tensor].contiguous()  # type: ignore[index]\n"
-    "            assert has_initial_state is not None\n"
-    "            initial_state[~has_initial_state, ...] = 0  # type: ignore[operator]\n"
+    "            # State indices, initial-state mask and cu_seqlens for the chunk\n"
+    "            # kernel are precomputed by the metadata builder (the prefill tail\n"
+    "            # when decodes are peeled off, else the full non-spec batch), so they\n"
+    "            # don't need to be re-derived per layer.\n"
+    "            prefill_state_indices = attn_metadata.prefill_state_indices\n"
+    "            prefill_has_initial_state = attn_metadata.prefill_has_initial_state\n"
+    "            assert prefill_state_indices is not None\n"
+    "            assert prefill_has_initial_state is not None\n"
+    "            initial_state = ssm_state[prefill_state_indices]\n"
+    "            initial_state[~prefill_has_initial_state, ...] = 0\n"
     "            (\n"
     "                core_attn_out_non_spec,\n"
     "                last_recurrent_state,\n"
@@ -189,24 +198,28 @@ PN32_ANCHOR = (
     "                beta=beta_non_spec,\n"
     "                initial_state=initial_state,\n"
     "                output_final_state=True,\n"
-    "                cu_seqlens=non_spec_query_start_loc,\n"
+    "                cu_seqlens=attn_metadata.prefill_query_start_loc,\n"
     "                chunk_indices=attn_metadata.chunk_indices,\n"
     "                chunk_offsets=attn_metadata.chunk_offsets,\n"
     "                use_qk_l2norm_in_kernel=False,\n"
     "            )\n"
     "            # Init cache\n"
-    "            ssm_state[non_spec_state_indices_tensor] = last_recurrent_state.to(\n"
-    "                ssm_state.dtype\n"
-    "            )\n"
+    "            ssm_state[prefill_state_indices] = last_recurrent_state.to(ssm_state.dtype)\n"
 )
 
 PN32_REPLACEMENT = (
-    "        # 2.2: Process the remaining part\n"
+    "        # 2.3: Process the remaining part (prefill chunk, or non-spec decode-only)\n"
     "        if attn_metadata.num_prefills > 0:\n"
-    "            assert non_spec_state_indices_tensor is not None\n"
-    "            initial_state = ssm_state[non_spec_state_indices_tensor].contiguous()  # type: ignore[index]\n"
-    "            assert has_initial_state is not None\n"
-    "            initial_state[~has_initial_state, ...] = 0  # type: ignore[operator]\n"
+    "            # State indices, initial-state mask and cu_seqlens for the chunk\n"
+    "            # kernel are precomputed by the metadata builder (the prefill tail\n"
+    "            # when decodes are peeled off, else the full non-spec batch), so they\n"
+    "            # don't need to be re-derived per layer.\n"
+    "            prefill_state_indices = attn_metadata.prefill_state_indices\n"
+    "            prefill_has_initial_state = attn_metadata.prefill_has_initial_state\n"
+    "            assert prefill_state_indices is not None\n"
+    "            assert prefill_has_initial_state is not None\n"
+    "            initial_state = ssm_state[prefill_state_indices]\n"
+    "            initial_state[~prefill_has_initial_state, ...] = 0\n"
     "\n"
     "            # [Genesis PN32 v2 v7.69 chunked-prefill] Cliff 2 fix:\n"
     "            # chunk the FLA call so the inner core_attn_out_non_spec\n"
@@ -242,8 +255,8 @@ PN32_REPLACEMENT = (
     "            # [0, T] entry. Multi-seq has shape [N+1] for N>1.\n"
     "            _genesis_pn32_T_full = int(query_non_spec.shape[1])\n"
     "            _genesis_pn32_is_single_seq = (\n"
-    "                non_spec_query_start_loc is not None\n"
-    "                and non_spec_query_start_loc.shape[0] == 2\n"
+    "                attn_metadata.prefill_query_start_loc is not None\n"
+    "                and attn_metadata.prefill_query_start_loc.shape[0] == 2\n"
     "            )\n"
     "            _genesis_pn32_should_chunk = (\n"
     "                _genesis_pn32_enabled\n"
@@ -286,7 +299,7 @@ PN32_REPLACEMENT = (
     "                    _genesis_pn32_chunk_cu_seqlens = torch.tensor(\n"
     "                        [0, _genesis_pn32_chunk_len],\n"
     "                        device=query_non_spec.device,\n"
-    "                        dtype=non_spec_query_start_loc.dtype,\n"
+    "                        dtype=attn_metadata.prefill_query_start_loc.dtype,\n"
     "                    )\n"
     "                    # FLA call on chunk; output_final_state=True for chaining\n"
     "                    (\n"
@@ -335,26 +348,26 @@ PN32_REPLACEMENT = (
     "                    beta=beta_non_spec,\n"
     "                    initial_state=initial_state,\n"
     "                    output_final_state=True,\n"
-    "                    cu_seqlens=non_spec_query_start_loc,\n"
+    "                    cu_seqlens=attn_metadata.prefill_query_start_loc,\n"
     "                    chunk_indices=attn_metadata.chunk_indices,\n"
     "                    chunk_offsets=attn_metadata.chunk_offsets,\n"
     "                    use_qk_l2norm_in_kernel=False,\n"
     "                )\n"
     "            # Init cache\n"
-    "            ssm_state[non_spec_state_indices_tensor] = last_recurrent_state.to(\n"
-    "                ssm_state.dtype\n"
-    "            )\n"
+    "            ssm_state[prefill_state_indices] = last_recurrent_state.to(ssm_state.dtype)\n"
 )
 
 
 def _make_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/mamba/gdn_linear_attn.py")
+    target = resolve_vllm_file(
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+    )
     if target is None:
         return None
     return TextPatcher(
         patch_name=(
-            "PN32 v2 model_executor/layers/mamba/gdn_linear_attn.py — "
-            "_forward_core chunked-prefill (Cliff 2 fix v7.69)"
+            "PN32 v2 model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+            " — _forward_core chunked-prefill (Cliff 2 fix v7.69)"
         ),
         target_file=str(target),
         marker=GENESIS_PN32_MARKER,
@@ -396,7 +409,7 @@ def apply() -> tuple[str, str]:
 
     patcher = _make_patcher()
     if patcher is None:
-        return "skipped", "gdn_linear_attn.py not resolvable"
+        return "skipped", "qwen_gdn_linear_attn.py not resolvable"
 
     result, failure = patcher.apply()
     return result_to_wiring_status(

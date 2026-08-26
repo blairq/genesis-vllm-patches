@@ -107,12 +107,20 @@ GENESIS_PN21_MARKER = "Genesis PN21 DFlash SWA support v7.65"
 
 
 # ─── Sub-patch: speculators/algos.py — preserve SWA config ─────────
+# v0.27.1: el patrón aux_layer_ids aparece 2× (update_dflash y update_dspark);
+# se desambigua con el bloque target_hidden_size exclusivo de update_dflash.
 PN21_ALGOS_ANCHOR = (
+    "    if config_dict.get(\"target_hidden_size\") is not None:\n"
+    "        pre_trained_config[\"target_hidden_size\"] = config_dict[\"target_hidden_size\"]\n"
+    "\n"
     "    aux_layer_ids = config_dict[\"aux_hidden_state_layer_ids\"]\n"
     "    pre_trained_config[\"eagle_aux_hidden_state_layer_ids\"] = aux_layer_ids\n"
 )
 
 PN21_ALGOS_REPLACEMENT = (
+    "    if config_dict.get(\"target_hidden_size\") is not None:\n"
+    "        pre_trained_config[\"target_hidden_size\"] = config_dict[\"target_hidden_size\"]\n"
+    "\n"
     "    # [Genesis PN21] vllm#40898 backport — preserve SWA config\n"
     "    for _genesis_pn21_key in (\n"
     "        \"layer_types\",\n"
@@ -129,16 +137,21 @@ PN21_ALGOS_REPLACEMENT = (
 
 
 # ─── Sub-patch: dflash.py — causal=True for SWA layers ─────────────
+# v0.27.1: el assert no-causal vive dentro del gate `if not self.dflash_causal:`
+# y el mensaje dice "e.g FlashAttention" (antes "such as FlashAttention").
+# El replacement integra el forzado causal=True de capas SWA con ese gate.
 PN21_DFLASH_ANCHOR = (
     "        per_group, per_layer = super().build_per_group_and_layer_attn_metadata(\n"
     "            cad, draft_index\n"
     "        )\n"
-    "        for layer_name, attn_metadata in per_layer.items():\n"
-    "            assert getattr(attn_metadata, \"causal\", None) is False, (\n"
-    "                f\"Attention metadata for layer {layer_name} does not have\"\n"
-    "                \" non-causal support, which is required for DFlash.\"\n"
-    "                \" Consider using a different attention backend, such as FlashAttention.\"\n"
-    "            )\n"
+    "        if not self.dflash_causal:\n"
+    "            # Require all layers to support non-causal attention when required by DFlash\n"
+    "            for layer_name, attn_metadata in per_layer.items():\n"
+    "                assert getattr(attn_metadata, \"causal\", None) is False, (\n"
+    "                    f\"Attention metadata for layer {layer_name} does not have\"\n"
+    "                    \" non-causal support, which is required for DFlash.\"\n"
+    "                    \" Consider using a different attention backend, e.g FlashAttention.\"\n"
+    "                )\n"
     "        return per_group, per_layer\n"
 )
 
@@ -159,18 +172,21 @@ PN21_DFLASH_REPLACEMENT = (
     "                )\n"
     "                for _genesis_pn21_ln in _genesis_pn21_causal_layers:\n"
     "                    per_layer[_genesis_pn21_ln] = _genesis_pn21_meta\n"
-    "        for layer_name, attn_metadata in per_layer.items():\n"
-    "            if layer_name in _genesis_pn21_sliding:\n"
-    "                assert getattr(attn_metadata, \"causal\", None) is True, (\n"
-    "                    f\"Attention metadata for sliding layer {layer_name} does not have\"\n"
-    "                    \" causal support, which is required for DFlash SWA.\"\n"
+    "        if not self.dflash_causal:\n"
+    "            # Require all layers to support non-causal attention when required by DFlash\n"
+    "            # ([Genesis PN21] sliding-window layers are exempt: causal=True required)\n"
+    "            for layer_name, attn_metadata in per_layer.items():\n"
+    "                if layer_name in _genesis_pn21_sliding:\n"
+    "                    assert getattr(attn_metadata, \"causal\", None) is True, (\n"
+    "                        f\"Attention metadata for sliding layer {layer_name} does not have\"\n"
+    "                        \" causal support, which is required for DFlash SWA.\"\n"
+    "                    )\n"
+    "                    continue\n"
+    "                assert getattr(attn_metadata, \"causal\", None) is False, (\n"
+    "                    f\"Attention metadata for layer {layer_name} does not have\"\n"
+    "                    \" non-causal support, which is required for DFlash.\"\n"
+    "                    \" Consider using a different attention backend, e.g FlashAttention.\"\n"
     "                )\n"
-    "                continue\n"
-    "            assert getattr(attn_metadata, \"causal\", None) is False, (\n"
-    "                f\"Attention metadata for layer {layer_name} does not have\"\n"
-    "                \" non-causal support, which is required for DFlash.\"\n"
-    "                \" Consider using a different attention backend, such as FlashAttention.\"\n"
-    "            )\n"
     "        return per_group, per_layer\n"
 )
 

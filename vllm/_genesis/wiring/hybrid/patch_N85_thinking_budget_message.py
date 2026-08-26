@@ -202,7 +202,7 @@ PROTO_PASS_NEW = (
 
 IP_OLD = (
     "                if self.use_v2_model_runner:\n"
-    "                    raise ValueError(\n"
+    "                    raise VLLMValidationError(\n"
     '                        "thinking_token_budget is not yet supported by the V2 "\n'
     '                        "model runner. Run vLLM with VLLM_USE_V2_MODEL_RUNNER=0 "\n'
     '                        "to use thinking_token_budget."\n'
@@ -211,7 +211,7 @@ IP_OLD = (
 
 IP_NEW = (
     "                if self.use_v2_model_runner:\n"
-    "                    raise ValueError(\n"
+    "                    raise VLLMValidationError(\n"
     '                        "thinking_token_budget is not yet supported by the V2 "\n'
     '                        "model runner. Run vLLM with VLLM_USE_V2_MODEL_RUNNER=0 "\n'
     '                        "to use thinking_token_budget."\n'

@@ -37,9 +37,12 @@ DONDE
    anillo y no a la free list del cache. Sin esto el cache terminaria
    entregando ids reservados.
 
-2. `tiering/manager.py`, dentro del `prepare_store` que instala PN90 — que es
-   el unico que corre de verdad, y ademas el unico lugar donde ya se sabe si
-   el agente es persistente (`should_persist`).
+2. `cpu/manager.py`, dentro de `prepare_store`: en v0.27.1 el calculo de
+   desalojos (`num_blocks_to_evict`) vive ahi — el tiering manager delega
+   los stores del tier primario en `CPUOffloadingManager.prepare_store`.
+   La persistencia del agente se evalua in situ con el mismo gate de PN90
+   (`kv_disk_gate.should_persist_to_secondary_tiers`, via
+   `req_context.kv_transfer_params`).
 
 La reserva es perezosa, en el primer `prepare_store`, cuando
 `_num_allocated_blocks` todavia es 0: se toman ids del tope del rango sin
@@ -124,8 +127,18 @@ RING_NEW = (
     "        # K es un TOPE, no una reserva: no se inmoviliza memoria. Con\n"
     "        # trafico efimero en cero el cache se queda con todo L2.\n"
     "        #\n"
-    "        # `should_persist` ya lo decidio PN90 unas lineas mas arriba.\n"
-    "        if not should_persist:\n"
+    "        # Mismo gate de PN90 (kv_disk_gate.should_persist_to_secondary_tiers)\n"
+    "        # evaluado aca: cpu/manager.prepare_store no tiene ese nombre en\n"
+    "        # scope, y la decision depende de kv_transfer_params de la request.\n"
+    "        try:\n"
+    "            from vllm._genesis import kv_disk_gate as _g100_gate\n"
+    "\n"
+    "            _g100_persist = _g100_gate.should_persist_to_secondary_tiers(\n"
+    "                getattr(req_context, 'kv_transfer_params', None)\n"
+    "            )\n"
+    "        except Exception:\n"
+    "            _g100_persist = True\n"
+    "        if not _g100_persist:\n"
     "            from vllm._genesis import kv_staging_ring as _g100\n"
     "\n"
     "            _g100_lib = _g100.hacer_lugar(self, keys_to_store)\n"
@@ -152,12 +165,14 @@ def _patcher() -> TextPatcher | None:
     root = vllm_install_root()
     if root is None:
         return None
-    tie = os.path.join(root, "v1", "kv_offload", "tiering", "manager.py")
-    if not os.path.exists(tie):
+    # v0.27.1: la decision de desalojo del tier primario vive en
+    # cpu/manager.py (el tiering manager delega prepare_store ahi).
+    mgr = os.path.join(root, "v1", "kv_offload", "cpu", "manager.py")
+    if not os.path.exists(mgr):
         return None
     return TextPatcher(
-        patch_name="PN100 staging ring (tiering manager)",
-        target_file=tie,
+        patch_name="PN100 staging ring (cpu manager)",
+        target_file=mgr,
         marker=GENESIS_PN100_MARKER,
         sub_patches=[
             TextPatch(
@@ -183,7 +198,7 @@ def apply() -> tuple[str, str]:
         return "skipped", "vllm install root not discoverable"
     p = _patcher()
     if p is None:
-        return "skipped", "target de tiering/manager.py no encontrado"
+        return "skipped", "target de cpu/manager.py no encontrado"
 
     result, failure = p.apply()
     from vllm._genesis.wiring.text_patch import result_to_wiring_status

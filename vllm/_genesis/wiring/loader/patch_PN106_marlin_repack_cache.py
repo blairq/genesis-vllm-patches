@@ -6,7 +6,8 @@ Genesis-original 2026-08-24 (checkpoint CK-0.3 del plan de optimización).
 El problema
 -----------
 En vLLM v0.23.0 sobre Ampere (sin tensor cores FP8), cada Linear del
-checkpoint cuantizado corre por Marlin W8A16. Para eso,
+checkpoint cuantizado corre por Marlin W8A16 — el sitio sigue vivo en
+v0.27.1 (`marlin_utils_fp8.prepare_fp8_layer_for_marlin`). Para eso,
 `prepare_fp8_layer_for_marlin` repackea los pesos EN CADA ARRANQUE:
 pack_fp8_to_int32 + gptq_marlin_repack + permute/repeat de escalas +
 pliegue del bias de exponente. Para un 27B son segundos-decenas de

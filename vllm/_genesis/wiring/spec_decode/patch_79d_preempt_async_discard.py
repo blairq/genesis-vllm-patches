@@ -1,6 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """Wiring for Patch 79d — preemption async-discard fix.
 
+===============================================================
+OBSOLETO en v0.27.1 (2026-08-26, migración del pin): upstream absorbió
+el fix de forma nativa y su mecanismo ya no existe.
+
+1) `_preempt_request()` ahora resetea `request.num_output_placeholders = 0`
+   por sí mismo (mitad 1 de este parche).
+2) El campo `discard_latest_async_tokens` fue ELIMINADO de `Request`
+   upstream; el rol lo cubre el par `drop_stale_output` /
+   `num_stale_output_tokens`, gestionado nativamente en `_preempt_request`
+   (parámetro `drop_stale_output` + drenaje por paso en
+   `update_from_output`) — mitad 2 de este parche.
+
+El anchor ya no matchea (los sitios originales se reescribieron), así que
+este módulo queda como research artifact y hace skip limpio en runtime.
+NO borrar: el dispatcher registra P79d y el historial de decisiones lo cita.
+===============================================================
+
 Backport of upstream PR vllm-project/vllm#38624 (CodersAcademy006, OPEN as
 of 2026-04-26). Fixes a stale state window in V1 AsyncScheduler where
 async placeholders persist across preemption — leading to silent

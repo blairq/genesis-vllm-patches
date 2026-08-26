@@ -6,7 +6,7 @@ Un solo archivo, dos anclas, ambas en el scheduler del connector de offloading:
   1. `SchedulerOffloadConfig.from_spec` — registra qué grupos son recurrentes.
      Es el único punto donde conviven el índice del grupo y su `KVCacheSpec`.
 
-  2. El filtro de `new_offload_keys` en `_get_offload_jobs` — descarta los
+  2. El filtro de `new_offload_keys` en `_build_store_jobs` — descarta los
      estados recurrentes intermedios ANTES de `manager.prepare_store`, con lo
      cual el bloque no entra ni a L2 RAM ni a L3 SSD.
 
@@ -30,43 +30,51 @@ GENESIS_PN93_MARKER = "[Genesis PN93: Sparse GDN Checkpointing]"
 # ─────────── 1. registro de grupos recurrentes ───────────
 
 REGISTER_OLD = (
-    "        for idx, gpu_block_size in enumerate(spec.gpu_block_size):\n"
-    "            kv_spec = spec.kv_cache_config.kv_cache_groups[idx].kv_cache_spec\n"
+    "        for idx, tokens_per_block in enumerate(spec.tokens_per_block):\n"
+    "            kv_spec = kv_cache_config.kv_cache_groups[idx].kv_cache_spec\n"
 )
 
 REGISTER_NEW = (
-    "        for idx, gpu_block_size in enumerate(spec.gpu_block_size):\n"
-    "            kv_spec = spec.kv_cache_config.kv_cache_groups[idx].kv_cache_spec\n"
+    "        for idx, tokens_per_block in enumerate(spec.tokens_per_block):\n"
+    "            kv_spec = kv_cache_config.kv_cache_groups[idx].kv_cache_spec\n"
     "            # " + GENESIS_PN93_MARKER + "\n"
-    "            from vllm._genesis import kv_sparse_gdn as _g93\n"
     "            # El tercer argumento es lo que store_block escribe por bloque.\n"
     "            # page_size_bytes mide el ESTADO recurrente (851.968 B aca) y no\n"
     "            # el bloque en disco (28.966.912 B): con el primero el contador de\n"
     "            # bytes ahorrados iba 34x corto.\n"
-    "            _g93.register_group_spec(\n"
-    "                idx, kv_spec, getattr(spec, 'kv_bytes_per_offloaded_block', 0)\n"
-    "            )\n"
+    "            try:\n"
+    "                from vllm._genesis import kv_sparse_gdn as _g93\n"
+    "\n"
+    "                _g93.register_group_spec(idx, kv_spec, kv_spec.page_size_bytes)\n"
+    "            except Exception:\n"
+    "                pass\n"
 )
 
 # ─────────── 2. filtro de bloques a offloadear ───────────
 
 FILTER_OLD = (
-    "                    if alignment_block_count is not None:\n"
-    "                        assert tail is not None\n"
-    "                        abs_block_idx = start_block_idx + key_idx\n"
-    "                        pos_in_segment = abs_block_idx % alignment_block_count\n"
-    "                        if pos_in_segment < alignment_block_count - tail:\n"
-    "                            continue\n"
+    "                    abs_chunk_idx = start_chunk_idx + key_idx\n"
+    "                    if not is_store_reachable_swa_chunk(\n"
+    "                        abs_chunk_idx,\n"
+    "                        num_chunks,\n"
+    "                        group_config.alignment_chunk_count,\n"
+    "                        group_config.sliding_window_size_in_chunks,\n"
+    "                        group_config.is_eagle_group,\n"
+    "                    ):\n"
+    "                        continue\n"
     "                    new_offload_keys.append(offload_key)\n"
 )
 
 FILTER_NEW = (
-    "                    if alignment_block_count is not None:\n"
-    "                        assert tail is not None\n"
-    "                        abs_block_idx = start_block_idx + key_idx\n"
-    "                        pos_in_segment = abs_block_idx % alignment_block_count\n"
-    "                        if pos_in_segment < alignment_block_count - tail:\n"
-    "                            continue\n"
+    "                    abs_chunk_idx = start_chunk_idx + key_idx\n"
+    "                    if not is_store_reachable_swa_chunk(\n"
+    "                        abs_chunk_idx,\n"
+    "                        num_chunks,\n"
+    "                        group_config.alignment_chunk_count,\n"
+    "                        group_config.sliding_window_size_in_chunks,\n"
+    "                        group_config.is_eagle_group,\n"
+    "                    ):\n"
+    "                        continue\n"
     "                    # " + GENESIS_PN93_MARKER + "\n"
     "                    # Los grupos recurrentes (Mamba/GDN) se resuelven con\n"
     "                    # _sliding_window_lookup(window=1): solo se lee el ULTIMO\n"
@@ -82,8 +90,8 @@ FILTER_NEW = (
     "                    from vllm._genesis import kv_sparse_gdn as _g93\n"
     "                    if _g93.should_skip_recurrent_block(\n"
     "                        group_config.group_idx,\n"
-    "                        start_block_idx + key_idx,\n"
-    "                        req.num_prompt_tokens // group_config.offloaded_block_size,\n"
+    "                        abs_chunk_idx,\n"
+    "                        req.num_prompt_tokens // group_config.tokens_per_chunk,\n"
     "                    ):\n"
     "                        continue\n"
     "                    new_offload_keys.append(offload_key)\n"
@@ -97,24 +105,18 @@ FILTER_NEW = (
 # del stride y sin medirlo no se puede calibrar.
 
 COST_OLD = (
-    "                if num_hit_blocks is None:\n"
-    "                    defer_lookup = True\n"
-    "                else:\n"
     "                    max_hit_size_tokens = min(\n"
     "                        max_hit_size_tokens,\n"
-    "                        offloaded_block_size * (start_block_idx + num_hit_blocks),\n"
+    "                        tokens_per_chunk * (start_chunk_idx + num_hit_chunks),\n"
     "                    )\n"
 )
 
 COST_NEW = (
-    "                if num_hit_blocks is None:\n"
-    "                    defer_lookup = True\n"
-    "                else:\n"
     "                    # " + GENESIS_PN93_MARKER + "\n"
     "                    _g93_before = max_hit_size_tokens\n"
     "                    max_hit_size_tokens = min(\n"
     "                        max_hit_size_tokens,\n"
-    "                        offloaded_block_size * (start_block_idx + num_hit_blocks),\n"
+    "                        tokens_per_chunk * (start_chunk_idx + num_hit_chunks),\n"
     "                    )\n"
     "                    if max_hit_size_tokens < _g93_before:\n"
     "                        from vllm._genesis import kv_sparse_gdn as _g93\n"

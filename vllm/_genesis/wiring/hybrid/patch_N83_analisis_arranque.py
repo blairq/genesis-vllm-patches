@@ -125,21 +125,29 @@ ANCHOR_WORKER_NEW = '''        logger.info_once(
 
 
 # ── 2. engine core: emitir el informe ────────────────────────────────────
+#
+# Desde 0.27 este punto vive DENTRO del loop por-rank de
+# _get_kv_cache_configs (12 espacios), no en una funcion propia a nivel de
+# modulo como en 0.23. El ancla lleva la indentacion completa para no
+# matchear por substring, y el informe se emite UNA sola vez via guard.
 
-ANCHOR_CORE_OLD = '''    logger.info_once("GPU KV cache size: %s tokens", f"{num_tokens:,}")
+ANCHOR_CORE_OLD = '''            logger.info_once("GPU KV cache size: %s tokens", f"{num_tokens:,}")
 '''
 
-ANCHOR_CORE_NEW = '''    logger.info_once("GPU KV cache size: %s tokens", f"{num_tokens:,}")
-    # _GENESIS_PN83_ANALISIS_ARRANQUE
-    # Ultimo punto del arranque donde ya se sabe TODO: config completa mas el
-    # tamaño real de la cache en tokens. Aca se junta con el desglose de
-    # memoria que dejo el worker y se escribe el informe para humanos.
-    try:
-        from vllm._genesis import analisis_arranque as _g83
+ANCHOR_CORE_NEW = '''            logger.info_once("GPU KV cache size: %s tokens", f"{num_tokens:,}")
+            # _GENESIS_PN83_ANALISIS_ARRANQUE
+            # Ultimo punto del arranque donde ya se sabe TODO: config completa mas el
+            # tamaño real de la cache en tokens. Aca se junta con el desglose de
+            # memoria que dejo el worker y se escribe el informe para humanos.
+            # El loop es por-rank: el guard emite UNA vez.
+            try:
+                from vllm._genesis import analisis_arranque as _g83
 
-        _g83.emitir_informe(vllm_config, num_tokens)
-    except Exception:
-        pass  # el informe es opcional; nunca puede tumbar el arranque
+                if not getattr(_g83, "_informe_emitido", False):
+                    _g83._informe_emitido = True
+                    _g83.emitir_informe(vllm_config, num_tokens)
+            except Exception:
+                pass  # el informe es opcional; nunca puede tumbar el arranque
 '''
 
 

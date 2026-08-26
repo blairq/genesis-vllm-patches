@@ -2,6 +2,16 @@
 """Wiring for Patch 57 v2 — TurboQuant spec-decode capture-safe buffers.
 
 ================================================================
+ESTADO EN v0.27.1 (2026-08-26, migración del pin): OBSOLETO-BY-DESIGN.
+Upstream mergeó el workspace manager (#40798): los buffers por-capa que
+este parche expandía (`_init_turboquant_buffers` + register_buffer) ya
+no existen; `turboquant_attn.py` reserva vía
+`current_workspace_manager().get_simultaneous(...)` con shapes basadas en
+`max_num_reqs`. El anchor no matchea y apply() hace skip limpio — que es
+exactamente el comportamiento "Compatibility" documentado abajo.
+Si se necesita la expansión (1+num_spec), hoy vive upstream en la
+reserva del workspace (pendiente upstream).
+================================================================
 HYPOTHESIS WEAKENED 2026-04-25 (after noonghunna independently
 tested #40798 backport at vllm#40831 issuecomment-4317503179):
 

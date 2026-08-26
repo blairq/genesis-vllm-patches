@@ -28,9 +28,10 @@ CÓMO
 `SecondaryTierManager.on_schedule_end()` existe justamente para esto. Su
 docstring lo dice: *"Called once at the end of each scheduler step.
 Secondary tiers may override this for per-step cleanup or deferred work
-submission."* `FileSystemTierManager` no lo implementa (hereda el no-op).
+submission."* Desde 0.27 `FileSystemTierManager` lo implementa, pero solo
+para hacer flush del lookup manager: sigue sin cuota ni limpieza.
 
-PN81 le agrega una implementación con dos barridos independientes:
+PN81 extiende ese hook con dos barridos independientes:
 
 **A. Cuota del directorio propio** — cada `GENESIS_KV_DISK_CHECK_SECS`
    (default 60) recorre `root_dir`, suma tamaños y, si supera
@@ -55,7 +56,7 @@ PN81 le agrega una implementación con dos barridos independientes:
 
 ⚠️ La cuota NO es por rank — el total en disco es `GENESIS_KV_DISK_MAX_GB`,
 no un múltiplo. `TieringOffloadingSpec.get_manager()` se llama desde un
-único sitio (`offloading/scheduler.py:265`, `OffloadingConnectorScheduler`),
+único sitio (`offloading/scheduler.py:457`, `OffloadingConnectorScheduler`),
 así que existe UN solo `FileSystemTierManager`, en el proceso scheduler, con
 `parallel_config.rank == 0`. En disco solo aparece `{base_path}_r0`, incluso
 con TP=2. Lo que sí es por rank es el mmap de RAM, que se crea aparte en
@@ -105,18 +106,20 @@ GENESIS_PN81_MARKER = "[Genesis PN81 kv disk tier quota]"
 
 ANCHOR_OLD = (
     "    @override\n"
-    "    def shutdown(self) -> None:\n"
+    "    def on_schedule_end(self, context: ScheduleEndContext) -> None:\n"
+    "        self._lookup_manager.flush()\n"
 )
 
 
 ANCHOR_NEW = (
     "    # " + GENESIS_PN81_MARKER + "\n"
-    "    # Implementa on_schedule_end (hook documentado del secondary tier,\n"
-    "    # que vLLM deja como no-op) para aplicar una cuota de disco. Sin esto\n"
-    "    # root_dir crece sin techo: el tier fs no tiene poda propia.\n"
+    "    # Extiende el on_schedule_end de upstream (que solo hace flush del\n"
+    "    # lookup manager) con la cuota de disco. Sin esto root_dir crece sin\n"
+    "    # techo: el tier fs no tiene poda propia.\n"
     "    # Ver wiring/hybrid/patch_N81_kv_disk_tier_quota.py\n"
     "    @override\n"
-    "    def on_schedule_end(self) -> None:\n"
+    "    def on_schedule_end(self, context: ScheduleEndContext) -> None:\n"
+    "        self._lookup_manager.flush()\n"
     "        import os as _g81_os\n"
     "        if _g81_os.environ.get('GENESIS_ENABLE_PN81_KV_DISK_QUOTA') != '1':\n"
     "            return\n"
@@ -281,8 +284,7 @@ ANCHOR_NEW = (
     "                import sys as _g81_s2\n"
     "                print('[PN81] la poda fallo y se desactiva (el engine sigue '\n"
     "                      'normal): %r' % (_g81_err,), file=_g81_s2.stderr, flush=True)\n"
-    "\n"
-) + ANCHOR_OLD
+)
 
 
 
@@ -294,7 +296,7 @@ ANCHOR_NEW = (
 # arranque siguiente murio con `madvise: Bad address`.
 # Se limpia al ARRANCAR (no al cerrar), que es lo unico que se puede garantizar.
 SHM_ANCHOR_OLD = (
-    '        self.mmap_path = f"/dev/shm/vllm_offload_{instance_id}.mmap"\n'
+    '        self.mmap_path = f"/dev/shm/vllm_offload_{engine_id}.mmap"\n'
 )
 
 SHM_ANCHOR_NEW = (
@@ -387,7 +389,8 @@ def _patcher() -> TextPatcher | None:
         upstream_drift_markers=[
             # Si upstream le agrega cuota propia al tier de disco, este parche
             # sobra y podria pelearse con la de ellos -> SKIP limpio.
-            "def on_schedule_end",
+            # (on_schedule_end ya existe en 0.27 pero solo hace flush del
+            # lookup manager: no es senal de cuota.)
             "max_bytes",
             "capacity_bytes",
         ],

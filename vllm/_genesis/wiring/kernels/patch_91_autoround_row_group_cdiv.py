@@ -9,10 +9,14 @@ Gemma4 AutoRound serving gaps on top of GPTQMarlin row groups").
 ROOT CAUSE
 ================================================================
 
-`vllm/model_executor/layers/quantization/gptq_marlin.py:395-402` computes:
+`vllm/model_executor/layers/quantization/auto_gptq.py:373-378` computes:
 
     scales_and_zp_input_dim = 0
     scales_and_zp_size = input_size_per_partition // group_size
+
+(Migración v0.27.1: el sitio vivía en `gptq_marlin.py` en pins previos;
+upstream consolidó GPTQ+Marlin en `auto_gptq.py` — mismo código,
+mismo bug.)
 
 When `input_size_per_partition % group_size != 0` (e.g. AutoRound INT4/INT8
 checkpoints where a row-parallel layer's per-rank shard does NOT divide
@@ -57,16 +61,19 @@ benchmark of Lorbus before/after this patch.
 FIX (text-patch, 3 anchored sub-patches in 2 files)
 ================================================================
 
-1. **gptq_marlin.py L402** — replace `input_size // group_size` with
+1. **auto_gptq.py L373** — replace `input_size // group_size` with
    `cdiv(input_size, group_size)` (the `repeat_scales_on_all_ranks` branch).
-2. **gptq_marlin.py L407** — replace `input_size_per_partition // group_size`
+2. **auto_gptq.py L378** — replace `input_size_per_partition // group_size`
    with `cdiv(input_size_per_partition, group_size)` (the row-parallel branch).
-3. **gptq_marlin.py L470** — register `row_group_size` and
+3. **auto_gptq.py L442** — register `row_group_size` and
    `row_input_size_per_partition` on `scales` and `qzeros` so the loader
    can compute the correct global group offset.
-4. **parameter.py L219-225** — replace the start_idx computation in
+4. **parameter.py L220-224** — replace the start_idx computation in
    `RowvLLMParameter.load_row_parallel_weight` with the group-aware variant
    from the PR.
+
+(Números de línea re-verificados contra el pin v0.27.1 en
+`assets/vllm`; los sitios vivían en `gptq_marlin.py` con el pin v0.23.0.)
 
 We deliberately DO NOT port the MoE-side changes (`gate_linear.py`,
 `moe_wna16.py`, `gemma4.py`) — those are Gemma4-specific and unrelated to
@@ -107,7 +114,7 @@ log = logging.getLogger("genesis.wiring.p91_autoround_row_group_cdiv")
 GENESIS_P91_MARKER = "Genesis P91 AutoRound row-group cdiv (vllm#39460) v7.62.1"
 
 
-# ─── gptq_marlin.py: 3 sub-patches ─────────────────────────────────────────
+# ─── auto_gptq.py: 3 sub-patches ───────────────────────────────────────────
 
 P91_GM_ANCHOR_FLOOR_INPUT_SIZE = (
     "            scales_and_zp_size = input_size // group_size\n"
@@ -173,14 +180,16 @@ P91_GM_REPLACE_REGISTER_SCALES = (
 
 
 def _make_gm_patcher() -> TextPatcher | None:
+    # Migración v0.27.1: `gptq_marlin.py` ya no existe como módulo propio;
+    # GPTQMarlin vive en `auto_gptq.py` (mismo sitio create_weights).
     target = resolve_vllm_file(
-        "model_executor/layers/quantization/gptq_marlin.py"
+        "model_executor/layers/quantization/auto_gptq.py"
     )
     if target is None:
         return None
     return TextPatcher(
         patch_name=(
-            "P91 gptq_marlin.py — cdiv groups + row-group attrs (vllm#39460)"
+            "P91 auto_gptq.py — cdiv groups + row-group attrs (vllm#39460)"
         ),
         target_file=str(target),
         marker=GENESIS_P91_MARKER + "_gptq_marlin",
@@ -297,7 +306,7 @@ def apply() -> tuple[str, str]:
 
     gm = _make_gm_patcher()
     if gm is None:
-        return "skipped", "gptq_marlin.py not found"
+        return "skipped", "auto_gptq.py not found"
     param = _make_param_patcher()
     if param is None:
         return "skipped", "parameter.py not found"
@@ -325,7 +334,7 @@ def apply() -> tuple[str, str]:
         if marker in gm_content and not gm_already:
             return (
                 "skipped",
-                f"upstream drift in gptq_marlin.py: {marker!r} present "
+                f"upstream drift in auto_gptq.py: {marker!r} present "
                 "without our marker — upstream may have merged equivalent fix",
             )
     for marker in param.upstream_drift_markers:
@@ -360,7 +369,7 @@ def apply() -> tuple[str, str]:
             _d = f" ({failure.detail})" if (failure and failure.detail) else ""
             return "skipped", (
                 f"{param.patch_name}: {_r}{_d} "
-                "(P91 partial: gptq_marlin.py applied but parameter.py "
+                "(P91 partial: auto_gptq.py applied but parameter.py "
                 "skipped — re-apply needed for matching pair)"
             )
         if result == TextPatchResult.FAILED:
@@ -372,7 +381,7 @@ def apply() -> tuple[str, str]:
 
     return (
         "applied",
-        "P91 applied (DUAL FILE): gptq_marlin.py uses cdiv() for scale rows "
+        "P91 applied (DUAL FILE): auto_gptq.py uses cdiv() for scale rows "
         "and tags scales/qzeros with row_group_size + "
         "row_input_size_per_partition; parameter.py uses group-aware "
         "start_idx for row-parallel scale/zero loading. Fixes silent dequant "

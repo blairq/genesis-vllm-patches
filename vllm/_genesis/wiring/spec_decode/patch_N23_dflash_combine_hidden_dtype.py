@@ -57,17 +57,14 @@ log = logging.getLogger("genesis.wiring.pn23_dflash_combine_hidden_dtype")
 
 GENESIS_PN23_MARKER = "Genesis PN23 DFlash combine_hidden_states dtype cast v7.65"
 
+# v0.27.1: upstream añadió validación de shape (fc.input_size) entre el
+# squeeze y la llamada a fc; el anchor se reduce a la línea única de la
+# llamada y el cast se inserta inmediatamente antes.
 PN23_ANCHOR = (
-    "        needs_squeeze = hidden_states.dim() == 1\n"
-    "        if needs_squeeze:\n"
-    "            hidden_states = hidden_states.unsqueeze(0)\n"
     "        result = self.model.fc(hidden_states)\n"
 )
 
 PN23_REPLACEMENT = (
-    "        needs_squeeze = hidden_states.dim() == 1\n"
-    "        if needs_squeeze:\n"
-    "            hidden_states = hidden_states.unsqueeze(0)\n"
     "        # [Genesis PN23] vllm#40334 backport — cast to fc params_dtype to\n"
     "        # handle mixed-precision targets (AWQ + non-quantized, FP8 + BF16 mix).\n"
     "        # params_dtype is the intended compute dtype; weight.dtype may be a\n"

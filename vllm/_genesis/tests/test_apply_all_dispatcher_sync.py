@@ -67,6 +67,17 @@ _KNOWN_REGISTRY_ONLY = frozenset({
     # registry entry is for `genesis explain` visibility. Real wiring
     # only matters when SM 12.0 hardware is detected at boot.
     "PN64",
+    # B2/B3/B5/B7 (CK-4.x super-kernel series) are registered with bare
+    # "B" IDs but their apply_patch_* functions carry descriptive suffixes
+    # (apply_patch_B2_full_cg, apply_patch_B5_rejection_sampler,
+    # apply_patch_B7_lm_head, and B3 wired via communication/patch_B3_custom_ar
+    # through rebind.py). The ID extractor in this test forces a "P" prefix
+    # and so cannot match the "B" family — document the asymmetry here
+    # instead of renaming the registry keys.
+    "B2",
+    "B3",
+    "B5",
+    "B7",
 })
 
 _KNOWN_APPLY_ONLY: frozenset[str] = frozenset({

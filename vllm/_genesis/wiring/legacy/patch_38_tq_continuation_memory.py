@@ -505,6 +505,24 @@ def apply() -> tuple[str, str]:
     if impl_cls is None:
         return "skipped", "TurboQuant backend not available"
 
+    # [v0.27.1] Superseded guard: upstream natively adopted the shared
+    # WorkspaceManager dequant path (PR #40655-class) inside
+    # `_continuation_prefill` — correctly-shaped 4-D shared k_buf/v_buf,
+    # no `.contiguous()` transients, pre-allocated k_full/v_full slice-copy
+    # instead of `torch.cat`, and cached `_cu_2` int32 tensors. That is the
+    # exact fix-set of this patch; rebinding our dev134-era body would
+    # REGRESS the native implementation. Self-skip when present.
+    try:
+        import importlib as _il
+        _tqa = _il.import_module("vllm.v1.attention.backends.turboquant_attn")
+        if hasattr(_tqa, "current_workspace_manager"):
+            return "skipped", (
+                "superseded: native WorkspaceManager dequant path "
+                "(current_workspace_manager) already implements P38's fixes"
+            )
+    except Exception:
+        pass
+
     if not hasattr(impl_cls, "_continuation_prefill"):
         return "skipped", (
             "TurboQuantAttentionImpl._continuation_prefill not present "

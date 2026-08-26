@@ -409,7 +409,7 @@ def _is_enabled() -> bool:
 
 def _patcher() -> TextPatcher | None:
     target = resolve_vllm_file(
-        "model_executor/layers/fla/ops/chunk_delta_h.py"
+        "third_party/flash_linear_attention/ops/chunk_delta_h.py"
     )
     if target is None:
         return None
@@ -454,7 +454,7 @@ def apply() -> tuple[str, str]:
         return "skipped", "vllm install root not discoverable"
     p = _patcher()
     if p is None:
-        return "skipped", "fla/ops/chunk_delta_h.py not found"
+        return "skipped", "third_party/flash_linear_attention/ops/chunk_delta_h.py not found"
     # captura del config: sin esto la sonda no puede leer intermediate_size y
     # el FFN queda sin contar. Best-effort: si el ancla derivo, el resto de PN80
     # sigue sirviendo (avisa en el reporte que el margen real es menor).

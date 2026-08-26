@@ -345,7 +345,17 @@ def test_observe_bucket_emite_las_tres_familias(sink):
     M.observe_bucket(fake, sink.drain(), 0)
     out2 = prom.generate_latest(reg).decode()
     assert "150.0" in out2, "el contador debe acumular"
-    assert "2.5e+010" in out2 or "25000000000.0" in out2, "el gauge debe pisar"
+    # El gauge pisa: prometheus_client >= 3 renderiza 25e9 estilo Go
+    # ("2.5e+10"); versiones viejas usaban exponente zero-padded
+    # ("2.5e+010") o repr Python ("25000000000.0").
+    assert (
+        "2.5e+10" in out2 or "2.5e+010" in out2 or "25000000000.0" in out2
+    ), "el gauge debe pisar"
+    # Y NO acumuló con la medicion anterior (27e9 + 25e9 = 52e9).
+    assert (
+        "5.2e+10" not in out2 and "5.2e+010" not in out2
+        and "52000000000.0" not in out2
+    ), "el gauge no debe acumular entre drains"
 
 
 def test_observe_bucket_nunca_lanza():
@@ -384,9 +394,9 @@ def test_anclas_apuntan_a_los_sitios_correctos():
     assert "JobResult(job_id=job_id, success=success)" in W.A3_OLD
     assert "primary_hit = self.primary_tier.lookup" in W.B1_OLD
     assert "_initiate_promotion" in W.B2_OLD
-    assert "We only emit stats from the worker-side" in W.C_OLD
-    assert "assert isinstance(accumulator, list)" in W.D1_OLD
-    assert "assert isinstance(ops_list, list)" in W.D2_OLD
+    assert "def get_kv_connector_stats(self) -> KVConnectorStats | None:" in W.C_OLD
+    assert "other_values.items()" in W.D1_OLD
+    assert "Unknown offloading stats key" in W.D2_OLD
 
 
 def test_cada_reemplazo_conserva_el_codigo_original():
@@ -404,12 +414,12 @@ def test_cada_reemplazo_conserva_el_codigo_original():
 def test_a3_envuelve_sin_cambiar_la_semantica():
     W = _wiring()
     assert "finish_job(self, JobResult(job_id=job_id, success=success))" in W.A3_NEW
-    assert "for job_id, success in self._pool.get_finished()" in W.A3_NEW
+    assert "_g88.finish_job(self, JobResult(job_id=job_id, success=success))" in W.A3_NEW
 
 
 def test_c_preserva_el_camino_del_worker():
     W = _wiring()
-    assert "return self.connector_worker.get_kv_connector_stats()" in W.C_NEW
+    assert "return _g88_stats" in W.C_NEW
     assert "_g88.sink().drain()" in W.C_NEW
 
 

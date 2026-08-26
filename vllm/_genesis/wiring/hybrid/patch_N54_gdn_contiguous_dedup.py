@@ -1,6 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Wiring for PN54 (plan v3 P0.7) — GDN contiguous-call deduplication.
 
+OBSOLETO en v0.27.1: upstream absorbió ambos fixes.
+Sub-A: la línea anclada (`ssm_state[...].contiguous()`) ya no existe —
+`_forward_core` hace `initial_state = ssm_state[prefill_state_indices]`
+sin `.contiguous()` redundante (v0.27.1, builder de metadata prefiere
+índices de prefill). Sub-B: la rama LoRA `hasattr(self, 'in_proj_qkv')`
+con `chunk()+.contiguous()` fue refactorizada fuera del forward CUDA
+(create_qkvz_proj factory). El módulo queda como registro histórico;
+sus anchors ya no calzan y apply() termina en no-op limpio.
+
 Removes redundant `.contiguous()` calls in `gdn_linear_attn.py` that are
 already guaranteed contiguous by upstream operator semantics OR re-enforced
 by FLA's `@input_guard` decorator on every entry point.
@@ -114,7 +123,9 @@ LORA_BA_NEW = (
 
 
 def _make_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/mamba/gdn_linear_attn.py")
+    target = resolve_vllm_file(
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+    )
     if target is None:
         return None
     return TextPatcher(

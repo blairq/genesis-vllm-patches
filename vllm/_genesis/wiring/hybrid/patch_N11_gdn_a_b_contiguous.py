@@ -15,8 +15,8 @@ WHAT IT DOES
 ================================================================
 
 In `GatedDeltaNetAttention.fix_query_key_value_ordering`
-(`vllm/model_executor/layers/mamba/gdn_linear_attn.py`), the final reshape
-of `b` and `a`:
+(`vllm/model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py`), the
+final reshape of `b` and `a`:
 
     b = b.reshape(b.size(0), self.num_v_heads // self.tp_size)
     a = a.reshape(a.size(0), self.num_v_heads // self.tp_size)
@@ -114,12 +114,14 @@ PN11_REPLACEMENT = (
 
 
 def _make_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/mamba/gdn_linear_attn.py")
+    target = resolve_vllm_file(
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+    )
     if target is None:
         return None
     return TextPatcher(
         patch_name=(
-            "PN11 model_executor/layers/mamba/gdn_linear_attn.py — "
+            "PN11 model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py — "
             "force a/b contiguity in fix_query_key_value_ordering (vllm#41142)"
         ),
         target_file=str(target),

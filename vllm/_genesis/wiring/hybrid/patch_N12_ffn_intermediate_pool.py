@@ -101,13 +101,16 @@ GENESIS_PN12_MARKER = (
 
 
 # ─── Sub-patch: replace SiluAndMul.forward_cuda body ──────────────────────
-# Anchor matches the exact 4-line body:
+# Anchor matches the exact body:
 #     def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:
 #         d = x.shape[-1] // 2
 #         output_shape = x.shape[:-1] + (d,)
 #         out = torch.empty(output_shape, dtype=x.dtype, device=x.device)
 #         self.op(out, x)
 #         return out
+# plus the trailing forward_xpu/forward_cpu and next-class decorator,
+# which disambiguate SiluAndMul from the byte-identical bodies of
+# MulAndSilu and GeluAndMul in the same file (v0.27.1).
 
 PN12_SILU_ANCHOR = (
     "    def forward_cuda(self, x: torch.Tensor) -> torch.Tensor:\n"
@@ -120,8 +123,13 @@ PN12_SILU_ANCHOR = (
     "    def forward_xpu(self, x: torch.Tensor) -> torch.Tensor:\n"
     "        return self.forward_cuda(x)\n"
     "\n"
+    "    def forward_cpu(self, x: torch.Tensor) -> torch.Tensor:\n"
+    "        if current_platform.get_cpu_architecture() == CpuArchEnum.POWERPC:\n"
+    "            return self.forward_cuda(x)\n"
+    "        return self.forward_native(x)\n"
     "\n"
-    "@CustomOp.register(\"silu_and_mul_with_clamp\")\n"
+    "\n"
+    "@CustomOp.register(\"situ_and_mul\")\n"
 )
 
 PN12_SILU_REPLACEMENT = (
@@ -158,8 +166,13 @@ PN12_SILU_REPLACEMENT = (
     "    def forward_xpu(self, x: torch.Tensor) -> torch.Tensor:\n"
     "        return self.forward_cuda(x)\n"
     "\n"
+    "    def forward_cpu(self, x: torch.Tensor) -> torch.Tensor:\n"
+    "        if current_platform.get_cpu_architecture() == CpuArchEnum.POWERPC:\n"
+    "            return self.forward_cuda(x)\n"
+    "        return self.forward_native(x)\n"
     "\n"
-    "@CustomOp.register(\"silu_and_mul_with_clamp\")\n"
+    "\n"
+    "@CustomOp.register(\"situ_and_mul\")\n"
 )
 
 

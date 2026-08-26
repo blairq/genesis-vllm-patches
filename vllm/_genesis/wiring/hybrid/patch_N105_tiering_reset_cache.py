@@ -1,6 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Wiring de Genesis PN105 — `reset_cache()` del tiering manager, que no existia.
 
+OBSOLETO en v0.27.1: upstream absorbió ambos fixes.
+(1) `TieringOffloadingManager.reset_cache()` ahora existe y es MAS completo
+que el nuestro (drena jobs de secundarios con drain_jobs(), procesa jobs
+terminados y limpia promociones pendientes antes de resetear el primario).
+(2) El reset del connector hace `status.transfer_jobs.clear()` en el mismo
+loop donde resetea `next_stored_chunk_idx` (v0.27.1 renombro block->chunk).
+El modulo queda como registro historico; sus anchors ya no calzan.
+
 `OffloadingManager.reset_cache()` en base.py es un no-op (`return`).
 `CPUOffloadingManager` lo implementa bien, pero **`TieringOffloadingManager`
 NO lo sobreescribe**, asi que hereda el vacio. Y como devuelve `None` y no

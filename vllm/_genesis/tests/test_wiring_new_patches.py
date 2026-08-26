@@ -575,22 +575,41 @@ class TestPatch27:
 #                    P7 — GDN dual-stream in_proj
 # ────────────────────────────────────────────────────────────────────────
 
+# [v0.27.1] gdn_linear_attn.py was split into mamba/gdn/; the LoRA
+# conditional left forward_cuda and the dual-GEMM pair now sits directly
+# in forward_cuda under the "Part 1: Input Projection" banner. The same
+# (or a near-identical) pair also exists in forward_xpu (banner, but
+# projected_states_* names) and forward_cpu (same names, no banner) —
+# the baseline mirrors that so disambiguation stays under test.
 _P7_BASELINE = '''# SPDX-License-Identifier: Apache-2.0
 import torch
 
 
-class GatedDeltaNet:
-    def forward_cuda(self, hidden_states, output):
-        """forward_cuda: two paths, LoRA and non-LoRA."""
+class QwenGatedDeltaNet:
+    def forward_cuda(self, hidden_states):
+        """Forward pass with three parts."""
         num_tokens = hidden_states.size(0)
-        if hasattr(self, "in_proj_qkv"):
-            mixed_qkv, _ = self.in_proj_qkv(hidden_states)
-            ba, _ = self.in_proj_ba(hidden_states)
-            z, _ = self.in_proj_z(hidden_states)
-        else:
-            mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
-            ba, _ = self.in_proj_ba(hidden_states)
-            # downstream processing
+        # ============================================================
+        # Part 1: Input Projection
+        # ============================================================
+        mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
+        ba, _ = self.in_proj_ba(hidden_states)
+        # downstream processing
+        return mixed_qkvz, ba
+
+    def forward_xpu(self, hidden_states):
+        num_tokens = hidden_states.size(0)
+        # ============================================================
+        # Part 1: Input Projection
+        # ============================================================
+        projected_states_qkvz, _ = self.in_proj_qkvz(hidden_states)
+        projected_states_ba, _ = self.in_proj_ba(hidden_states)
+        return projected_states_qkvz, projected_states_ba
+
+    def forward_cpu(self, hidden_states):
+        assert not hasattr(self, "in_proj_qkv"), "lora isn't supported on CPU."
+        mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)
+        ba, _ = self.in_proj_ba(hidden_states)
         return mixed_qkvz, ba
 '''
 
@@ -640,15 +659,20 @@ class TestPatch7Deferred:
         assert "DualStreamDispatcher.maybe_parallel" in content
         assert "[Genesis P7]" in content
 
-    def test_env_enabled_only_non_lora_branch(
+    def test_env_enabled_only_cuda_branch(
         self, fake_gdn_linear_attn, monkeypatch,
     ):
+        # [v0.27.1] The LoRA conditional is gone from forward_cuda; the
+        # intent survives as: patch ONLY forward_cuda's pair, leaving the
+        # identical forward_cpu pair and the banner'd forward_xpu pair
+        # untouched.
         from vllm._genesis.wiring.legacy import patch_7_gdn_dual_stream as p7
         monkeypatch.setenv("GENESIS_ENABLE_P7", "1")
         p7.apply()
         content = open(fake_gdn_linear_attn).read()
-        assert "mixed_qkv, _ = self.in_proj_qkv(hidden_states)" in content
-        assert content.count("mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)") == 0
+        assert "DualStreamDispatcher.maybe_parallel" in content
+        assert content.count("mixed_qkvz, _ = self.in_proj_qkvz(hidden_states)") == 1
+        assert "projected_states_qkvz, _ = self.in_proj_qkvz(hidden_states)" in content
 
     def test_env_enabled_idempotent(self, fake_gdn_linear_attn, monkeypatch):
         from vllm._genesis.wiring.legacy import patch_7_gdn_dual_stream as p7

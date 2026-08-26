@@ -132,13 +132,15 @@ def _looks_recurrent(kv_cache_spec: object) -> bool:
     """¿Este KVCacheSpec guarda estado recurrente?
 
     Se prueba `isinstance(..., MambaSpec)` primero; si el import falla (versión
-    de vLLM distinta) se cae a duck-typing sobre el nombre de la clase y el
-    atributo `mamba_type`, que sólo existe en MambaSpec.
+    de vLLM distinta) O el isinstance no matchea (specs sintéticos de test,
+    subclasses de otro árbol), se cae a duck-typing sobre el nombre de la
+    clase y el atributo `mamba_type`, que sólo existe en MambaSpec.
     """
     try:
         from vllm.v1.kv_cache_interface import MambaSpec
 
-        return isinstance(kv_cache_spec, MambaSpec)
+        if isinstance(kv_cache_spec, MambaSpec):
+            return True
     except Exception:
         pass
     return type(kv_cache_spec).__name__ == "MambaSpec" or hasattr(

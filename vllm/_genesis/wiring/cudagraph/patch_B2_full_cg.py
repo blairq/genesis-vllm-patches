@@ -13,14 +13,14 @@ En ``assets/vllm``:
   interfaces/generic, no hay logica de CG mode).
 * ``vllm/v1/worker`` — hits en:
 
-  - ``vllm/v1/worker/gpu_model_runner.py:4157, 5775, 5807, 6602``
-    (``pad_attn = cudagraph_mode == CUDAGraphMode.FULL`` y
+  - ``vllm/v1/worker/gpu_model_runner.py:4318, 6015, 6067`` (y vecinos,
+    ``pad_attn = cudagraph_mode == CUDAGraphMode.FULL`` y
     ``cudagraph_runtime_mode == CUDAGraphMode.FULL`` — selects
     de atencion, no degradan).
-  - ``vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py:84``
+  - ``vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py:70``
     (``if cudagraph_mode.decode_mode() == CUDAGraphMode.FULL:
     cudagraph_mode = CUDAGraphMode.FULL_DECODE_ONLY``) — **DEGRADA**.
-  - ``vllm/v1/worker/gpu/cudagraph_utils.py:52`` (``CG mode`` docstring).
+  - ``vllm/v1/worker/gpu/cudagraph_utils.py:50`` (``CG mode`` docstring).
 
 El camino que degrada es
 ``vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py``
@@ -41,7 +41,7 @@ el drafter pierde el FULL CG y la latencia de draft sube
 
 Segundo sitio con el mismo patron (no en v1/worker pero
 documentado aqui para trazabilidad) es
-``vllm/v1/spec_decode/llm_base_proposer.py:386``:
+``vllm/v1/spec_decode/llm_base_proposer.py:417-422``:
 
     if cudagraph_mode.mixed_mode() in [PIECEWISE, FULL]:
         eagle_cudagraph_mode = PIECEWISE
@@ -107,7 +107,8 @@ ENV_FLAG = "GENESIS_ENABLE_B2_FULL_CG"
 GENESIS_B2_MARKER = "Genesis B2 FULL CG for long prefill v1"
 
 # ─── Anchor: init_cudagraph_manager degrada FULL -> FULL_DECODE_ONLY ──────
-# Copiado verbatim de assets/vllm/vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py:84-87
+# Copiado verbatim de assets/vllm/vllm/v1/worker/gpu/spec_decode/autoregressive/speculator.py:70-74
+# (re-verificado en el pin v0.27.1; estaba en :84-87 con v0.23.0).
 # (indent 8 espacios dentro de clase). Debe matchear exactamente una ocurrencia.
 B2_OLD = (
     "        # PIECEWISE cudagraphs are not supported for draft decodes.\n"

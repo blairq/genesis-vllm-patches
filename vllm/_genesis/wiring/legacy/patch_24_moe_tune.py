@@ -76,27 +76,30 @@ UPSTREAM_DRIFT_MARKERS = [
 
 
 # Anchor 1: fp8_w8a8 block-quant config dict (line 1255-1256 in baseline).
+# [v0.27.1] The fp8_w8a8 block-quant branch now computes BLOCK_SIZE_N /
+# num_stages in a local if/elif ladder (`block_n`, `num_stages`) before the
+# dict literal; re-anchored to the refactored dict (count==1 verified).
 _OLD_FP8_CFG = (
     "        config = {\n"
     "            \"BLOCK_SIZE_M\": 16 if M <= 64 else 64,\n"
-    "            \"BLOCK_SIZE_N\": block_shape[0],\n"
+    "            \"BLOCK_SIZE_N\": block_n,\n"
     "            \"BLOCK_SIZE_K\": block_shape[1],\n"
     "            \"GROUP_SIZE_M\": 1 if M <= 16 else 32,\n"
     "            \"SPLIT_K\": 1,\n"
     "            \"num_warps\": 4,\n"
-    "            \"num_stages\": 3 if not current_platform.is_rocm() else num_stages_rocm,\n"
+    "            \"num_stages\": num_stages,\n"
     "        }"
 )
 
 _NEW_FP8_CFG = (
     "        config = {\n"
     "            \"BLOCK_SIZE_M\": 16 if M <= 64 else 64,\n"
-    "            \"BLOCK_SIZE_N\": block_shape[0],\n"
+    "            \"BLOCK_SIZE_N\": block_n,\n"
     "            \"BLOCK_SIZE_K\": block_shape[1],\n"
     "            \"GROUP_SIZE_M\": 1 if M <= 16 else 32,\n"
     "            \"SPLIT_K\": 1,\n"
     "            \"num_warps\": 4,\n"
-    "            \"num_stages\": 3 if not current_platform.is_rocm() else num_stages_rocm,\n"
+    "            \"num_stages\": num_stages,\n"
     "        }\n"
     "        # [Genesis P24] per-SM / env override for num_warps + num_stages\n"
     "        try:\n"

@@ -8,6 +8,13 @@ https://github.com/vllm-project/vllm/pull/39930
 "[Attention][Spec Decode] Allow independent drafter attention backend
 selection" by @MatthewBonanni (Matthew Bonanni), MERGED upstream.
 
+OBSOLETO desde el pin v0.27.1: el PR #39930 vive nativamente en
+`_create_draft_vllm_config` (llm_base_proposer.py ~linea 1296: `backend=
+spec_cfg.attention_backend` con reset incondicional del backend del
+drafter). El drift check de apply() detecta `spec_cfg.attention_backend`
+y PN9 se auto-retira; usar el flag upstream
+`--speculative-config.attention_backend`.
+
 ================================================================
 WHAT IT DOES (one paragraph)
 ================================================================

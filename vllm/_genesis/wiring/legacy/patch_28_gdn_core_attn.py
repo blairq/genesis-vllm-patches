@@ -94,7 +94,10 @@ _NEW_ALLOC = (
 
 
 def _make_patcher() -> TextPatcher | None:
-    target = resolve_vllm_file("model_executor/layers/mamba/gdn_linear_attn.py")
+    # [v0.27.1] gdn_linear_attn.py → mamba/gdn/qwen_gdn_linear_attn.py
+    target = resolve_vllm_file(
+        "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py"
+    )
     if target is None:
         return None
     return TextPatcher(
@@ -122,20 +125,33 @@ _INIT_WRAPPED_ATTR = "_genesis_p28_init_wrapped"
 
 # Candidate class names across vLLM versions. Older baselines named the
 # class `GatedDeltaNet`; post-2026-04 renamed to `GatedDeltaNetAttention`
-# (to reflect the PluggableLayer / MambaBase mixin). We try both and use
-# whichever imports cleanly.
-_CANDIDATE_CLASS_NAMES = ("GatedDeltaNetAttention", "GatedDeltaNet")
+# (to reflect the PluggableLayer / MambaBase mixin). In 0.27.1 the module
+# was split into `mamba/gdn/` and the Qwen concrete class is
+# `QwenGatedDeltaNetAttention`. We try all and use whichever imports.
+_CANDIDATE_CLASS_NAMES = (
+    "QwenGatedDeltaNetAttention",
+    "GatedDeltaNetAttention",
+    "GatedDeltaNet",
+)
+
+# Candidate modules, newest first.
+_CANDIDATE_MODULE_PATHS_P28 = (
+    "vllm.model_executor.layers.mamba.gdn.qwen_gdn_linear_attn",  # 0.27.x
+    "vllm.model_executor.layers.mamba.gdn_linear_attn",           # ≤0.23.x
+)
 
 
 def _resolve_gdn_class():
-    """Import the GDN class, trying known names. Returns class or None."""
-    try:
-        import importlib
-        mod = importlib.import_module(
-            "vllm.model_executor.layers.mamba.gdn_linear_attn"
-        )
-    except Exception as e:
-        log.info("[Genesis P28] gdn_linear_attn module not importable: %s", e)
+    """Import the GDN class, trying known modules/names. Returns class or None."""
+    import importlib
+    mod = None
+    for modpath in _CANDIDATE_MODULE_PATHS_P28:
+        try:
+            mod = importlib.import_module(modpath)
+            break
+        except Exception as e:
+            log.info("[Genesis P28] %s not importable: %s", modpath, e)
+    if mod is None:
         return None
     for name in _CANDIDATE_CLASS_NAMES:
         cls = getattr(mod, name, None)

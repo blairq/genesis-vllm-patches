@@ -42,13 +42,14 @@ def _is_enabled() -> bool:
     ).strip().lower() in ("1", "true", "yes", "on")
 
 
-# Anchor on stable finish_reason_ if/else block (lines 1084-1093 pristine)
+# Re-anclado 2026-08-26 para pin v0.27.1: el bloque finish_reason del
+# stream generator ya no evalúa auto_tools_called/use_harmony (quedó en
+# `if tools_streamed[i] and not tool_choice_function_name:`). La condición
+# `not auto_tools_called` se cubre con `not tools_streamed[i]`; el reasoner
+# se consulta vía `parser.reasoning_parser` (ParserManager facade).
+# GenerationError se movió a entrypoints/openai/engine/protocol.py.
 ANCHOR_OLD = (
-    "                        if (\n"
-    "                            auto_tools_called\n"
-    "                            or (tools_streamed[i] and not tool_choice_function_name)\n"
-    "                            or (self.use_harmony and harmony_tools_streamed[i])\n"
-    "                        ):\n"
+    "                        if tools_streamed[i] and not tool_choice_function_name:\n"
     "                            finish_reason_ = \"tool_calls\"\n"
     "                        else:\n"
     "                            finish_reason_ = (\n"
@@ -58,11 +59,7 @@ ANCHOR_OLD = (
 )
 
 ANCHOR_NEW = (
-    "                        if (\n"
-    "                            auto_tools_called\n"
-    "                            or (tools_streamed[i] and not tool_choice_function_name)\n"
-    "                            or (self.use_harmony and harmony_tools_streamed[i])\n"
-    "                        ):\n"
+    "                        if tools_streamed[i] and not tool_choice_function_name:\n"
     "                            finish_reason_ = \"tool_calls\"\n"
     "                        else:\n"
     "                            finish_reason_ = (\n"
@@ -74,19 +71,21 @@ ANCHOR_NEW = (
     "                        # author): EOS at reasoning→tool_call boundary leaves\n"
     "                        # finish_reason=stop with no content/tool_calls. Raise\n"
     "                        # retryable error so client retries instead of seeing\n"
-    "                        # silent empty response. Defensive: 6 AND-conditions,\n"
+    "                        # silent empty response. Defensive AND-conditions,\n"
     "                        # no impact on happy path.\n"
     "                        if (\n"
     "                            finish_reason_ == \"stop\"\n"
     "                            and request.tools\n"
     "                            and not tools_streamed[i]\n"
-    "                            and not auto_tools_called\n"
-    "                            and reasoning_parser is not None\n"
+    "                            and parser is not None\n"
+    "                            and parser.reasoning_parser is not None\n"
     "                            and delta_message is not None\n"
     "                            and not delta_message.content\n"
     "                            and not delta_message.tool_calls\n"
     "                        ):\n"
-    "                            from vllm.entrypoints.openai.chat_completion.protocol import GenerationError as _P107_GenError\n"
+    "                            from vllm.entrypoints.openai.engine.protocol import (\n"
+    "                                GenerationError as _P107_GenError,\n"
+    "                            )\n"
     "                            logger.warning(\n"
     "                                \"[Genesis P107] MTP truncation detected for request %s: \"\n"
     "                                \"finished with 'stop' but tools configured and only \"\n"

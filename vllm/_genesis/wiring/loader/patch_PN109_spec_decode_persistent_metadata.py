@@ -7,14 +7,12 @@ Genesis-original 2026-08-24.
 El problema
 -----------
 En cada paso de spec-decode, `GPUModelRunner._calc_spec_decode_metadata`
-(`vllm/v1/worker/gpu_model_runner.py:2730-2808`) calcula 5 arrays numpy en CPU
-y, al final, hace **5 copias H2D independientes** con
-`torch.from_numpy(arr).to(device, non_blocking=True)`. Cada una de esas
-`from_numpy` produce un tensor **pageable** (no pinned) de vida corta, así que
-el `non_blocking=True` no llega a ser asíncrono de verdad: el copy engine
-debe esperar a que la página sea copiada a una buffer intermedia, y además se
-re-alocan 5 tensores por paso. El TODO upstream en :2778 lo pide explícitamente:
-"Optimize the CPU -> GPU copy".
+(`vllm/v1/worker/gpu_model_runner.py:2851-2942` en v0.27.1) calcula 5 arrays numpy en CPU
+y, al final, hace **5 copias H2D independientes** vía `async_tensor_h2d(...)`. Cada
+llamada re-crea un tensor pinned desde el array numpy (`pin_memory()` por copia,
+5 alojamientos nuevos por paso) y luego `to(device, non_blocking=True)`. El
+movimiento es asíncrono, pero se re-alocan 5 tensores pinned por paso y no hay
+reutilización entre pasos.
 
 La solución
 -----------
@@ -35,7 +33,7 @@ El rebind
 wrapper: (1) llama `spec_decode_metadata_numpy` con `self._get_cumsum_and_arange`
 y `self._arange_scratch` (misma matemática y dtypes que upstream), (2) sube los
 5 arrays por la cache persistente, (3) recalcula `draft_token_ids` igual que
-upstream (:2795-2798 con `self.input_ids.gpu`) y (4) devuelve el
+upstream (:2913-2914 en v0.27.1 con `self.input_ids.gpu`) y (4) devuelve el
 `SpecDecodeMetadata` con `num_draft_tokens.tolist()` intacto.
 
 Restricción de validez intra-paso
@@ -108,8 +106,9 @@ def spec_decode_metadata_numpy(
 ) -> dict[str, np.ndarray]:
     """Calcula en CPU los 5 arrays de metadata de spec-decode.
 
-    Replica EXACTO las líneas 2745-2776 de
-    `GPUModelRunner._calc_spec_decode_metadata` (vllm 0.23.0): misma
+    Replica EXACTO las líneas 2868-2897 de
+    `GPUModelRunner._calc_spec_decode_metadata` (vllm 0.23.0; verificado
+    idéntico en v0.27.1): misma
     matemática y mismos dtypes que upstream. Aquí NO hay ninguna copia a GPU;
     eso lo hace `PersistentMetadataBuffers.upload`.
 
@@ -255,7 +254,7 @@ def _make_wrapper(original):
             buffers = PersistentMetadataBuffers(self.device)
             self._genesis_pn109_buffers = buffers
 
-        # Misma matemática y dtypes que upstream (:2745-2776).
+        # Misma matemática y dtypes que upstream (:2868-2897 en v0.27.1).
         meta = spec_decode_metadata_numpy(
             num_draft_tokens,
             cu_num_scheduled_tokens,
@@ -266,7 +265,7 @@ def _make_wrapper(original):
         # 5 H2D sobre buffers persistentes (pinned) en vez de 5 pageable.
         gpu = {key: buffers.upload(key, meta[key]) for key in _METADATA_KEYS}
 
-        # Compute the draft token ids (idéntico a upstream :2795-2798).
+        # Compute the draft token ids (idéntico a upstream :2913-2914).
         # draft_token_indices:      [  1,   2,   3, 105, 106, 208]
         draft_token_ids = self.input_ids.gpu[gpu["logits_indices"]]
         draft_token_ids = draft_token_ids[gpu["target_logits_indices"] + 1]

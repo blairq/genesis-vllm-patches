@@ -199,6 +199,18 @@ Numbers in "noise" parentheses are from `tools/genesis_bench_suite.py
 --mode standard --runs 25 --max-tokens 1024` runs on 2× RTX A5000
 2026-04-30. CV is 5-6%, so anything under ±2% is sampling noise.
 
+## vLLM pin compatibility (allowlist de `guards.py`)
+
+| Pin | Estado | Notas |
+|---|---|---|
+| `0.20.1rc1.dev16+g7a1eb8ac2` | 🟢 validated | v7.65 PROD baseline (2026-04-23 → 2026-05-04) |
+| `0.20.2rc1.dev9+g01d4d1ad3` | 🟢 validated | v7.70 pin-bump target (2026-05-04) |
+| `0.27.1` | 🟢 validated | Migración update/v0.27.1 (2026-08-25): `assets/vllm` @ tag `v0.27.1` (commit `6e448d0`), wiring re-anclado por categorías |
+
+Pins fuera de esta tabla arrancan en modo `warn`; con
+`GENESIS_VLLM_PIN_POLICY=strict` el boot aborta (fail fast contra pin
+drift).
+
 ## How to add patches to your launch script
 
 ```bash

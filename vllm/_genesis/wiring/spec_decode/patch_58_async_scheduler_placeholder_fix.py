@@ -185,15 +185,19 @@ def _make_request_patcher() -> TextPatcher | None:
 # alone — removing it cleanly is harder via TextPatcher and the harm of
 # leaving it is just a few bytes of unused state per scheduler instance.
 
+# Re-anchored for v0.27.1: the preceding `num_output_placeholders +=`
+# statement became a multi-line expression keyed on
+# `num_sampled_tokens_per_step`, so the anchor now starts at the unchanged
+# comment pair below. Verified unique (1 occurrence) on v0.27.1.
 ASYNC_SCHED_OLD = (
-    "            request.num_output_placeholders += 1 + cur_num_spec_tokens\n"
     "            # Add placeholders for the new draft/spec tokens.\n"
     "            # We will update the actual spec token ids in the worker process.\n"
     "            request.spec_token_ids = self._spec_token_placeholders"
 )
 
 ASYNC_SCHED_NEW = (
-    "            request.num_output_placeholders += 1 + cur_num_spec_tokens\n"
+    "            # Add placeholders for the new draft/spec tokens.\n"
+    "            # We will update the actual spec token ids in the worker process.\n"
     "            # [Genesis P58] Backport vllm#40768: track placeholder intent as\n"
     "            # count, not list-reference. Materialized to [-1, ...] only by\n"
     "            # Scheduler._consume_spec_decode_tokens_for_step and only when\n"
@@ -202,7 +206,9 @@ ASYNC_SCHED_NEW = (
     "            # Without this gate, -1s leak through embedding lookup → token\n"
     "            # corruption (#40831) or vectorized_gather IMA (#37159, #40756).\n"
     "            if self.num_spec_tokens > 0:\n"
-    "                request.num_pending_async_spec_placeholders = self.num_spec_tokens\n"
+    "                request.num_pending_async_spec_placeholders = (\n"
+    "                    self.num_spec_tokens\n"
+    "                )\n"
     "            else:\n"
     "                request.num_pending_async_spec_placeholders = 0"
 )
@@ -335,15 +341,21 @@ SCHED_NEW_METHOD_NEW = (
 )
 
 # Clear placeholder counter on preemption.
+#
+# Re-anchored for v0.27.1: `_preempt_request` grew native stale-output
+# handling (`num_stale_output_tokens` / `drop_stale_output`) between the
+# `spec_token_ids = []` reset and the `num_preemptions` increment, and now
+# clears `num_output_placeholders` natively. The anchor below brackets the
+# tail of the new method body; verified unique (1 occurrence) on v0.27.1.
 SCHED_PREEMPT_OLD = (
-    "        if request.spec_token_ids:\n"
-    "            request.spec_token_ids = []\n"
+    "        request.num_stale_output_tokens = request.num_in_flight_tokens\n"
+    "        request.num_output_placeholders = 0\n"
     "        request.num_preemptions += 1"
 )
 
 SCHED_PREEMPT_NEW = (
-    "        if request.spec_token_ids:\n"
-    "            request.spec_token_ids = []\n"
+    "        request.num_stale_output_tokens = request.num_in_flight_tokens\n"
+    "        request.num_output_placeholders = 0\n"
     "        # [Genesis P58] Backport vllm#40768.\n"
     "        request.num_pending_async_spec_placeholders = 0\n"
     "        request.num_preemptions += 1"

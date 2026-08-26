@@ -14,10 +14,10 @@
 #
 # DOS DESVIACIONES DELIBERADAS DE LA MODEL CARD:
 #
-#  1. Ella pide vLLM v0.24.0; este stack corre v0.23.0. El requisito real que
-#     menciona es transformers >= 5.12 y el contenedor ya tiene 5.12.0. Se
-#     prueba en 0.23 antes de mover la imagen, porque subir de version mueve
-#     los anchors de todos los parches Genesis.
+#  1. (resuelta 2026-08-25) Ella pedía vLLM >= v0.24.0 y el stack corría
+#     v0.23.0; con la migración del pin a v0.27.1 el requisito queda
+#     cubierto de sobra. El requisito real que menciona la card es
+#     transformers >= 5.12 y el contenedor ya trae 5.12.0.
 #  2. (resuelta) Se usa "mtp" como pide la card. El vLLM de este build avisa
 #     que "qwen3_next_mtp" está deprecado y lo reemplaza por "mtp", así que el
 #     nombre de la card es el correcto y ademas evita el warning.
@@ -41,8 +41,8 @@ version: '3.8'
 
 services:
   vllm-server:
-    # Imagen oficial de vLLM v0.23.0 fijada para compatibilidad con parches Genesis y Qwen 3.8
-    image: vllm/vllm-openai:v0.23.0
+    # Imagen oficial de vLLM v0.27.1 fijada para compatibilidad con parches Genesis y Qwen 3.8
+    image: vllm/vllm-openai:v0.27.1
     container_name: genesis-27b-qwen38-fp8
     # SIN restart automático a propósito (2026-08-14): con `restart:
     # unless-stopped`, un crash por OOM se relevantaba solo y el contenedor
