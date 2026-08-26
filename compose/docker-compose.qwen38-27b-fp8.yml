@@ -269,6 +269,29 @@ services:
       - GENESIS_ENABLE_PN66=1
       # PN77: Cuantización FP8 del LM head -> Ahorra ~1.2 GiB de VRAM por GPU
       - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1
+      # PN108 (2026-08-24): FP8 del lm_head del BORRADOR MTP. El drafter
+      # (Qwen3_5MTP) carga su lm_head vía SpecDecodeBaseProposer.load_model,
+      # que no pasa por el walker de PN77 -> quedaba fp16 (1,27 GiB/rank).
+      # A/B en lab (10x250 tok, 2026-08-24): aceptancia 2,61 vs 2,60
+      # baseline (+0,4%), draft acceptance 53,5% vs 53,4%: sin pérdida.
+      # VRAM del drafter 2,78 -> 2,15 GiB (-630 MiB/rank). El rejection
+      # sampler verifica contra el target, riesgo de calidad cero.
+      - GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD=1
+      # PN110 (2026-08-25): Requant FP8→INT8 W8A8 por capa con swap 1:1 (b_col
+      # column-major, chunked 512, excluye GDN/mamba, invalida cache Dynamo).
+      # A/B prefill 2×8000 tokens en lab TP=2 (0.80 util): wall 7.21s -> 5.56s
+      # (-23%, 17.8 -> 23.0 tps). Sin OOM tras fix nn.Parameter. Queda pendiente
+      # gate CK-2.4 completo (tool-calls 10/10 y TTFT 126k) antes de considerar
+      # promoción definitiva, pero el prefill ya rinde para cargas largas.
+      - GENESIS_ENABLE_PN110_INT8_PHASE_DISPATCH=1
+      # B3 (2026-08-25): Custom all-reduce TP=2 fast path con fallback robusto
+      # (P2P PIX entre las dos 3090). Sin esto vLLM usa PYNCCL genérico.
+      # A/B aislado PN110 solo (2026-08-25): B2/B3/B5/B7 apagados para medir delta real
+      - GENESIS_ENABLE_B3_CUSTOM_AR=1
+      # B2/B5/B7 (2026-08-25): triada prefill/concurrencia para romper techo 95 t/s
+      - GENESIS_ENABLE_B2_FULL_CG=0
+      - GENESIS_ENABLE_B5_REJECTION_SAMPLER=0
+      - GENESIS_ENABLE_B7_LM_HEAD=0
       # P100: CUDAGraphs FULL para spec-decode -> Mejora la latencia single-stream en +5-10%
       - GENESIS_ENABLE_P100=1
       # PN8: Cuantización online del borrador MTP.
@@ -351,6 +374,7 @@ services:
       - VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD=1024
       - VLLM_MARLIN_USE_ATOMIC_ADD=1
       - VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
+      - VLLM_LOGGING_LEVEL=INFO
       - GENESIS_VERBOSE=0
       - GENESIS_LOG_LEVEL=INFO
       - NVIDIA_VISIBLE_DEVICES=all

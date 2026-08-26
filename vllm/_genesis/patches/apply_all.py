@@ -1324,6 +1324,141 @@ def apply_patch_N105_tiering_reset_cache() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN106 cache en disco del repack FP8→Marlin")
+def apply_patch_N106_marlin_repack_cache() -> PatchResult:
+    """PN106: persiste el resultado del repack FP8→Marlin entre boots.
+
+    Status: opt-in via GENESIS_ENABLE_PN106_MARLIN_REPACK_CACHE=1.
+    Cache dir: GENESIS_MARLIN_CACHE_DIR o ~/.cache/genesis/marlin_repack.
+    Invalidación automática por hash de pesos + fuente de la función.
+    """
+    name = "PN106 marlin repack disk cache"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: rebind ready")
+    try:
+        from vllm._genesis.wiring.loader import (
+            patch_PN106_marlin_repack_cache,)
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN106_marlin_repack_cache.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN108 FP8 lm_head del draft MTP (extensión PN77 al drafter)")
+def apply_patch_N108_draft_fp8_lm_head() -> PatchResult:
+    """PN108: comprime el lm_head del DRAFT MTP a FP8 reusando el método
+    de PN77. Riesgo de calidad cero (rejection sampler verifica exacto);
+    único riesgo medible: tasa de aceptancia.
+    Status: opt-in via GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD=1.
+    """
+    name = "PN108 draft fp8 lm_head"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: rebind ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import (
+            patch_PN108_draft_fp8_lm_head,)
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN108_draft_fp8_lm_head.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN109 spec-decode persistent metadata")
+def apply_patch_N109_spec_decode_persistent_metadata() -> PatchResult:
+    """PN109: buffers persistentes pinned+GPU para los 5 tensores de
+    _calc_spec_decode_metadata.
+
+    Ataca el TODO upstream en gpu_model_runner.py:2778: sin esto, cada paso
+    de spec-decode hace 5 allocations + 5 H2D copias pageable.
+
+    Status: opt-in via GENESIS_ENABLE_PN109_SPEC_DECODE_PERSISTENT_METADATA=1.
+    """
+    name = "PN109 spec-decode persistent metadata"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: rebind ready")
+    try:
+        from vllm._genesis.wiring.loader import (
+            patch_PN109_spec_decode_persistent_metadata,)
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN109_spec_decode_persistent_metadata.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN110 INT8 phase dispatch (prefill W8A8)")
+def apply_patch_N110_int8_phase_dispatch() -> PatchResult:
+    """PN110: requant FP8→INT8 de los Linears al cargar + despacho por fase.
+
+    El prefill (M>=umbral) va por cutlass_scaled_mm INT8 (~3x vs Marlin en
+    Ampere); el decode sigue en Marlin.
+
+    Status: opt-in via GENESIS_ENABLE_PN110_INT8_PHASE_DISPATCH=1.
+    Tunables: GENESIS_PN110_W8A8_MIN_TOKENS, GENESIS_PN110_EXCLUDE_LAYERS.
+    """
+    name = "PN110 INT8 phase dispatch"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: rebind ready")
+    try:
+        from vllm._genesis.wiring.quantization import (
+            patch_PN110_int8_phase_dispatch,)
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN110_int8_phase_dispatch.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("B2 FULL CG for long prefill (force FULL)")
+def apply_patch_B2_full_cg() -> PatchResult:
+    """B2 CK-4.1: fuerza FULL CG incluso en prefill largo.
+
+    Text-patch sobre ``v1/worker/gpu/spec_decode/autoregressive/speculator.py``
+    (``AutoRegressiveSpeculator.init_cudagraph_manager`` degrada
+    ``FULL -> FULL_DECODE_ONLY``; con prefill largo el drafter pierde FULL).
+    Con ``GENESIS_ENABLE_B2_FULL_CG=1`` retiene ``FULL`` para el drafter
+    (prefill+ddecode en el mismo FULL graph).
+
+    Ubicacion verificada via grep ``cudagraph.*FULL|CG.*mode`` en
+    ``vllm/v1/worker`` -> hit en speculator.py:84. ``vllm/model_executor``
+    no tiene hits para ese patron (solo interfaces).
+
+    Status: opt-in via GENESIS_ENABLE_B2_FULL_CG=1 (default OFF).
+    Sigue patron PN110 (env opt-in, idempotente, marker).
+    """
+    name = "B2 FULL CG for long prefill"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.cudagraph import patch_B2_full_cg as _b2
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    # Contrato exige funcion patch_B2_full_cg(); wiring expone esa y alias apply().
+    fn = getattr(_b2, "patch_B2_full_cg", None) or getattr(_b2, "apply", None)
+    if fn is None:
+        return _failed(name, "wiring missing patch_B2_full_cg/apply")
+    status, reason = fn()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN80 GDN h budget probe (observabilidad de VRAM)")
 def apply_patch_N80_gdn_h_budget_probe() -> PatchResult:
     """PN80: loguea el cálculo de `h` y proyecta el margen en tokens/forward.
@@ -2113,6 +2248,41 @@ def apply_patch_71_block_verify() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("B5 Rejection sampler vectorized early-exit + cache (CK-4.3)")
+def apply_patch_B5_rejection_sampler() -> PatchResult:
+    """B5 CK-4.3: rejection sampler optimization — early-exit + vectorized expand + cache.
+
+    Optimiza `v1/sample/rejection_sampler.py` (muestreador de spec-decode):
+
+      - Early-exit cuando num_tokens==0 / batch_size==0 / max_spec_len==0,
+        evitando lanzamientos Triton y alloc de uniform_probs (~5-15us).
+      - Vectoriza expand_batch_to_tokens con torch.repeat_interleave para
+        N<=16 o num_tokens<=32 (caso Genesis max_num_seqs=2).
+      - Cache LRU 32 entradas del patrón de expansión (clave: cu_num_tokens).
+
+    Env gate: GENESIS_ENABLE_B5_REJECTION_SAMPLER=1 (opt-in, default OFF).
+    Strict-superset: cualquier excepción cae al path Triton original.
+    """
+    name = "B5 Rejection sampler vectorized early-exit + cache (CK-4.3)"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_B5_rejection_sampler as _b5
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    # El módulo expone patch_B5_rejection_sampler() como entry-point canónico (CK-4.3)
+    # y apply() como alias. Preferimos el nombre canónico si existe.
+    fn = getattr(_b5, "patch_B5_rejection_sampler", None) or getattr(_b5, "apply", None)
+    if fn is None:
+        return _failed(name, "wiring missing patch_B5_rejection_sampler/apply")
+    status, reason = fn()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("P78 TurboQuant .tolist() capture-guard (adapted from noonghunna)")
 def apply_patch_78_tolist_capture_guard() -> PatchResult:
     """Patch 78: surgical safety-net for cudagraph capture in
@@ -2355,6 +2525,39 @@ def apply_patch_N77_fp8_lm_head() -> PatchResult:
     except Exception as e:
         return _failed(name, f"wiring import failed: {e}")
     status, reason = patch_N77_fp8_lm_head.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("B7 lm_head restante — fused + tie_word_embeddings (CK-4.4)")
+def apply_patch_B7_lm_head() -> PatchResult:
+    """B7 CK-4.4: quant/fused del lm_head que queda tras PN77/PN108.
+
+    Cubre (A) tie_word_embeddings=True (storage compartido, PN77 lo skipea)
+    via FP8 per-channel compartido con canario, y (B) fused sampled logits
+    (solo filas muestreadas) en ParallelLMHead/LogitsProcessor.
+
+    Status: opt-in via GENESIS_ENABLE_B7_LM_HEAD=1.
+    """
+    name = "B7 lm_head restante (CK-4.4)"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch + runtime hook ready")
+    try:
+        from vllm._genesis.wiring.perf_hotfix import patch_B7_lm_head
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    # Contrato exige funcion patch_B7_lm_head()
+    try:
+        status, reason = patch_B7_lm_head.patch_B7_lm_head()
+    except Exception:
+        # fallback a apply() si la firma difiere
+        try:
+            status, reason = patch_B7_lm_head.apply()
+        except Exception as e2:
+            return _failed(name, f"wiring raised: {e2}")
     if status == "applied":
         return _applied(name, reason)
     if status == "skipped":
@@ -5246,6 +5449,36 @@ def apply_patch_PN71_reasoning_content_compat() -> PatchResult:
         "PN71 OpenWebUI reasoning_content compatibility",
         "patch_N71_reasoning_content_compat",
     )
+
+
+@register_patch("B3 custom AR TP=2 fast path (CK-4.2)")
+def apply_patch_B3_custom_ar() -> PatchResult:
+    """B3 CK-4.2: custom all-reduce TP=2 fast path + robust fallback.
+
+    Wraps CustomAllreduce.should_custom_ar with TP=2 small-tensor fast path
+    and CudaCommunicator.all_reduce with exception fallback to
+    torch.distributed.all_reduce. Reference: gpu_model_runner:6546.
+
+    Env: GENESIS_ENABLE_B3_CUSTOM_AR=1 (opt-in, default OFF).
+    """
+    name = "B3 custom AR TP=2 fast path (CK-4.2)"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: rebind ready")
+    try:
+        from vllm._genesis.wiring.communication.patch_B3_custom_ar import (
+            patch_B3_custom_ar,
+        )
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    try:
+        status, reason = patch_B3_custom_ar()
+    except Exception as e:
+        return _failed(name, f"wiring raised: {e}")
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

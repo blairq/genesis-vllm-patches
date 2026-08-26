@@ -61,6 +61,8 @@ _SUBCOMMAND_MAP: dict[str, str] = {
     "self-test":       "vllm._genesis.compat.self_test",
     "verify":          "vllm._genesis.compat.verify",
     "preflight":       "vllm._genesis.compat.preflight_checks",
+    # Offline tools
+    "requant":         "vllm._genesis.tools.requant",
     # Benchmarking
     "bench":           "vllm._genesis.compat.bench",
 }
@@ -89,6 +91,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "self-test":        "structural sanity check (post-pull / pin bump)",
     "verify":           "post-install smoke test (--quick / --boot / --full)",
     "preflight":        "preflight checks: PN60 quant validator + club#34/#43 rules",
+    "requant":          "W4A16 offline requant — MLPs a int4 (CK-3.1, AWQ group-128)",
     "bench":            "Genesis benchmark suite (decode TPOT, wall TPS, stress)",
 }
 

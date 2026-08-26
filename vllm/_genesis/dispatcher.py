@@ -280,6 +280,14 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "credit": "Backport of vllm#40819 (Z. Golpayegani draft) + Sun et al. arXiv 2403.10444 + 2 critical fixes from gemini-code-assist review (shared u per request, denom==0 → 1.0)",
         "upstream_pr": 40819,
     },
+    "B5": {
+        "title": "Rejection sampler vectorized early-exit + cache (CK-4.3 B5)",
+        "env_flag": "GENESIS_ENABLE_B5_REJECTION_SAMPLER",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": "Genesis-original CK-4.3 B5 — optimiza rejection_sampler.py: early-exit para batch trivial (num_tokens==0/max_spec_len==0) evitando lanzamientos Triton (~5-15us), vectoriza expand_batch_to_tokens con torch.repeat_interleave para N<=16, y cache LRU de 32 entradas del patrón de expansión. Strict-superset, fallback a Triton en cualquier excepción.",
+        "upstream_pr": None,
+    },
     "P74": {
         "title": "Auto chunk-clamp via long_prefill_token_threshold (P72 companion)",
         "env_flag": "GENESIS_ENABLE_P74_CHUNK_CLAMP",
@@ -1023,6 +1031,138 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
             "que el usuario cree que arranca de cero y sigue midiendo sobre una "
             "cache caliente. Los tiers secundarios no exponen reset en su "
             "interfaz, asi que L3 se sigue limpiando por borrado de archivos."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN106": {
+        "title": "Cache en disco del repack FP8→Marlin (saltea el repack de ~27B en cada boot)",
+        "env_flag": "GENESIS_ENABLE_PN106_MARLIN_REPACK_CACHE",
+        "default_on": False,
+        "category": "loader",
+        "credit": (
+            "Genesis-original 2026-08-24. vLLM v0.23.0 repackea los pesos "
+            "FP8 a formato Marlin en CADA arranque (pack_fp8_to_int32 + "
+            "gptq_marlin_repack + permute de escalas) sin caché en disco: "
+            "para el 27B son segundos-decenas de segundos por boot, y este "
+            "stack reinicia seguido (restart policy=no a propósito desde "
+            "2026-08-14). PN106 persiste el resultado del repack keyed por "
+            "sha256 de (pesos+escalas+formas+fuente de la función), con "
+            "invalidación automática si upstream cambia la lógica del "
+            "repack. Mismo patrón que PN57, vía rebind en vez de text-patch "
+            "para no anclar 110 líneas frágiles."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN89": {
+        "title": "Endpoint nativo de actividad KV offload (/v1/kv-offload/requests)",
+        "env_flag": "GENESIS_ENABLE_PN89_KV_OFFLOAD_REQUESTS_ENDPOINT",
+        "default_on": True,
+        "category": "observability",
+        "credit": (
+            "Genesis-original. Registra el endpoint /v1/kv-offload/requests "
+            "en el api_router para inspeccionar la actividad de offloading "
+            "por request sin grepear logs. El wiring aplica por anchor-match "
+            "(text-patch de api_router.py); sin gate de env propio hoy."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN348": {
+        "title": "Qwen3 MTP backbone dedup — skip embed/lm_head duplicados (~1 GiB/rank)",
+        "env_flag": "GENESIS_ENABLE_PN348_MTP_BACKBONE_DEDUP",
+        "default_on": True,
+        "category": "spec_decode",
+        "credit": (
+            "Ported 2026-07-04 from sndr_core_engine (anchors 0.23.x), "
+            "vendored vllm#44644. Skip de embed_tokens + lm_head duplicados "
+            "en el backbone del MTP cuando el target los comparte "
+            "(Qwen3.5/3.6, PP=1): ~1 GiB VRAM liberados por worker. "
+            "Opt-out via GENESIS_DISABLE_PN348=1."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN77": {
+        "title": "FP8 lm_head compression — BF16→E4M3 + escala por canal (~606 MiB/rank)",
+        "env_flag": "GENESIS_ENABLE_PN77_FP8_LM_HEAD",
+        "default_on": False,
+        "category": "memory_savings",
+        "credit": (
+            "Genesis Phase E.5 (ported 2026-07-04 desde sndr_core_engine, "
+            "anchors 0.23.x). Comprime el lm_head BF16→FP8 e4m3 con escala "
+            "per-channel (~606 MiB/rank en el 27B); camino Marlin en Ampere. "
+            "Opt-in via GENESIS_ENABLE_PN77_FP8_LM_HEAD=1."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN108": {
+        "title": "FP8 lm_head del DRAFT MTP — extiende el swap de PN77 al drafter (~636 MB/rank)",
+        "env_flag": "GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis-original 2026-08-24 (CK-1.1). El lm_head del drafter "
+            "(Qwen3_5MTP, vocab 248320) carga por SpecDecodeBaseProposer."
+            "load_model, que NO pasa por el walker parcheado por PN77 — "
+            "verificado con sonda de árbol (fp16 + UnquantizedEmbeddingMethod). "
+            "PN108 rebindea ese load_model: tras el original, aplica el mismo "
+            "Genesis_FP8_LMHead_EmbeddingMethod al lm_head del draft. "
+            "Seguridad de calidad por construcción: el rejection sampler "
+            "verifica contra el target, así que el único riesgo es la tasa "
+            "de aceptancia (gate del plan: caída <5% relativa). Ahorro: "
+            "~636 MB/rank VRAM + BW de los forwards del draft."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "B7": {
+        "title": "B7 lm_head restante — fused sampled + tie_word_embeddings (CK-4.4)",
+        "env_flag": "GENESIS_ENABLE_B7_LM_HEAD",
+        "default_on": False,
+        "category": "perf_hotfix",
+        "credit": (
+            "Genesis CK-4.4 (B7) — cubre el lm_head que PN77/PN108 dejan sin "
+            "optimizar: tie_word_embeddings=True (storage compartido, PN77 hace "
+            "SKIP deliberado) y el matmul de vocab completo en el camino de "
+            "sampleo (248320×hidden). B7 hace (A) cuantización FP8 per-channel "
+            "compartida sobre el buffer tied (mismo tensor para embed y lm_head, "
+            "canario cos≥0.999) y (B) fused sampled logits (gather de filas "
+            "muestreadas antes del matmul) en ParallelLMHead/LogitsProcessor. "
+            "Opt-in via GENESIS_ENABLE_B7_LM_HEAD=1. Marker: Genesis B7 lm_head."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN109": {
+        "title": "PN109 spec-decode persistent metadata",
+        "env_flag": "GENESIS_ENABLE_PN109_SPEC_DECODE_PERSISTENT_METADATA",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis-original 2026-08-24. Ataca el TODO upstream en "
+            "gpu_model_runner.py:2778: _calc_spec_decode_metadata hace "
+            "5 allocations + 5 H2D copias pageable por paso de spec-decode. "
+            "PN109 preasigna buffers persistentes pinned+GPU para los 5 "
+            "tensores y reusa la memoria entre pasos, eliminando el churn "
+            "de alloc/free y el traspaso pageable en el camino crítico."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN110": {
+        "title": "PN110 INT8 phase dispatch (prefill W8A8)",
+        "env_flag": "GENESIS_ENABLE_PN110_INT8_PHASE_DISPATCH",
+        "default_on": False,
+        "category": "quantization",
+        "credit": (
+            "Genesis-original 2026-08-24. Requantiza los Linears de FP8 a "
+            "INT8 al cargar y despacha por fase: el prefill (M>=umbral) va "
+            "por cutlass_scaled_mm INT8 (~3x vs Marlin en Ampere) y el "
+            "decode sigue en Marlin. Umbral GENESIS_PN110_W8A8_MIN_TOKENS, "
+            "exclusion GENESIS_PN110_EXCLUDE_LAYERS."
         ),
         "upstream_pr": None,
         "applies_to": {},
@@ -2515,6 +2655,35 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "credit": "Genesis-original — implements lexhoefsloot's option-3 fix for noonghunna/club-3090#57. Wraps `vllm.tool_parsers.utils._get_json_schema_from_tools` and filters tools containing xgrammar-unsupported JSON Schema keys (patternProperties / propertyNames / $ref / oneOf / etc.) BEFORE the combined `anyOf` is built and handed to xgrammar. Companion to P68's option-1 skip: where P68 refuses to upgrade tool_choice on dirty catalogs, PN70 keeps the upgrade and filters dirty tools out of grammar enforcement (model can still SEE all tools in context but grammar restricts callable subset). Reuses P68's `_scan_schema_for_unsupported_key` so the unsupported-key set is single-sourced. Off by default; enable per workload.",
         "applies_to": {},
         "composes_with": ["P68"],
+    },
+    "B3": {
+        "title": "Custom all-reduce TP=2 fast path + robust fallback (gpu_model_runner:6546)",
+        "env_flag": "GENESIS_ENABLE_B3_CUSTOM_AR",
+        "default_on": False,
+        "category": "communication",
+        "credit": "Genesis-original CK-4.2 (B3) — wraps CustomAllreduce / CudaCommunicator with TP=2 fast path and exception fallback; robust optimization around cuda_communicator all-reduce (ref gpu_model_runner:6546).",
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "B2": {
+        "title": "B2 FULL cudagraph for long prefill (force FULL CG even on long prefill)",
+        "env_flag": "GENESIS_ENABLE_B2_FULL_CG",
+        "default_on": False,
+        "category": "cudagraph",
+        "credit": (
+            "Genesis-original CK-4.1 B2 — text-patch que fuerza "
+            "CUDAGraphMode.FULL incluso en prefill largo. Ubicacion: "
+            "assets/vllm/vllm/v1/worker/gpu/spec_decode/autoregressive/"
+            "speculator.py:84 (AutoRegressiveSpeculator.init_cudagraph_manager "
+            "degrada FULL->FULL_DECODE_ONLY; vllm/model_executor no tiene hits "
+            "para cudagraph.*FULL). Con GENESIS_ENABLE_B2_FULL_CG=1 retiene "
+            "FULL para el drafter (prefill+ddecode en el mismo FULL graph) y "
+            "evita la caida ~30% por prefill largo fuera de CG. "
+            "Segundo sitio trazable: vllm/v1/spec_decode/llm_base_proposer.py:386 "
+            "(mixed_mode FULL->PIECEWISE). Gate CK-4.1: FULL capturado + latencia draft."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
     },
 }
 
