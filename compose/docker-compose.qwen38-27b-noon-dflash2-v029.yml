@@ -602,7 +602,7 @@ services:
       # inferencia del worker), asi que cae a 10 y el servidor se muere al llegar
       # el lote 11: "RuntimeError: PN131: lote 12 > GENESIS_PN131_BMAX 10".
       # Tiene que ACOMPAÑAR a --max-num-seqs de mas abajo.
-      - GENESIS_PN131_BMAX=6
+      - GENESIS_PN131_BMAX=11
       - VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
       - VLLM_LOGGING_LEVEL=INFO
       - GENESIS_VERBOSE=0
@@ -738,7 +738,7 @@ services:
       #    1 pedido 274 -> 298 (+9%) | 2: 378 -> 450 (+19%) | 4: 677 -> 732 (+8%) | 6: 942 -> 937
       # GENESIS_PN131_BMAX tiene que seguir a este numero.
       - --max-num-seqs
-      - "6"
+      - "11"
       - --tensor-parallel-size
       - "2"
       - --max-model-len

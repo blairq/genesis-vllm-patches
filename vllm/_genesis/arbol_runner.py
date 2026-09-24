@@ -278,18 +278,27 @@ def _antes_del_forward(runner, ms, input_batch) -> None:
         E.hay_temp = bool((tnp > 0).any())
     except Exception:
         E.hay_temp = True
-    forma = bool((nst == T).all())
+    has_prefill = getattr(input_batch, "has_prefill", False)
+    if not has_prefill and getattr(input_batch, "is_prefilling_np", None) is not None:
+        has_prefill = bool(input_batch.is_prefilling_np[:R].any())
+    cu = getattr(input_batch, "cu_num_logits_np", None)
+    logits_ok = (cu is not None and cu.shape[0] > R and int(cu[R]) == R * T and
+                 bool((cu[1:R+1] - cu[:R] == T).all()))
+    ndp = getattr(input_batch, "num_draft_tokens_per_req", None)
+    draft_ok = (ndp is None) or bool((ndp[:R] == E.K).all())
+    forma = bool((nst == T).all()) and not has_prefill and logits_ok and draft_ok
     pen = forma and _hay_penalidades(runner, input_batch.idx_mapping_np[:R])
     uniforme = forma and not pen and anc131 is not None and R * T <= anc131.shape[0] \
         and rope is not None
     gdn_cinta.paso_en_arbol(uniforme)
     E.pasos += 1
     n_dec = int((nst == T).sum())          # pedidos que traen el arbol entero en este paso
+    con_prefill = has_prefill or bool((nst > T).any())
     if uniforme:
         _contar("arbol", n_dec)
     elif pen:
         _contar("penalidades", n_dec)
-    elif bool((nst > T).any()):
+    elif con_prefill:
         _contar("con_prefill", n_dec)
     elif bool((nst <= 1).all()):
         _contar("sin_borradores", 0)
@@ -325,7 +334,10 @@ def _rejection_sample(target_logits, draft_logits, draft_sampled, cu_num_logits,
                            use_fp64=use_fp64, use_block_verification=use_block_verification)
     from vllm.v1.worker.gpu.sample.gumbel import gumbel_sample
     R, T = cu_num_logits.shape[0] - 1, E.T
-    en_arbol = E.uniforme and not (_modo() & 1)
+    uniforme_valido = E.uniforme and (pos.shape[0] == R * T)
+    if not uniforme_valido and E.uniforme:
+        E.uniforme = False
+    en_arbol = uniforme_valido and not (_modo() & 1)
     idx = idx_mapping.long() if (_RHEO and E.hay_temp) or en_arbol else idx_mapping
     if en_arbol:
         # La semilla del ruido se indexa por posicion REAL (base + profundidad): asi el token j
