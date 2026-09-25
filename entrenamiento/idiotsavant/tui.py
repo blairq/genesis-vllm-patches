@@ -5,8 +5,8 @@ linea de comandos con `idiotsavant.py estado [--json]` y `dflash2.sh estado [--j
 Solo LEE el disco (marcas, informes, logs, archivo de estado) y nvidia-smi: abrirlo o cerrarlo no
 afecta a la corrida.
 
-    ./correr.sh tui.py modelo   --trabajo DIR --salida DIR [--capas 64]
-    ./correr.sh tui.py borrador [--nombre idiotsavant_dflash2]
+    bash correr.sh tui.py modelo   --trabajo DIR --salida DIR [--capas 64]
+    bash correr.sh tui.py borrador [--nombre idiotsavant_dflash2]
 Salir: Ctrl-C.
 """
 from __future__ import annotations

@@ -10,10 +10,10 @@
 #            necesita GENESIS_ENABLE_PN148_ROT_DOWN=1 (Hadamard antes de down_proj).
 #
 #  Uso (ver README.md; todo corre en el virtualenv local del proyecto, preparado con preparar.sh):
-#    ./correr.sh idiotsavant.py todo --dry-run  --bf16 BF16 --calib CALIB --trabajo DIR --salida DIR
-#    ./correr.sh idiotsavant.py todo            --bf16 BF16 --calib CALIB --trabajo DIR --salida DIR
-#    ./correr.sh idiotsavant.py estado [--json] --trabajo DIR --salida DIR      (en cualquier momento)
-#    ./correr.sh tui.py modelo --trabajo DIR --salida DIR                        (visor opcional)
+#    bash correr.sh idiotsavant.py todo --dry-run  --bf16 BF16 --calib CALIB --trabajo DIR --salida DIR
+#    bash correr.sh idiotsavant.py todo            --bf16 BF16 --calib CALIB --trabajo DIR --salida DIR
+#    bash correr.sh idiotsavant.py estado [--json] --trabajo DIR --salida DIR      (en cualquier momento)
+#    bash correr.sh tui.py modelo --trabajo DIR --salida DIR                        (visor opcional)
 #  Las decisiones y las mediciones que las respaldan estan en DECISIONES.md.
 #
 #  El borrador DFlash2 (qwen3.8_27b_idiotSavant_sm_86_dflash2) NO sale de aca: se entrena contra

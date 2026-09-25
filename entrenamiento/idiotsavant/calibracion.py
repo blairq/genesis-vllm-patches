@@ -20,8 +20,8 @@ Tres formas de conseguirlo, de la mas exacta a la mas propia:
      (--template si no es el del modelo). Ver DECISIONES.md, B4.
 
 Uso:
-    ./correr.sh calibracion.py --bf16 BF16 --desde-hf --salida calib.npy [--n 256] [--largo 4096]
-    ./correr.sh calibracion.py --bf16 BF16 --conversaciones charlas.jsonl --salida calib.npy
+    bash correr.sh calibracion.py --bf16 BF16 --desde-hf --salida calib.npy [--n 256] [--largo 4096]
+    bash correr.sh calibracion.py --bf16 BF16 --conversaciones charlas.jsonl --salida calib.npy
 """
 from __future__ import annotations
 

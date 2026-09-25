@@ -1,8 +1,8 @@
 #!/bin/bash
 # Prepara el entorno LOCAL del proyecto: .venv/ y .cache/ adentro de esta carpeta. No instala nada
 # en el sistema ni escribe en ~/.cache. Borrar la carpeta .venv (y .cache) deja todo como estaba.
-#   ./preparar.sh            instala (idempotente: si ya esta, solo verifica)
-#   ./preparar.sh --verificar solo verifica
+#   bash preparar.sh            instala (idempotente: si ya esta, solo verifica)
+#   bash preparar.sh --verificar solo verifica
 set -eu
 AQUI="$(cd "$(dirname "$0")" && pwd)"
 . "$AQUI/entorno.sh"

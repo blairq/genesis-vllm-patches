@@ -21,9 +21,9 @@ cada decisión, con sus mediciones: [DECISIONES.md](DECISIONES.md).
 ## Rápido: un solo comando
 
 ```bash
-./reconstruir.sh --dry-run                               # entorno + BF16 (si falta, 55 GB) + validación
-setsid nohup ./reconstruir.sh > reconstruir.log 2>&1 &   # la reconstrucción (larga)
-./correr.sh idiotsavant.py estado --trabajo trabajo --salida qwen3.8_27b_idiotSavant_sm_86   # avance
+bash reconstruir.sh --dry-run                               # entorno + BF16 (si falta, 55 GB) + validación
+setsid nohup bash reconstruir.sh > reconstruir.log 2>&1 &   # la reconstrucción (larga)
+bash correr.sh idiotsavant.py estado --trabajo trabajo --salida qwen3.8_27b_idiotSavant_sm_86   # avance
 ```
 
 - **Variables opcionales:** `BF16=…` (si ya lo tenés bajado, por ejemplo
@@ -39,8 +39,8 @@ Todo queda adentro de esta carpeta: `.venv/` para los paquetes y `.cache/` para 
 torch, Triton, HuggingFace). Borrar las dos deja el sistema como estaba.
 
 ```bash
-./preparar.sh               # hace lo de abajo y verifica las GPUs
-./preparar.sh --verificar   # solo verifica
+bash preparar.sh               # hace lo de abajo y verifica las GPUs
+bash preparar.sh --verificar   # solo verifica
 ```
 
 o a mano:
@@ -52,7 +52,7 @@ python3 -m venv .venv
 ```
 
 `requirements.txt` fija las versiones de la imagen de vLLM con la que se sirve. Otro transformers
-podría cambiar el forward de Qwen3.5 que se calibra. Todo se corre con `./correr.sh <script> …`, que
+podría cambiar el forward de Qwen3.5 que se calibra. Todo se corre con `bash correr.sh <script> …`, que
 activa el `.venv`, manda las cachés a `.cache/` y deja el Hub apagado.
 
 ### 2. Modelo base (55 GB)
@@ -68,8 +68,8 @@ HF_HUB_OFFLINE=0 HF_HUB_DISABLE_XET=1 .venv/bin/hf download orcarouter/Qwen3.8-2
 | opción | cómo | resultado |
 |---|---|---|
 | **exacta** (default) | `calib_256x4096.npy` (en esta carpeta) | los mismos pesos que en HF (salvo el no-determinismo de la GPU) |
-| desde el dataset público | `CALIB=desde-hf ./reconstruir.sh` o `./correr.sh calibracion.py --bf16 BF16 --desde-hf --salida calib.npy` | tráfico equivalente, pesos no idénticos |
-| tráfico propio | `./correr.sh calibracion.py --bf16 BF16 --conversaciones charlas.jsonl --salida calib.npy [--template otro.jinja]` | ajustada a tu uso |
+| desde el dataset público | `CALIB=desde-hf bash reconstruir.sh` o `bash correr.sh calibracion.py --bf16 BF16 --desde-hf --salida calib.npy` | tráfico equivalente, pesos no idénticos |
+| tráfico propio | `bash correr.sh calibracion.py --bf16 BF16 --conversaciones charlas.jsonl --salida calib.npy [--template otro.jinja]` | ajustada a tu uso |
 
 - **La exacta:** 256 × 4096 tokens. Cada muestra es la ventana final de un pedido de agente de código
   con tools: el prompt más la respuesta del modelo servido, con el chat template de producción. Los
@@ -83,7 +83,7 @@ HF_HUB_OFFLINE=0 HF_HUB_DISABLE_XET=1 .venv/bin/hf download orcarouter/Qwen3.8-2
 ### 4. Dry-run (~20 s)
 
 ```bash
-./correr.sh idiotsavant.py todo --dry-run --bf16 BF16 --calib calib_256x4096.npy --trabajo trabajo --salida qwen3.8_27b_idiotSavant_sm_86
+bash correr.sh idiotsavant.py todo --dry-run --bf16 BF16 --calib calib_256x4096.npy --trabajo trabajo --salida qwen3.8_27b_idiotSavant_sm_86
 ```
 
 Valida, sin escribir capas:
@@ -98,7 +98,7 @@ Cada línea dice `OK` o `FALLA` y el motivo.
 ### 5. Reconstrucción
 
 ```bash
-./correr.sh idiotsavant.py todo --bf16 BF16 --calib calib_256x4096.npy --trabajo trabajo --salida qwen3.8_27b_idiotSavant_sm_86
+bash correr.sh idiotsavant.py todo --bf16 BF16 --calib calib_256x4096.npy --trabajo trabajo --salida qwen3.8_27b_idiotSavant_sm_86
 ```
 
 - **Dos procesos:** `calibrar` (la pasada BF16, que escribe las Hessianas de cada capa) y `cuantizar`
@@ -108,7 +108,7 @@ Cada línea dice `OK` o `FALLA` y el motivo.
 - **Seguimiento:**
   - `idiotsavant.py estado [--json]`: el avance (`--json` es para scripts y LLMs);
   - `trabajo/logs/{calibrar,cuantizar,armar}.log`;
-  - `./correr.sh tui.py modelo --trabajo trabajo --salida …`: visor opcional.
+  - `bash correr.sh tui.py modelo --trabajo trabajo --salida …`: visor opcional.
 - **Informe por capa:** `trabajo/capa_NN/informe.json` y, al final,
   `…/informe_idiotsavant.json`. Un error local de 0,5–13% por capa es normal (bajo al principio,
   meseta en 23–51); una capa 10 veces por encima de sus vecinas indica que algo está mal.
@@ -129,7 +129,7 @@ no en el `.venv`.
 DRY_RUN=1 ./dflash2.sh                     # valida todo sin crear nada
 setsid nohup ./dflash2.sh > dflash2.log 2>&1 &
 ./dflash2.sh estado [--json]               # avance
-./correr.sh tui.py borrador                # visor opcional
+bash correr.sh tui.py borrador                # visor opcional
 PASOS="6" ./dflash2.sh                     # solo el A/B (cada paso hecho se saltea solo)
 ```
 
@@ -138,7 +138,7 @@ por disco), 4 entrenar (~75 min), 5 cuantizar, 6 A/B. Arranca por defecto del DF
 
 ## Notas para una LLM que lo opere
 
-- Antes de lanzar, correr `./reconstruir.sh --dry-run` y leer las líneas `FALLA`.
+- Antes de lanzar, correr `bash reconstruir.sh --dry-run` y leer las líneas `FALLA`.
 - Lanzar desacoplado y consultar `idiotsavant.py estado --json`. Campos útiles: `cuantizadas`,
   `eta_minutos`, `procesos_vivos`, `marcas`, `recursos`, `capas[i].error_capa`.
 - No correrlo en las mismas GPUs que un servidor vLLM: el dry-run chequea la memoria de GPU libre.
