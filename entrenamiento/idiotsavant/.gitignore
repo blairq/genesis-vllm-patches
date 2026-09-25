@@ -1,2 +1,7 @@
 .venv/
 .cache/
+modelos/
+trabajo/
+qwen3.8_27b_idiotSavant_sm_86/
+calib_desde_hf.npy
+*.log

@@ -4,5 +4,7 @@
 transformers==5.16.1
 safetensors==0.8.0
 numpy==2.2.6
+# solo para calibracion.py --desde-hf (lee el parquet del dataset de a lotes)
+pyarrow==21.0.0
 # solo para la TUI (opcional: la linea de comandos no la necesita)
 rich==15.0.0
