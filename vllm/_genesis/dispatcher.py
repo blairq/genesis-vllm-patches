@@ -1278,6 +1278,39 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN149": {
+        "title": "Borrador DFlash en su base original sobre un target con el residuo rotado",
+        "env_flag": "GENESIS_ENABLE_PN149_ROT_BORRADOR",
+        "default_on": False,
+        "category": "models",
+        "credit": (
+            "Genesis-original 2026-09-25. El target rotado comparte con el borrador un embedding E Rt y un lm_head W diag(g) Rt. El borrador queda en su base original (su k/v sirve a dos normas distintas y no se puede rotar): se desrota el embedding y se rota el hidden antes del lm_head, con Hadamard por bloques en linea. Inerte si el config del borrador no trae genesis_rotacion."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN148": {
+        "title": "Hadamard en linea antes de down_proj (checkpoint con residuo rotado)",
+        "env_flag": "GENESIS_ENABLE_PN148_ROT_DOWN",
+        "default_on": False,
+        "category": "models",
+        "credit": (
+            "Genesis-original 2026-09-24. El checkpoint propio rotado (residuo estilo QuaRot + Hadamard por bloques de 512 en down_proj) guarda down_proj como R W Hd: la entrada tiene que llegar por Hd. En torch, modelo entero W4A8: KL 0,0116 contra 0,0300 de noon. SOLO con ese checkpoint: con cualquier otro rompe el modelo."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN147": {
+        "title": "Saneo de pedidos para spec decode: min_p/logit_bias y thinking_budget_message",
+        "env_flag": "GENESIS_ENABLE_PN147_SANEO_SPEC",
+        "default_on": False,
+        "category": "middleware",
+        "credit": (
+            "Genesis-original 2026-09-24. Los dos arreglos que hacia el proxy j-space y sin los que opencode se rompe con DFlash2: vLLM 0.29.0 rechaza el pedido entero con min_p>0 o logit_bias bajo decodificacion especulativa (en streaming, error adentro del SSE con HTTP 200), y thinking_budget_message cicla con spec decode. Se mueven al servidor para poder servir vLLM directo."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN146": {
         "title": "Tamano de grupo de KV elegible (la heuristica de upstream no lo acierta)",
         "env_flag": "GENESIS_ENABLE_PN146_GROUP_SIZE",

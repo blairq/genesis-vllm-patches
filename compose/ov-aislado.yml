@@ -1,0 +1,26 @@
+# Override de pruebas: el MISMO servidor de produccion, inalcanzable para todo lo demas.
+#
+#   docker compose -f docker-compose.qwen38-27b-noon-dflash2-v029.yml -f ov-aislado.yml up -d --force-recreate
+#
+# Cierra las tres vias de trafico ajeno (ver la memoria aislar-el-server-de-pruebas-de-hermes):
+#   1. el puerto del host: 8361 en vez de 8360 (Hermes, opencode y el dashboard apuntan a 8360);
+#   2. el nombre de servicio en lanbridge: red propia, asi Traefik y el dashboard no lo resuelven;
+#   3. el healthcheck: el de produccion hace una GENERACION cada 60 s; este solo pide /health.
+# Los bancos apuntan a http://localhost:8361. Para volver a produccion, recrear sin este archivo.
+services:
+  vllm-server:
+    container_name: genesis-27b-pruebas
+    ports: !override
+      - "8361:8320"
+    networks: !override
+      pruebas: {}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -m 10 http://localhost:8320/health"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 1800s
+
+networks:
+  pruebas:
+    driver: bridge

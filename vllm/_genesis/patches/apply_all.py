@@ -2406,6 +2406,60 @@ def apply_patch_N127() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN149 borrador sobre target rotado")
+def apply_patch_PN149() -> PatchResult:
+    """PN149: embedding/lm_head compartidos con un target rotado; inerte sin genesis_rotacion."""
+    name = "PN149 borrador sobre target rotado"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.models import patch_PN149_rot_borrador
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN149_rot_borrador.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN148 Hadamard antes de down_proj")
+def apply_patch_PN148() -> PatchResult:
+    """PN148: Hadamard en linea antes de down_proj; solo con el checkpoint rotado."""
+    name = "PN148 Hadamard antes de down_proj"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.models import patch_PN148_rot_down
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN148_rot_down.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN147 saneo para spec decode")
+def apply_patch_PN147() -> PatchResult:
+    """PN147: min_p/logit_bias se anulan y thinking_budget_message se descarta con spec decode."""
+    name = "PN147 saneo para spec decode"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.middleware import patch_PN147_saneo_spec_decode
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN147_saneo_spec_decode.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN146 tamano de grupo de KV")
 def apply_patch_PN146() -> PatchResult:
     """PN146: group_size elegible por env; inerte sin ella."""

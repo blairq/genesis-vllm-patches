@@ -1,0 +1,622 @@
+<title>Tipos de datos en SM86</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+  :root {
+    --fondo: #f7f6f3; --panel: #ffffff; --panel2: #f1efea; --tinta: #15181c; --tinta2: #5b6169;
+    --linea: #ddd9d1; --acento: #b25419; --frio: #2b6b78; --ok: #4a7c3f; --aviso: #9a6b12;
+    --violeta: #6b4a86; --gris: #a39e94;
+    --sombra: 0 1px 2px rgba(20,23,28,.06), 0 8px 24px -16px rgba(20,23,28,.25);
+    --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --cuerpo: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --dato: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --fondo: #0e1114; --panel: #161a1f; --panel2: #1b2027; --tinta: #e8ecf1; --tinta2: #9aa3ad;
+      --linea: #252b33; --acento: #e08a4e; --frio: #5fb3c4; --ok: #82c06f; --aviso: #d9ad4a;
+      --violeta: #b394cf; --gris: #4d555f;
+      --sombra: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -20px rgba(0,0,0,.8);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --fondo: #0e1114; --panel: #161a1f; --panel2: #1b2027; --tinta: #e8ecf1; --tinta2: #9aa3ad;
+    --linea: #252b33; --acento: #e08a4e; --frio: #5fb3c4; --ok: #82c06f; --aviso: #d9ad4a;
+    --violeta: #b394cf; --gris: #4d555f;
+    --sombra: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -20px rgba(0,0,0,.8);
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--fondo); color: var(--tinta); font-family: var(--cuerpo);
+         font-size: 16px; line-height: 1.6; padding: 0 20px; padding-block: 0 80px; }
+  .marco { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 56px; }
+  header { padding-block: 52px 0; display: flex; flex-direction: column; gap: 18px; }
+  .ojo { font-family: var(--dato); font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+         color: var(--acento); font-weight: 500; }
+  h1 { font-family: var(--display); font-weight: 700; font-size: clamp(34px, 6vw, 54px);
+       line-height: 1.03; margin: 0; letter-spacing: -.02em; text-wrap: balance; max-width: 20ch; }
+  .bajada { font-size: 19px; color: var(--tinta2); max-width: 64ch; margin: 0; }
+  .ficha { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1px;
+           background: var(--linea); border: 1px solid var(--linea); border-radius: 3px; overflow: hidden;
+           margin: 0; }
+  .ficha div { background: var(--panel); padding: 12px 14px; }
+  .ficha dt { font-family: var(--dato); font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+              color: var(--tinta2); margin: 0 0 4px; }
+  .ficha dd { margin: 0; font-family: var(--dato); font-size: 14px; font-weight: 500; }
+  section { display: flex; flex-direction: column; gap: 18px; }
+  h2 { font-family: var(--display); font-weight: 600; font-size: 26px; margin: 0; letter-spacing: -.01em;
+       text-wrap: balance; }
+  h2 .num { font-family: var(--dato); font-size: 13px; color: var(--acento); margin-right: 10px;
+            font-weight: 500; vertical-align: 3px; }
+  h3 { font-family: var(--display); font-weight: 600; font-size: 18px; margin: 0; }
+  p { margin: 0; max-width: 68ch; }
+  .nota { font-size: 14px; color: var(--tinta2); }
+  code, .m { font-family: var(--dato); font-size: .86em; }
+  code { background: var(--panel2); border: 1px solid var(--linea); border-radius: 2px; padding: 0 4px; }
+
+  /* regla del silicio */
+  .tasas { display: flex; flex-direction: column; gap: 10px; background: var(--panel);
+           border: 1px solid var(--linea); border-radius: 3px; padding: 20px 20px 16px; }
+  .tasa { display: grid; grid-template-columns: minmax(150px, 230px) 1fr 58px; gap: 14px; align-items: center; }
+  .tasa .et { font-family: var(--dato); font-size: 13px; }
+  .tasa .et small { display: block; color: var(--tinta2); font-size: 11px; }
+  .pista { height: 22px; background: var(--panel2); border-radius: 2px; position: relative; }
+  .pista b { position: absolute; inset: 0 auto 0 0; border-radius: 2px; }
+  .tasa .x { font-family: var(--dato); font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+  .eje { display: grid; grid-template-columns: minmax(150px, 230px) 1fr 58px; gap: 14px;
+         font-family: var(--dato); font-size: 10.5px; color: var(--tinta2); }
+  .eje .marcas { position: relative; height: 14px; }
+  .eje .marcas span { position: absolute; transform: translateX(-50%); }
+  .eje .marcas span:first-child { transform: none; }
+  .eje .marcas span:last-child { transform: translateX(-100%); }
+
+  /* composicion */
+  .compo { display: flex; flex-direction: column; gap: 14px; }
+  .fila-compo { display: grid; grid-template-columns: 80px 1fr; gap: 14px; align-items: center; }
+  .fila-compo .et { font-family: var(--dato); font-size: 12px; letter-spacing: .08em; text-transform: uppercase;
+                    color: var(--tinta2); }
+  .barra { display: flex; width: 100%; height: 44px; border-radius: 3px; overflow: hidden;
+           border: 1px solid var(--linea); }
+  .barra span { display: flex; align-items: center; justify-content: center; height: 100%;
+                font-family: var(--dato); font-size: 11.5px; font-weight: 600; color: #fff;
+                font-variant-numeric: tabular-nums; overflow: hidden; white-space: nowrap; }
+  .c-ok { background: var(--ok); } .c-marg { background: var(--acento); } .c-forma { background: var(--aviso); }
+  .c-lat { background: var(--frio); } .c-resto { background: var(--gris); }
+  .leyenda { display: flex; flex-wrap: wrap; gap: 8px 22px; font-family: var(--dato); font-size: 12.5px;
+             padding-left: 94px; }
+  .leyenda i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 7px;
+               vertical-align: -1px; }
+
+  /* tabla */
+  .tabla-caja { overflow-x: auto; border: 1px solid var(--linea); border-radius: 3px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  table.pipe { min-width: 980px; }
+  thead th { font-family: var(--dato); font-size: 11px; letter-spacing: .09em; text-transform: uppercase;
+             color: var(--tinta2); text-align: left; padding: 11px 12px; border-bottom: 1px solid var(--linea);
+             background: var(--panel2); white-space: nowrap; font-weight: 500; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--linea); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tr.grupo td { background: var(--panel2); font-family: var(--dato); font-size: 11px; letter-spacing: .12em;
+                text-transform: uppercase; color: var(--tinta2); padding: 7px 12px; }
+  .k { font-family: var(--dato); font-size: 13px; font-weight: 500; }
+  .k small { display: block; font-weight: 400; color: var(--tinta2); font-size: 11.5px; }
+  .n { font-family: var(--dato); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .flujo { font-family: var(--dato); font-size: 12px; white-space: nowrap; }
+  .flujo .fl { color: var(--tinta2); }
+  .porq { color: var(--tinta2); font-size: 13.5px; min-width: 260px; }
+  .chip { font-family: var(--dato); font-size: 11px; padding: 2px 7px; border-radius: 2px;
+          white-space: nowrap; border: 1px solid; font-weight: 500; display: inline-block; }
+  .ch-ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+           background: color-mix(in srgb, var(--ok) 10%, transparent); }
+  .ch-marg { color: var(--acento); border-color: color-mix(in srgb, var(--acento) 45%, transparent);
+             background: color-mix(in srgb, var(--acento) 10%, transparent); }
+  .ch-forma { color: var(--aviso); border-color: color-mix(in srgb, var(--aviso) 45%, transparent);
+              background: color-mix(in srgb, var(--aviso) 10%, transparent); }
+  .ch-lat { color: var(--frio); border-color: color-mix(in srgb, var(--frio) 45%, transparent);
+            background: color-mix(in srgb, var(--frio) 9%, transparent); }
+  .ch-neu { color: var(--tinta2); border-color: var(--linea); background: var(--panel2); }
+  .pct { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+  .pct i { display: block; height: 6px; border-radius: 1px; background: currentColor; opacity: .55; }
+
+  /* frentes */
+  .frentes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  .frente { background: var(--panel); border: 1px solid var(--linea); border-radius: 3px; padding: 20px;
+            display: flex; flex-direction: column; gap: 10px; }
+  .frente.mayor { border-color: color-mix(in srgb, var(--acento) 55%, var(--linea)); box-shadow: var(--sombra); }
+  .frente .orden { font-family: var(--dato); font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+                   color: var(--acento); }
+  .frente .premio { font-family: var(--dato); font-size: 13px; font-weight: 600; }
+  .frente p { font-size: 15px; }
+  .frente .costo { font-family: var(--dato); font-size: 12px; color: var(--tinta2); margin-top: auto;
+                   padding-top: 8px; border-top: 1px solid var(--linea); }
+
+  /* veredicto PN130 */
+  .dos { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+  .caja { background: var(--panel); border: 1px solid var(--linea); border-radius: 3px; padding: 20px;
+          display: flex; flex-direction: column; gap: 12px; }
+  .veredicto { display: flex; gap: 12px; align-items: baseline; }
+  .veredicto .si { font-family: var(--display); font-weight: 700; font-size: 30px; color: var(--ok); line-height: 1; }
+  table.chica { font-size: 13.5px; }
+  table.chica td, table.chica th { padding: 8px 10px; }
+  .peor { color: var(--acento); font-weight: 600; }
+  .mejor { color: var(--ok); font-weight: 600; }
+
+  /* receta */
+  .cambios { display: flex; flex-direction: column; border: 1px solid var(--linea); border-radius: 3px;
+             background: var(--panel); overflow: hidden; }
+  .cambio { display: grid; grid-template-columns: 170px 1fr 1fr; border-bottom: 1px solid var(--linea); }
+  .cambio:last-child { border-bottom: none; }
+  .cambio > div { padding: 14px 16px; }
+  .cambio .que { font-family: var(--display); font-weight: 600; font-size: 15px; background: var(--panel2);
+                 display: flex; flex-direction: column; gap: 6px; }
+  .cambio .antes { color: var(--tinta2); font-size: 14.5px; border-right: 1px solid var(--linea); }
+  .cambio .despues { font-size: 14.5px; }
+  .cambio .rot { font-family: var(--dato); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+                 display: block; margin-bottom: 4px; }
+  .antes .rot { color: var(--tinta2); } .despues .rot { color: var(--acento); }
+  .cambio.queda .despues .rot { color: var(--ok); }
+  .cabeza-cambios { display: grid; grid-template-columns: 170px 1fr 1fr; font-family: var(--dato); font-size: 11px;
+                    letter-spacing: .1em; text-transform: uppercase; color: var(--tinta2); background: var(--panel2);
+                    border-bottom: 1px solid var(--linea); }
+  .cabeza-cambios > div { padding: 9px 16px; }
+  pre { margin: 0; background: var(--panel2); border: 1px solid var(--linea); border-radius: 3px; padding: 16px 18px;
+        overflow-x: auto; font-family: var(--dato); font-size: 12.5px; line-height: 1.55; }
+  pre .c { color: var(--tinta2); } pre .a { color: var(--acento); font-weight: 600; }
+  .pasos { display: flex; flex-direction: column; gap: 10px; margin: 0; padding-left: 22px; }
+  .pasos li { max-width: 72ch; }
+  .pasos li::marker { font-family: var(--dato); color: var(--acento); font-size: 13px; }
+  footer { font-family: var(--dato); font-size: 12px; color: var(--tinta2); border-top: 1px solid var(--linea);
+           padding-top: 18px; display: flex; flex-direction: column; gap: 6px; }
+
+  @media (max-width: 720px) {
+    .cambio, .cabeza-cambios { grid-template-columns: 1fr; }
+    .cabeza-cambios { display: none; }
+    .cambio .antes { border-right: none; border-bottom: 1px dashed var(--linea); }
+    .leyenda { padding-left: 0; }
+    .fila-compo { grid-template-columns: 1fr; gap: 6px; }
+    .tasa, .eje { grid-template-columns: 1fr 50px; }
+    .tasa .et { grid-column: 1 / -1; }
+    .eje > span:first-child { display: none; }
+  }
+  a { color: var(--frio); }
+  :focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+</style>
+
+<div class="marco">
+  <header>
+    <div class="ojo">Genesis · auditoría de tipos · 23-09-2026</div>
+    <h1>Tipos de datos en SM86</h1>
+    <p class="bajada">Cada operación del pipeline de producción (noon W4A8 servido en dos RTX 3090) contra el
+      tipo de dato que mejor rinde en Ampere. Qué ya está alineado, dónde queda margen, y cómo habría que
+      cuantizar un checkpoint nuevo con la receta de RedHat para que encaje de entrada.</p>
+    <dl class="ficha">
+      <div><dt>dtype global</dt><dd>float16</dd></div>
+      <div><dt>Pesos lineales</dt><dd>int4 g128 simétrico</dd></div>
+      <div><dt>Activaciones GEMM</dt><dd>int8 por token</dd></div>
+      <div><dt>KV de atención</dt><dd>int8 por token-cabeza</dd></div>
+      <div><dt>All-reduce prefill</dt><dd>int8 por grupo 64</dd></div>
+      <div><dt>Estado GDN</dt><dd>float16</dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <h2>La regla del silicio</h2>
+    <p>En GA102 (GeForce) importa tanto el tipo de la entrada como el del acumulador. Un <code>mma</code> fp16 con
+      acumulador fp32, que es lo que usan por defecto FlashInfer, cuBLAS y los kernels de Triton, corre a la
+      mitad de la tasa del mismo con acumulador fp16 y a un cuarto de la de int8. Esa brecha solo cuenta
+      donde el cómputo manda (prefill). En decode manda la memoria, y lo que cuenta son los bytes.</p>
+    <div class="tasas" role="img" aria-label="Rendimiento relativo de los tensor cores de SM86 por tipo: fp16 con acumulador fp32 1x, fp16 con acumulador fp16 2x, int8 4x, int4 8x">
+      <div class="tasa"><div class="et">fp16 · acum fp32<small>HMMA.F32 — FlashInfer, fla, cuBLAS</small></div>
+        <div class="pista"><b style="width:12.5%; background: var(--acento)"></b></div><div class="x">1×</div></div>
+      <div class="tasa"><div class="et">fp16 · acum fp16<small>HMMA.F16 — riesgo numérico</small></div>
+        <div class="pista"><b style="width:25%; background: var(--aviso)"></b></div><div class="x">2×</div></div>
+      <div class="tasa"><div class="et">int8 · acum int32<small>IMMA s8 — Marlin W4A8, SK-18</small></div>
+        <div class="pista"><b style="width:50%; background: var(--ok)"></b></div><div class="x">4×</div></div>
+      <div class="tasa"><div class="et">int4 · acum int32<small>IMMA s4 — medido 2,0× sobre s8</small></div>
+        <div class="pista"><b style="width:100%; background: var(--frio)"></b></div><div class="x">8×</div></div>
+      <div class="eje"><span></span><div class="marcas"><span style="left:0">0</span><span style="left:25%">2×</span><span style="left:50%">4×</span><span style="left:100%">8×</span></div><span></span></div>
+    </div>
+    <p class="nota">Las tasas son pico denso del GA102. La de s4 contra s8 está medida en este rig
+      (<span class="m">mma m16n8k64</span>).</p>
+  </section>
+
+  <section>
+    <h2>Dónde se va el tiempo, según el tipo</h2>
+    <p>Porcentaje del tiempo de GPU del rank 0, sumado por veredicto. Decode: 40 pasos, DFlash2 K=8, 21-09.
+      Prefill: chunks de 1760 tokens, 20-09. Ninguna de las dos trazas incluye el árbol ni
+      <span class="m">max-num-seqs 11</span>.</p>
+    <div class="compo">
+      <div class="fila-compo"><div class="et">Decode</div>
+        <div class="barra" role="img" aria-label="Decode: alineado 58,7%, margen de tipo 5,2%, forma de lanzamiento 7,2%, latencia de all-reduce 18,3%, resto 10,5%">
+          <span class="c-ok" style="width:58.7%">58,7%</span><span class="c-marg" style="width:5.2%"></span><span class="c-forma" style="width:7.2%">7,2</span><span class="c-lat" style="width:18.3%">18,3%</span><span class="c-resto" style="width:10.6%">10,5</span>
+        </div></div>
+      <div class="fila-compo"><div class="et">Prefill</div>
+        <div class="barra" role="img" aria-label="Prefill: alineado 70,0%, margen de tipo 19,6%, resto 10,4%">
+          <span class="c-ok" style="width:70%">70,0%</span><span class="c-marg" style="width:19.6%">19,6%</span><span class="c-resto" style="width:10.4%">10,4</span>
+        </div></div>
+      <div class="leyenda">
+        <span><i class="c-ok"></i>alineado con SM86</span>
+        <span><i class="c-marg"></i>margen de tipo de dato</span>
+        <span><i class="c-forma"></i>forma de lanzamiento</span>
+        <span><i class="c-lat"></i>latencia de all-reduce</span>
+        <span><i class="c-resto"></i>resto</span>
+      </div>
+    </div>
+    <p>Las lineales, que son casi la mitad del tiempo en las dos fases, ya están en su mejor forma. En decode
+      leen 6,2 GB de pesos int4 por GPU en 9,65 ms, que es el techo de DRAM. En prefill corren en IMMA s8. El
+      margen de tipo de dato está casi todo en el prefill, y casi todo en la atención.</p>
+  </section>
+
+  <section>
+    <h2>El pipeline, operación por operación</h2>
+    <div class="tabla-caja">
+      <table class="pipe">
+        <thead><tr><th>Operación</th><th>Entrada → cómputo → salida</th><th class="n">Decode</th><th class="n">Prefill</th><th>Veredicto</th><th>Por qué</th></tr></thead>
+        <tbody>
+          <tr class="grupo"><td colspan="6">Lineales</td></tr>
+          <tr><td class="k">Proyecciones W4A8<small>Marlin + PN130</small></td>
+            <td class="flujo">int8 × int4 <span class="fl">→</span> IMMA s8, acum int32 <span class="fl">→</span> fp16</td>
+            <td class="n">44,4%</td><td class="n">49,4%</td><td><span class="chip ch-ok">alineado</span></td>
+            <td class="porq">En decode, 9,65 ms por paso, el techo de DRAM. En prefill, el tipo más rápido que la calidad permite: W4A4 compone errores.</td></tr>
+          <tr><td class="k">lm_head<small>PN139, Marlin W4A16</small></td>
+            <td class="flujo">fp16 × int4 <span class="fl">→</span> HMMA <span class="fl">→</span> fp16</td>
+            <td class="n">3,6%</td><td class="n">0,1%</td><td><span class="chip ch-ok">alineado</span></td>
+            <td class="porq">Limitado por memoria, así que el A16 no cuesta. Hoy se cuantiza con RTN al cargar.</td></tr>
+          <tr><td class="k">in_proj_a / in_proj_b<small>GDN, denso</small></td>
+            <td class="flujo">fp16 × fp16 <span class="fl">→</span> WMMA cutlass <span class="fl">→</span> fp16</td>
+            <td class="n">1,3%</td><td class="n">0,3%</td><td><span class="chip ch-neu">menor</span></td>
+            <td class="porq">Matrices de 48×5120 que los dos checkpoints dejan en bf16 a propósito, porque controlan la compuerta del GDN.</td></tr>
+
+          <tr class="grupo"><td colspan="6">Entre lineales</td></tr>
+          <tr><td class="k">Cuantizar la activación<small>_per_token_quant_int8</small></td>
+            <td class="flujo">fp16 <span class="fl">→</span> amax fila <span class="fl">→</span> int8 + escala</td>
+            <td class="n">2,7%</td><td class="n">1,6%</td><td><span class="chip ch-marg">margen</span></td>
+            <td class="porq">Pasada suelta que relee lo que la RMSNorm o el SiLU acaban de escribir en fp16. SK-20 ya fusiona norma y cuantización.</td></tr>
+          <tr><td class="k">a_scales × factor<small>triton_poi_fused_…_mul</small></td>
+            <td class="flujo">fp32[M] × escalar</td>
+            <td class="n">1,3%</td><td class="n">—</td><td><span class="chip ch-marg">margen</span></td>
+            <td class="porq">Un kernel entero (grid 1, 1,25 µs) para multiplicar M floats, unas 230 veces por paso. Se pliega en el cuantizador.</td></tr>
+          <tr><td class="k">SiLU · mul</td>
+            <td class="flujo">fp16 <span class="fl">→</span> fp32 <span class="fl">→</span> fp16</td>
+            <td class="n">1,2%</td><td class="n">1,2%</td><td><span class="chip ch-marg">margen</span></td>
+            <td class="porq">Escribe fp16 que el cuantizador vuelve a leer. Con salida int8 directa se ahorra una ida y vuelta.</td></tr>
+          <tr><td class="k">RMSNorm + residuo<small>Triton, inductor</small></td>
+            <td class="flujo">fp16 <span class="fl">→</span> fp32 <span class="fl">→</span> fp16</td>
+            <td class="n">~2,5%</td><td class="n">~2,0%</td><td><span class="chip ch-ok">alineado</span></td>
+            <td class="porq">Residuo en fp16 con la norma en fp32: correcto. PN144 cubre el desborde del borrador.</td></tr>
+
+          <tr class="grupo"><td colspan="6">Atención (16 capas)</td></tr>
+          <tr><td class="k">Decode<small>PN131 · SK-18h</small></td>
+            <td class="flujo">KV int8 <span class="fl">→</span> QK y softmax enteros <span class="fl">→</span> fp16</td>
+            <td class="n">5,0%</td><td class="n">—</td><td><span class="chip ch-ok">alineado</span></td>
+            <td class="porq">Lee la KV int8 sin descuantizar. Es el diseño objetivo.</td></tr>
+          <tr><td class="k">Prefill<small>FlashInfer + sk18h_decuant</small></td>
+            <td class="flujo">KV int8 <span class="fl">→</span> fp16 <span class="fl">→</span> HMMA acum fp32</td>
+            <td class="n">—</td><td class="n">12,8%</td><td><span class="chip ch-marg">margen</span></td>
+            <td class="porq">El tipo más lento de la tabla, y encima descuantiza la KV en cada chunk. Crece con el largo: 22% a 42k, 40% a 100k.</td></tr>
+
+          <tr class="grupo"><td colspan="6">GatedDeltaNet (48 capas)</td></tr>
+          <tr><td class="k">Recurrencia spec<small>_k_spec (PN122)</small></td>
+            <td class="flujo">fp16 <span class="fl">→</span> fp32 <span class="fl">→</span> estado fp16</td>
+            <td class="n">4,0%</td><td class="n">—</td><td><span class="chip ch-ok">alineado</span></td>
+            <td class="porq">Rango 1 por token, así que no hay GEMM para acelerar. El estado en fp16 va contra el fp32 que pide el config; está medido y es estable.</td></tr>
+          <tr><td class="k">Cinta de rollback<small>_k_escribir (PN122)</small></td>
+            <td class="flujo">fp16 <span class="fl">→</span> fp32 <span class="fl">→</span> cinta fp32</td>
+            <td class="n">7,2%</td><td class="n">—</td><td><span class="chip ch-forma">forma</span></td>
+            <td class="porq">grid=(N,): con 1 pedido, toda la GPU corre un solo bloque durante 33 µs, 48 veces por paso. Recorre tokens × cabezas en serie.</td></tr>
+          <tr><td class="k">Chunk de prefill<small>fla: chunk_h, chunk_o, merge…</small></td>
+            <td class="flujo">fp16 <span class="fl">→</span> HMMA acum fp32</td>
+            <td class="n">—</td><td class="n">4,1%</td><td><span class="chip ch-marg">margen</span></td>
+            <td class="porq">Candidato a int8 como la forma cerrada del árbol. Es numéricamente más delicado por la recurrencia.</td></tr>
+          <tr><td class="k">Conv causal</td>
+            <td class="flujo">fp16 <span class="fl">→</span> fp32 <span class="fl">→</span> fp16</td>
+            <td class="n">0,9%</td><td class="n">0,8%</td><td><span class="chip ch-ok">alineado</span></td>
+            <td class="porq">Elementwise, limitado por memoria.</td></tr>
+
+          <tr class="grupo"><td colspan="6">Comunicación de TP</td></tr>
+          <tr><td class="k">All-reduce de decode<small>NCCL RING_LL</small></td>
+            <td class="flujo">fp16 suma</td>
+            <td class="n">18,3%</td><td class="n">1,3%</td><td><span class="chip ch-lat">latencia</span></td>
+            <td class="porq">26,7 µs por 92 KB: es latencia, no ancho de banda, así que int8 no lo acorta. La palanca es el kernel P2P propio.</td></tr>
+          <tr><td class="k">All-reduce de prefill<small>PN120 · all-gather int8</small></td>
+            <td class="flujo">fp16 <span class="fl">→</span> int8 g64 <span class="fl">→</span> suma fp16</td>
+            <td class="n">—</td><td class="n">20,5%</td><td><span class="chip ch-ok">alineado</span></td>
+            <td class="porq">Unos 18 GB/s, el techo del enlace. int4 está medido y es 7× peor a igual tráfico; queda solapar.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="nota">Los tipos de las lineales salen de decodificar los IDs del template de Marlin con el
+      <span class="m">ScalarType</span> del propio vLLM 0.29.0: <span class="m">Marlin&lt;int8, uint4b8, float16, float16&gt;</span> para las
+      proyecciones y <span class="m">&lt;float16, uint4b8, float16, float16&gt;</span> para el lm_head.</p>
+  </section>
+
+  <section>
+    <h2>Tres frentes, por premio</h2>
+    <div class="frentes">
+      <article class="frente mayor">
+        <div class="orden">El grande · prefill largo</div>
+        <h3>Atención de prefill entera</h3>
+        <div class="premio">12,8% del prefill corto, 40% a 100k</div>
+        <p>Llevar SK-18f al camino de prefill: QK<sup>T</sup> en IMMA s8 directo sobre la KV int8, sin
+          <span class="m">sk18h_decuant</span>. SK-18f ya empataba a FlashInfer a 16k y le ganaba 1,3× a 57k,
+          que es el largo real de opencode (hilos de 60 a 100k).</p>
+        <div class="costo">Costo alto · kernel nuevo en el camino de prefill</div>
+      </article>
+      <article class="frente">
+        <div class="orden">El barato · decode</div>
+        <h3>Paralelizar <span class="m">_k_escribir</span></h3>
+        <div class="premio">~1,4 ms de ~21,7 ms por paso (~7%)</div>
+        <p>Pasar la grilla de <span class="m">(N,)</span> a <span class="m">(N, T−1, H)</span>. Cada fila de la
+          cinta es independiente, así que no cambia ningún número. De paso, alinear el docstring con la cinta,
+          que es fp32 y no fp16.</p>
+        <div class="costo">Costo bajo · un kernel de Triton, verificable bit a bit</div>
+      </article>
+      <article class="frente">
+        <div class="orden">El de fusión · las dos fases</div>
+        <h3>La activación nace en int8</h3>
+        <div class="premio">~5% del decode, ~3% del prefill</div>
+        <p>RMSNorm que escriba int8 (SK-20 existe), SiLU·mul con salida int8, y el
+          <span class="m">input_global_scale</span> plegado dentro del cuantizador. Son tres kernels menos por
+          lineal.</p>
+        <div class="costo">Costo medio · ojo con la caché de torch.compile</div>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>PN125 y PN130 con escalas BF16</h2>
+    <div class="dos">
+      <div class="caja">
+        <div class="veredicto"><span class="si">Sí</span><p>las dos las aceptan.</p></div>
+        <p><strong>PN125</strong> hace la cuenta en float y guarda con el dtype original. Con el RedHat ni siquiera
+          actúa, porque sale temprano si no hay escalas negativas.</p>
+        <p><strong>PN130</strong> nunca recibe BF16. Con <span class="m">--dtype float16</span>, vLLM convierte las
+          escalas a FP16 al cargarlas. Solo el 0,001% queda subnormal.</p>
+        <p class="nota">El kernel de PN130 se instancia únicamente para <span class="m">s8 × uint4b8 × fp16</span>, y por eso el
+          dtype global tiene que seguir en float16.</p>
+      </div>
+      <div class="caja">
+        <h3>Lo que sí aparece: el rango de escalas</h3>
+        <p>PN130 pasa las escalas a int16 normalizadas por el máximo del tensor, con techo 4096. El AWQ de RedHat
+          estira el rango de escalas de 4 a 7 órdenes de magnitud, y los grupos chicos pierden precisión.</p>
+        <div class="tabla-caja">
+          <table class="chica">
+            <thead><tr><th>Error de escala</th><th class="n">noon</th><th class="n">RedHat · tensor</th><th class="n">RedHat · fila</th></tr></thead>
+            <tbody>
+              <tr><td>mediana</td><td class="n">0,05%</td><td class="n">0,08%</td><td class="n mejor">0,012%</td></tr>
+              <tr><td>p99</td><td class="n">0,22%</td><td class="n peor">0,83%</td><td class="n mejor">0,020%</td></tr>
+              <tr><td>peor (L2 down_proj)</td><td class="n">0,28%</td><td class="n peor">3,50%</td><td class="n mejor">0,051%</td></tr>
+              <tr><td>grupos en escala 0</td><td class="n">0</td><td class="n peor">404</td><td class="n mejor">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="nota">Normalizar por fila (canal de salida) baja el error unas 70 veces y sirve para cualquier
+          checkpoint. Cuesta un factor por columna en el epílogo del kernel propio.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="receta">
+    <h2>La receta de RedHat, ajustada a Genesis</h2>
+    <p>La comparación capa por capa mostró que noon y RedHat son el mismo Qwen. noon es la abliteración de
+      orcarouter: una edición de rango 1 en el embed y en las matrices que escriben el residuo, cuantizada con
+      AutoRound. RedHat aplicó AWQ + GPTQ sobre el base. Aplicar la receta de RedHat al BF16 de orcarouter da un
+      noon sin censura, sin escalas negativas y calibrado para nuestra carga.</p>
+
+    <div class="cambios">
+      <div class="cabeza-cambios"><div>Parámetro</div><div>RedHat hoy</div><div>Para Genesis</div></div>
+      <div class="cambio"><div class="que">Modelo base</div>
+        <div class="antes"><span class="rot">hoy</span><span class="m">Qwen/Qwen3.8-27B</span>, con censura.</div>
+        <div class="despues"><span class="rot">cambiar</span><span class="m">orcarouter/Qwen3.8-27B-Uncensored</span> en BF16, el mismo que cuantizó noon.</div></div>
+      <div class="cambio"><div class="que">dtype de las escalas</div>
+        <div class="antes"><span class="rot">hoy</span>BF16: 0,17% de redondeo por escala.</div>
+        <div class="despues"><span class="rot">cambiar</span>FP16: 0,02% de redondeo, 8 veces menos, y es el dtype en el que sirve PN130. Poner <span class="m">scale_dtype: float16</span> o cargar el modelo en fp16 para calibrar.</div></div>
+      <div class="cambio"><div class="que">lm_head</div>
+        <div class="antes"><span class="rot">hoy</span>Ignorado, queda en BF16. PN139 lo cuantiza igual al cargar, con RTN.</div>
+        <div class="despues"><span class="rot">cambiar</span>Cuantizarlo con GPTQ W4 g128 en el checkpoint: el mismo formato que ya servimos, pero calibrado. Hay que verificar que vLLM lo cargue cuantizado en compressed-tensors.</div></div>
+      <div class="cambio"><div class="que">Esquema KV</div>
+        <div class="antes"><span class="rot">hoy</span>FP8 estática por tensor (<span class="m">k_scale</span>, <span class="m">v_scale</span>).</div>
+        <div class="despues"><span class="rot">sacar</span>Usamos int8 dinámica por token-cabeza, y FP8 degrada el GDN. Las escalas estáticas quedarían sin uso.</div></div>
+      <div class="cambio"><div class="que">Calibración</div>
+        <div class="antes"><span class="rot">hoy</span>512 muestras de <span class="m">open-perfectblend</span> de hasta 4096 tokens.</div>
+        <div class="despues"><span class="rot">cambiar</span>Mezcla de nuestra carga: ~40% código y tool calls de agente con thinking, ~30% chat general, ~30% secuencias de 8 a 16k. El estado del GDN a contexto largo no se parece al de 4k.</div></div>
+      <div class="cambio"><div class="que">Suavizado AWQ</div>
+        <div class="antes"><span class="rot">hoy</span>Norma → qkv/z/a/b, norma → gate/up, up → down.</div>
+        <div class="despues"><span class="rot">mantener</span>Se pliega en la RMSNorm sin costo y achica los canales salientes de la activación, que es justo lo que duele en int8. Plegado verificado sobre la GemmaRMSNorm (1+w). No agregar v → o: con GQA 24/4 llm-compressor lo salta, y los outliers de o_proj son por token, no por canal.</div></div>
+      <div class="cambio queda"><div class="que">Esquema de pesos</div>
+        <div class="antes"><span class="rot">hoy</span>W4A16, simétrico, g128, actorder static, damp 0,01.</div>
+        <div class="despues"><span class="rot">mantener</span>Simétrico sin zero points y sin <span class="m">g_idx</span>: Marlin lo lee sin permutación, con 0% de escalas negativas. No declarar W4A8 en el checkpoint: la activación int8 la pone <span class="m">VLLM_MARLIN_INPUT_DTYPE</span>.</div></div>
+      <div class="cambio queda"><div class="que">Excluidos</div>
+        <div class="antes"><span class="rot">hoy</span>Visión, embed, in_proj_a/b, MTP.</div>
+        <div class="despues"><span class="rot">mantener</span>in_proj_a/b gobiernan la compuerta del GDN. El MTP no se usa, porque el borrador es DFlash2.</div></div>
+    </div>
+
+    <pre aria-label="Receta propuesta para llm-compressor"><span class="c"># recipe.yaml propuesto — RedHat + ajustes Genesis (sin probar todavía)</span>
+default_stage:
+  default_modifiers:
+    AWQModifier:
+      <span class="c"># mismos mapeos que RedHat: norma→qkv/z/a/b, post_attention_layernorm→gate/up, up→down</span>
+      duo_scaling: both
+      n_grid: 20
+    GPTQModifier:
+      targets: [Linear]
+      ignore: ['re:visual.*', 're:model.visual.*', 're:.*embed_tokens$',
+               're:.*linear_attn\.in_proj_a$', 're:.*linear_attn\.in_proj_b$', 're:^mtp.*']
+      <span class="c"># lm_head YA NO se ignora: GPTQ W4 g128 en vez del RTN de PN139</span>
+      config_groups:
+        group_0:
+          targets: [Linear]
+          weights: {num_bits: 4, type: int, symmetric: true, strategy: group,
+                    group_size: 128, actorder: static, <span class="a">scale_dtype: float16</span>}
+      block_size: 128
+      dampening_frac: 0.01
+      <span class="c"># sin kv_cache_scheme: la KV es int8 dinámica por token-cabeza</span></pre>
+
+    <h3>Del lado de Genesis, para que encaje</h3>
+    <ol class="pasos">
+      <li><strong>PN130 normalizado por fila.</strong> Un factor por columna en el epílogo en vez de uno por tensor.
+        Absorbe el rango de escalas de AWQ (70 veces menos error) y le sirve también a noon.</li>
+      <li><strong>PN139 reconoce un lm_head ya cuantizado.</strong> Que no re-cuantice pesos que vienen calibrados.</li>
+      <li><strong>Medir el borrador.</strong> DFlash2 se entrenó sobre los estados ocultos del target, así que un
+        target recalibrado puede mover la aceptación. Se mide con el banco A/B.</li>
+    </ol>
+
+    <h3>Cómo se corre y cómo se valida</h3>
+    <ol class="pasos">
+      <li>Bajar el BF16 de orcarouter (~54 GB; hay ~107 GB libres). Con 32 GB de RAM, <span class="m">oneshot</span> necesita
+        carga secuencial y offload a disco. Es lento pero entra.</li>
+      <li>La calibración usa las GPU, así que requiere una ventana con producción bajada.</li>
+      <li>Validar en el servidor de pruebas (puerto 8361) contra noon:
+        <ul>
+          <li>KL de logits contra el piso de ruido de 0,019;</li>
+          <li>banco A/B greedy;</li>
+          <li>la tarea de código larga, mirando si el modelo cierra;</li>
+          <li>la aceptación de DFlash2.</li>
+        </ul>
+        Tres arranques por brazo como mínimo.</li>
+      <li>Si gana, la brecha de 6,5 puntos de MMLU-Pro que la ficha de noon atribuye a la abliteración queda
+        explicada como costo de AutoRound. Hoy es solo una sospecha.</li>
+    </ol>
+  </section>
+
+  <section id="rotaciones">
+    <h2>Rotaciones: qué resuelven y qué no</h2>
+    <p>Una rotación ortogonal reparte la energía de los canales atípicos entre todos los demás. Eso achica
+      el rango de las escalas de grupo y aplana las activaciones que después se cuantizan a int8. Lo probé
+      con una Hadamard por bloques de 128, del tamaño del grupo, sobre los pesos del RedHat:</p>
+    <div class="tabla-caja">
+      <table class="chica">
+        <thead><tr><th>Tensor</th><th class="n">Rango de escalas<br>original → rotado</th><th class="n">Error int16 de PN130<br>original → rotado</th><th>Lectura</th></tr></thead>
+        <tbody>
+          <tr><td class="k">L2 down_proj</td><td class="n">1489 → <span class="mejor">134</span></td><td class="n">3,72% → <span class="mejor">0,43%</span></td><td class="porq">El peor caso de AWQ mejora 9 veces.</td></tr>
+          <tr><td class="k">L30 down_proj</td><td class="n">349 → <span class="mejor">34</span></td><td class="n">0,46% → <span class="mejor">0,05%</span></td><td class="porq">Mejora.</td></tr>
+          <tr><td class="k">L2 gate_proj</td><td class="n">32 → <span class="mejor">6</span></td><td class="n">0,12% → <span class="mejor">0,02%</span></td><td class="porq">Mejora.</td></tr>
+          <tr><td class="k">L31 o_proj</td><td class="n">112 → 64</td><td class="n">0,09% → 0,05%</td><td class="porq">Poco cambio.</td></tr>
+          <tr><td class="k">L0 out_proj</td><td class="n">79 → <span class="peor">157</span></td><td class="n">0,21% → <span class="peor">0,47%</span></td><td class="porq">Empeora: no hay atípicos que repartir.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Para el problema de las escalas, la normalización por fila de PN130 rinde más (0,05% en el peor tensor) y no toca el
+      modelo. La rotación sirve para otra cosa, la calidad. Eso solo se mide cuantizando desde el BF16: re-cuantizar
+      pesos que ya son int4 favorece al original.</p>
+
+    <div class="frentes">
+      <article class="frente">
+        <div class="orden">Escalas · arXiv 2405.04532</div>
+        <h3>QServe: cuantización progresiva</h3>
+        <p>Primero int8 por canal con escala fp16, y después grupos int4 con escalas u8 relativas a ese canal. Es la
+          versión publicada de normalizar PN130 por fila. De QServe no traemos el desempaque "nibble crudo", que ya
+          medimos más lento en nuestro kernel.</p>
+        <div class="costo">Aplica ya · solo la parte de las escalas</div>
+      </article>
+      <article class="frente">
+        <div class="orden">Escalas · arXiv 2405.14597</div>
+        <h3>Integer Scale</h3>
+        <p>Describe exactamente el mecanismo de Marlin W4A8: escalas de grupo enteras con un amplificador y
+          acumulación int32. Tiene el mismo problema de rango y lo resuelve eligiendo bien el amplificador.</p>
+        <div class="costo">Referencia · confirma el diagnóstico</div>
+      </article>
+      <article class="frente mayor">
+        <div class="orden">Calidad · arXiv 2512.24124</div>
+        <h3>OptRot</h3>
+        <p>Rotaciones plegables en los pesos y sin datos de calibración, que minimizan la cuarta potencia de los pesos
+          rotados. Con GPTQ le gana a Hadamard, a SpinQuant y a OSTQuant en W4A16, y mejora la activación en W4A8, que
+          es nuestro caso. En W4A4 empeora.</p>
+        <div class="costo">Candidato · brazo B contra AWQ sobre el BF16</div>
+      </article>
+      <article class="frente">
+        <div class="orden">Grupos · arXiv 2607.27694 · 2511.04214</div>
+        <h3>GyRot y Block Rotation</h3>
+        <p>Una rotación global choca con las escalas por grupo, así que rotan por bloques del tamaño del grupo y
+          permutan canales para alinearlos. Es la variante que probé en la tabla de arriba.</p>
+        <div class="costo">Referencia · para rotar sin romper los grupos</div>
+      </article>
+    </div>
+
+    <h3>Qué cambia en Genesis si rotamos el residuo</h3>
+    <div class="cambios">
+      <div class="cambio queda"><div class="que">Gana</div>
+        <div class="antes"><span class="rot">activaciones</span>down_proj y o_proj pierden 1,9–2,5 bits en int8 por atípicos.</div>
+        <div class="despues"><span class="rot">con R1 + R4</span>Activaciones int8 más planas en las lineales y en el all-reduce int8 de PN120.</div></div>
+      <div class="cambio"><div class="que">Rompe</div>
+        <div class="antes"><span class="rot">DFlash2</span>El borrador lee los estados ocultos de las capas 5, 19, 33, 47 y 61.</div>
+        <div class="despues"><span class="rot">hay que</span>Plegar la rotación en el <span class="m">fc</span> del borrador y re-cuantizarlo. Lo mismo el embed y el lm_head (PN139).</div></div>
+      <div class="cambio"><div class="que">Obliga a elegir</div>
+        <div class="antes"><span class="rot">AWQ</span>Suavizado por canal, plegado en la RMSNorm.</div>
+        <div class="despues"><span class="rot">o</span>Rotación, sitio por sitio. Las dos juntas no: la rotación deshace el suavizado.</div></div>
+      <div class="cambio"><div class="que">Cuesta</div>
+        <div class="antes"><span class="rot">R1, R2</span>Plegables en los pesos, gratis.</div>
+        <div class="despues"><span class="rot">R4</span>Hadamard online antes de down_proj: 64 lanzamientos más por paso. El kernel ya existe (<span class="m">sk_fwht</span>, como PN126).</div></div>
+    </div>
+  </section>
+
+  <section id="borrador">
+    <h2>El borrador DFlash2</h2>
+    <p>El que usamos es <span class="m">incoai/Qwen3.8-27B-DFlash2</span>: 5 capas, 1,92 B de parámetros, entrenado por Inco sobre el
+      Qwen <strong>base</strong>. Lo re-cuantizó a W4A16 GPTQ <span class="m">syv-ai/qwen38-27b-rtx3090</span>, con Hessianas de 400
+      prompts de <strong>chat</strong>, y queda en 1,19 GB. Incoai no cambió los pesos desde el 18-08: los commits del 17-09 son de la ficha.</p>
+
+    <div class="tabla-caja">
+      <table class="chica" style="min-width:760px">
+        <thead><tr><th>Borrador</th><th>Arquitectura</th><th class="n">HumanEval</th><th class="n">Chat</th><th class="n">Tool call</th><th>Para nosotros</th></tr></thead>
+        <tbody>
+          <tr><td class="k">incoai DFlash2<small>el nuestro · z-lab es espejo</small></td><td class="porq">bloque de 8 + selector de candidatos</td>
+            <td class="n">4,39</td><td class="n">4,10 <small class="nota">MT-Bench</small></td><td class="n">—</td>
+            <td class="porq">El árbol de 8 nodos se construye sobre su selector top-16. Es lo que está medido.</td></tr>
+          <tr><td class="k">RedHat DSpark<small>publicado el 21-09</small></td><td class="porq">DFlash + cabeza de Markov + confianza, 8 capas auxiliares</td>
+            <td class="n">4,42</td><td class="n">3,77 <small class="nota">writing</small></td><td class="n peor">3,76</td>
+            <td class="porq">Empata en código y flojea en tool calls y escritura, que es nuestra carga. vLLM 0.29.0 ya lo sirve, pero perderíamos el árbol.</td></tr>
+          <tr><td class="k">RadixArk DSpark</td><td class="porq">DSpark comunitario</td>
+            <td class="n">3,30</td><td class="n">3,01</td><td class="n">—</td><td class="porq">Por debajo de DFlash2 en la tabla de Inco.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="nota">Largo de aceptación con 7 tokens de borrador (Inco, SGLang en H200) y con 8 (RedHat, vLLM en H100). Son arneses
+      distintos, así que la comparación es aproximada. Ninguno se midió con un target abliterado ni cuantizado.</p>
+
+    <p><strong>No hay un borrador claramente mejor para descargar.</strong> El margen está en adaptar el que tenemos a lo
+      que realmente ve: nuestro target (abliterado y W4A8) y nuestra carga (agente de código con thinking y tool calls).
+      El método de RedHat es público, pero el de DFlash2 no: Inco no liberó el entrenamiento, y
+      <span class="m">speculators</span> entrena DFlash v1, DSpark, EAGLE-3 y MTP, no DFlash2.</p>
+
+    <div class="frentes">
+      <article class="frente">
+        <div class="orden">Paso 1 · barato</div>
+        <h3>Re-calibrar el GPTQ del borrador</h3>
+        <div class="premio">Recuperar parte del −5% de aceptación con sampling</div>
+        <p>Repetir el pipeline de syv-ai (<span class="m">capture_dflash2.py</span> y <span class="m">quant_dflash2.py</span>), pero capturando las
+          Hessianas con nuestro target W4A8 y prompts de opencode en vez de chat genérico. En el mismo pase, escalas
+          FP16. Ellos también dejaron un aprendizaje: mezclar la distribución de la KV de contexto en las Hessianas de k/v dio 7% peor.</p>
+        <div class="costo">~20 min de GPU y ~56 GB de disco · ventana con producción bajada</div>
+      </article>
+      <article class="frente mayor">
+        <div class="orden">Paso 2 · el grande</div>
+        <h3>Aprender de producción</h3>
+        <div class="premio">El borrador alineado al target que realmente sirve</div>
+        <p>El método de RedHat regenera los datos con el target para que el borrador imite sus salidas. Nosotros ya tenemos
+          eso gratis: en cada paso, producción calcula los estados ocultos de las 5 capas que lee DFlash2 y emite los tokens
+          verdaderos. Un parche que muestree y guarde esos pares a disco (~51 KB por token; 2 M tokens son ~100 GB) da un
+          set de ajuste fino con la carga real, en la línea de OSD y Draft-OPD.</p>
+        <div class="costo">Falta el entrenador de DFlash2: portarlo sobre el de DFlash de speculators, o pedírselo a Inco, que lo ofrece para fine-tunes</div>
+      </article>
+      <article class="frente">
+        <div class="orden">Alternativa · abierta de punta a punta</div>
+        <h3>DSpark con speculators</h3>
+        <div class="premio">Todo el pipeline público</div>
+        <p>Arrancar desde el checkpoint DSpark de RedHat y ajustarlo con datos de noon. La confianza por posición podría
+          alimentar el selector de largo que ya simulamos. El precio es reconstruir el árbol sobre la cabeza de Markov.</p>
+        <div class="costo">Costo alto · se pierde el árbol medido (+10-11% en prosa)</div>
+      </article>
+    </div>
+    <p class="nota">El entrenamiento necesita las GPU libres. Un borrador de 1,9 B con Muon ocupa ~12 GB entre pesos,
+      gradientes y momento, más las activaciones. Entra en una 3090 con checkpointing, pero no al lado de producción.</p>
+  </section>
+
+  <footer>
+    <span>Fuentes: trazas <span class="m">decode_sync</span> (21-09) y <span class="m">pp_thr1760</span> (20-09) · comparación noon/RedHat
+      con <span class="m">tests/bench/comparar_checkpoints_int4.py</span> (23-09, 64 capas, CPU).</span>
+    <span>Literatura: QServe 2405.04532 · Integer Scale 2405.14597 · OptRot 2512.24124 · SpinQuant 2405.16406 ·
+      GyRot 2607.27694 · Block Rotation 2511.04214 · fichas de incoai, RedHatAI y syv-ai en Hugging Face.</span>
+    <span>Producción: <span class="m">genesis-27b-dflash2</span>, vLLM 0.29.0, TP=2 en dos RTX 3090 a 229/243 W.</span>
+  </footer>
+</div>

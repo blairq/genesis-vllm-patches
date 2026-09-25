@@ -1,0 +1,12 @@
+# Captura de datos para ajustar el borrador DFlash2 (va ENCIMA de ov-aislado.yml):
+#
+#   docker compose -f docker-compose.qwen38-27b-noon-dflash2-v029.yml -f ov-aislado.yml \
+#                  -f ov-captura.yml up -d --force-recreate
+#
+# Instala el volcado de features del fc en los pasos de prefill (vllm/_genesis/captura_borrador.py).
+# Solo vuelca mientras exista /traces/captura/CAPTURAR, que maneja regenerar_y_capturar.py.
+services:
+  vllm-server:
+    environment:
+      - GENESIS_CAPTURA_BORRADOR=1
+      - GENESIS_CAPTURA_BORRADOR_DIR=/traces/captura

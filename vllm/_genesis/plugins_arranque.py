@@ -81,6 +81,21 @@ def cargar() -> None:
         except Exception as e:  # noqa: BLE001
             log.error("[ARBOL] no se pudo instalar: %s: %s", type(e).__name__, e)
 
+    if os.environ.get("GENESIS_DIAG_CAPAS_DUMP", "").strip():
+        try:
+            from vllm._genesis import diag_capas_dump
+            diag_capas_dump.instalar()
+        except Exception as e:  # noqa: BLE001
+            log.error("[DIAG capas] no se pudo instalar: %s: %s", type(e).__name__, e)
+
+    if _prendido("GENESIS_CAPTURA_BORRADOR"):
+        # Datos para ajustar DFlash2 contra noon: features del fc en los pasos de prefill.
+        try:
+            from vllm._genesis import captura_borrador
+            captura_borrador.instalar()
+        except Exception as e:  # noqa: BLE001
+            log.error("[CAPTURA] no se pudo instalar: %s: %s", type(e).__name__, e)
+
     if os.environ.get("GENESIS_DIAG_DDTREE_DUMP", "").strip():
         try:
             from vllm._genesis.diag_ddtree_dump import enganchar as _ddt

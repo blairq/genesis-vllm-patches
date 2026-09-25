@@ -1,0 +1,8 @@
+# Mismas versiones que la imagen vllm/vllm-openai:v0.29.0 con la que se armo y se sirve el modelo:
+# con otras, transformers puede cambiar el forward de Qwen3.5 (GDN, RoPE parcial) y la calibracion
+# dejaria de ser la del modelo servido. torch va aparte (preparar.sh), desde el indice de CUDA 13.0.
+transformers==5.16.1
+safetensors==0.8.0
+numpy==2.2.6
+# solo para la TUI (opcional: la linea de comandos no la necesita)
+rich==15.0.0

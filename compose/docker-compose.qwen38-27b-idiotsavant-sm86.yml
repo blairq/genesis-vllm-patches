@@ -1,4 +1,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
+# qwen3.8_27b_idiotSavant_sm_86 + qwen3.8_27b_idiotSavant_sm_86_dflash2   (2026-09-25)
+#
+# El cuant PROPIO, afinado para SM86 (int8 en todo el decode), sobre el BF16 de
+# orcarouter/Qwen3.8-27B-Uncensored (entrenamiento/cuant/):
+#   * residuo ROTADO offline (Hadamard por bloques de 1024 con signos, estilo QuaRot): la
+#     activacion masiva deja de fijar la escala int8 por token de Marlin W4A8
+#   * GPTQ W4 g128 en la base rotada (Hessianas transformadas exactas desde el cache)
+#   * Hadamard de 512 antes de down_proj, en linea: PN148 con SK-23 (SiluAndMul + Hadamard +
+#     int8 por token en un kernel, directo a Marlin)
+#   * KL sobre respuestas vs BF16 (vLLM, W4A8): 0,0194 contra 0,0385 de noon
+# Borrador DFlash2 reajustado contra este modelo (LoRA AUF sobre 840 pedidos de agente) y
+# servido en su base original con PN149 (desrota el embedding, rota antes del lm_head).
+# Banco de 40 pedidos de agente con arbol: 5,69 aceptados/paso, 217 tok/s de decode.
+#
+# Mismo IP/puerto que el compose de noon (no pueden correr juntos). Cachés JIT propias.
+# Al cambiar de checkpoint, VACIAR /home/usuario/Proyectos/kv-offload (misma ruta).
+# ─────────────────────────────────────────────────────────────────────────────
+# (lo que sigue es el compose de noon con los cambios de arriba)
+# ─────────────────────────────────────────────────────────────────────────────
 # noon-at-cgn/Qwen3.8-27B-Uncensored-W4A16-AutoRound servido como W4A8
 # KV de atencion en INT8 por token-cabeza (PN131 / SK-18g)
 #
@@ -51,7 +70,7 @@ version: '3.8'
 services:
   vllm-server:
     image: vllm/vllm-openai:v0.29.0
-    container_name: genesis-27b-dflash2
+    container_name: genesis-27b-idiotsavant
     # SIN SWAP, nunca. El kernel se habia llevado a swap 1,8 GB del propio proceso servidor
     # (3,85 GB contando el cgroup entero) con el sistema en swappiness=60 y ~15 GB de cache de
     # paginas: con eso prefiere paginar anonimo antes que soltar cache. Un proceso que sirve no
@@ -98,10 +117,10 @@ services:
       # Tier 2 del cache de KV: NVMe
       - /home/usuario/Proyectos/kv-offload:/kv-offload
       # Persistencia de cachés JIT vLLM, PyTorch, Triton e Inductor dedicadas
-      - /home/usuario/.cache/vllm/qwen38-27b-noon-w4a8-v029:/root/.cache/vllm
-      - /home/usuario/.cache/torch/qwen38-27b-noon-w4a8-v029:/root/.cache/torch
-      - /home/usuario/.cache/triton/qwen38-27b-noon-w4a8-v029:/root/.cache/triton
-      - /home/usuario/.cache/torchinductor/qwen38-27b-noon-w4a8-v029:/root/.cache/torchinductor
+      - /home/usuario/.cache/vllm/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/vllm
+      - /home/usuario/.cache/torch/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/torch
+      - /home/usuario/.cache/triton/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/triton
+      - /home/usuario/.cache/torchinductor/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/torchinductor
       # Montaje de la suite de parches Genesis en modo lectura
       - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro
       - /home/usuario/Proyectos/genesis-vllm-patches/tests/bench/medicion/trazas:/traces
@@ -118,7 +137,8 @@ services:
       # largo, que es lo unico que valia la pena guardar. 64 GB = 1,8x L1, y el disco tiene
       # 229 GB libres. OJO: podar por mtime es antiguedad de ESCRITURA, no de uso; con la
       # cuota holgada pesa menos, pero sigue siendo la politica equivocada para un cache.
-      - GENESIS_KV_DISK_MAX_GB=64
+      # 40 y no 64: con el disco al 92% el tope de 64 lo llenaba en minutos
+      - GENESIS_KV_DISK_MAX_GB=40
       - GENESIS_KV_DISK_CHECK_SECS=60
       - GENESIS_KV_DISK_ORPHAN_DAYS=3
       - GENESIS_KV_DISK_ORPHAN_CHECK_SECS=3600
@@ -373,6 +393,12 @@ services:
       # min_p en casi todos sus proveedores. PN147 los anula y descarta
       # thinking_budget_message (cicla con spec decode). Sin esto, opencode se rompe.
       - GENESIS_ENABLE_PN147_SANEO_SPEC=1
+      # PN148: Hadamard 512 antes de down_proj (el checkpoint la pide: down_proj = R W Hd). Con
+      # SK-23 sale int8 directo a Marlin (+1,4% prefill, +0,6% decode). GENESIS_PN148_INT8=0 /
+      # GENESIS_PN148_FUSIONADO=0 vuelven a los caminos anteriores. SIN esto el modelo da basura.
+      - GENESIS_ENABLE_PN148_ROT_DOWN=1
+      # PN149: el borrador comparte embedding/lm_head rotados; queda en su base original.
+      - GENESIS_ENABLE_PN149_ROT_BORRADOR=1
       # Medido con 10 requests de 8k en paralelo, que es la forma de la carga real:
       #   g=4  18 grupos  KV 526.414  43,4 tok/s agregado
       #   g=8   9 grupos  KV 526.221  49,6 tok/s   <- misma KV, +14%
@@ -687,12 +713,12 @@ services:
       - --
     command:
       # Checkpoint AWQ W4A16 con MTP nativo preservado
-      - noon-at-cgn/Qwen3.8-27B-Uncensored-W4A16-AutoRound
+      - /root/.cache/huggingface/qwen3.8_27b_idiotSavant_sm_86
       - --served-model-name
+      - qwen3.8_27b_idiotSavant_sm_86
       - qwen3.8
       - qwen3.6
       - qwen3.8-27b-uncensored
-      - noon-at-cgn/Qwen3.8-27B-Uncensored-W4A16-AutoRound
       - --disable-access-log-for-endpoints
       - "/metrics,/health"
       - --enable-prompt-tokens-details
@@ -909,7 +935,7 @@ services:
       # Banco de 40 pedidos de agente con arbol: 5,46 -> 5,64 aceptados/paso, 214 -> 245 tok/s;
       # bench.sh de club-3090: prosa 140,2 -> 146,6, codigo empata. Ver entrenamiento/borrador/.
       # Para volver al de syvai: ".../qwen3.8-27b-dflash2-w4a16".
-      - '{"method":"dflash","model":"/root/.cache/huggingface/dflash2-ft-auf-rtn-w4a16","num_speculative_tokens":8}'
+      - '{"method":"dflash","model":"/root/.cache/huggingface/qwen3.8_27b_idiotSavant_sm_86_dflash2","num_speculative_tokens":8}'
       - --host
       - "0.0.0.0"
       - --port
