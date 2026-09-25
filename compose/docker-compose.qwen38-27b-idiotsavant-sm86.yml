@@ -1,90 +1,37 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# qwen3.8_27b_idiotSavant_sm_86 + qwen3.8_27b_idiotSavant_sm_86_dflash2   (2026-09-25)
+# qwen3.8_27b_idiotSavant_sm_86 + qwen3.8_27b_idiotSavant_sm_86_dflash2
+# vLLM v0.29.0 + parches Genesis, 2x RTX 3090 (sm_86), TP=2
 #
-# El cuant PROPIO, afinado para SM86 (int8 en todo el decode), sobre el BF16 de
-# orcarouter/Qwen3.8-27B-Uncensored (entrenamiento/cuant/):
-#   * residuo ROTADO offline (Hadamard por bloques de 1024 con signos, estilo QuaRot): la
-#     activacion masiva deja de fijar la escala int8 por token de Marlin W4A8
-#   * GPTQ W4 g128 en la base rotada (Hessianas transformadas exactas desde el cache)
-#   * Hadamard de 512 antes de down_proj, en linea: PN148 con SK-23 (SiluAndMul + Hadamard +
-#     int8 por token en un kernel, directo a Marlin)
-#   * KL sobre respuestas vs BF16 (vLLM, W4A8): 0,0194 contra 0,0385 de noon
-# Borrador DFlash2: el original de Inco ajustado DIRECTO contra este modelo (LoRA AUF sobre 840
-# pedidos de agente) y servido en su base original con PN149 (desrota el embedding, rota antes del
-# lm_head). Banco de 40 pedidos de agente con arbol: 5,63 aceptados/paso, ~216 tok/s de decode.
+# El modelo: Qwen3.8-27B sin censura (orcarouter) en W4 GPTQ con el RESIDUO ROTADO
+# (Hadamard por bloques, estilo QuaRot), servido como W4A8: pesos int4 x activaciones
+# int8 por token en Marlin. KL sobre respuestas vs BF16: 0,0194 (el int4 de AutoRound
+# de noon: 0,0385), misma velocidad. Como se arma y por que: entrenamiento/idiotsavant/
+# (README.md y DECISIONES.md).
+#   HF: https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86
+#       https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2
 #
-# Mismo IP/puerto que el compose de noon (no pueden correr juntos). Cachés JIT propias.
-# Al cambiar de checkpoint, VACIAR /home/usuario/Proyectos/kv-offload (misma ruta).
+# Lo IMPRESCINDIBLE para este checkpoint:
+#   GENESIS_ENABLE_PN148_ROT_DOWN=1      Hadamard 512 antes de down_proj (sin eso: basura)
+#   GENESIS_ENABLE_PN149_ROT_BORRADOR=1  el borrador comparte embedding/lm_head rotados
+#   VLLM_MARLIN_INPUT_DTYPE=int8         W4A8 (sin esto corre W4A16: anda, algo mas lento)
+# Todo lo demas es el stack de rendimiento/agente de este rig (medido en la memoria
+# del proyecto); se puede apagar por separado.
+#
+# Cosas a saber:
+#   * Mismo IP (172.20.0.228) y puerto (8360) que el compose de noon: no corren juntos.
+#   * Al cambiar de checkpoint VACIAR /home/usuario/Proyectos/kv-offload: el directorio
+#     del offload se identifica por el nombre del modelo, no por los pesos.
+#   * Caches JIT propias (vLLM, torch, Triton, Inductor): el cambio de modelo invalida
+#     torch.compile y los kernels; mezclarlas arrastraria artefactos de otro modelo.
 # ─────────────────────────────────────────────────────────────────────────────
-# (lo que sigue es el compose de noon con los cambios de arriba)
-# ─────────────────────────────────────────────────────────────────────────────
-# noon-at-cgn/Qwen3.8-27B-Uncensored-W4A16-AutoRound servido como W4A8
-# KV de atencion en INT8 por token-cabeza (PN131 / SK-18g)
-#
-# ⚠ VARIANTE DE MIGRACION A vLLM v0.29.0 — el compose principal sigue en v0.27.1
-#   Los dos NO pueden correr juntos: cada uno se lleva las dos placas enteras. Por eso
-#   comparte el IP 172.20.0.228 (litellm y open-webui apuntan ahi y no hay que tocarlos)
-#   pero cambia el nombre del contenedor, el puerto publicado (8321) y TODAS las cachés
-#   JIT: el cambio de version invalida torch.compile, Triton, Inductor y la .so de Marlin,
-#   y mezclarlas seria arrastrar artefactos compilados contra la otra version.
-#
-#   Antes de migrar se corrio el pre-vuelo de anclajes contra las fuentes de v0.29.0:
-#     python -m vllm._genesis.preflight_anclajes --bajar v0.29.0 --arbol /tmp/v029
-#   De los 40 parches que este compose prende, 0 quedan con anclas rotas. Ninguno de los
-#   de kernel se movio (marlin_utils.py es identico entre las dos versiones). PN19, PN88 y
-#   PN90 ahora se saltan solos porque upstream absorbio lo que hacian — ver mas abajo.
-# 2x RTX 3090 (GA102, sm_86), TP=2, MTP nativo K=3
-# ─────────────────────────────────────────────────────────────────────────────
-#
-# EL CHECKPOINT
-#   Pesos int4 simetricos g128 de AutoRound, formato compressed-tensors
-#   "pack-quantized" (NO GPTQ): weight_packed [N,K/8] + weight_scale [N,K/G].
-#   El nibble es complemento a dos ([0,15] = [-8,7]) y la MITAD de las escalas
-#   son NEGATIVAS — cualquier clamp_min sobre ellas destruye el peso.
-#   lm_head, embeddings, vision y DeltaNet quedan en BF16 en el checkpoint.
-#   La capa MTP viene preservada: method "qwen3_5_mtp", K=3.
-#
-# EL CAMINO DE COMPUTO (lo que decide el rendimiento)
-#   Activaciones int8 + pesos int4 -> mma.m16n8k32.s8 en los tensor cores.
-#   Marlin es quien lo ejecuta, y es un kernel PERSISTENTE: su grid es el numero
-#   de SMs (82) y reparte el trabajo con stream-K. Los GEMM de decode corren al
-#   81-106% del techo de DRAM, o sea que ahi NO queda margen de kernel.
-#
-# MEDIDO EN ESTA MAQUINA (no son estimaciones)
-#   prefill          2200-2750 tok/s de 1k a 50k de contexto
-#   decode 1 pedido  115-120 tok/s hasta 10k, 92-99 a 50k
-#   coding           139-145 tok/s (42 pasos/s x 3,4 tokens por paso)
-#   throughput       ~870 tok/s agregado con 20-24 pedidos concurrentes
-#   aceptacion MTP   63% con un pedido, 70% con seis
-#
-#   Ojo al medir: con MTP, vLLM manda los tokens aceptados de un paso JUNTOS en
-#   un mismo chunk SSE. Contar chunks subestima 3,4x. Usar `usage`.
-#
-# ESTRUCTURA DE ESTE ARCHIVO
-#   Los parches Genesis (GENESIS_ENABLE_*) van agrupados por tema y cada bloque
-#   dice QUE hace y CUANTO da, con el numero medido. Lo que esta apagado tambien
-#   lleva su motivo: un parche sin justificacion no se vuelve a evaluar nunca.
-#
 version: '3.8'
 
 services:
   vllm-server:
     image: vllm/vllm-openai:v0.29.0
     container_name: genesis-27b-idiotsavant
-    # SIN SWAP, nunca. El kernel se habia llevado a swap 1,8 GB del propio proceso servidor
-    # (3,85 GB contando el cgroup entero) con el sistema en swappiness=60 y ~15 GB de cache de
-    # paginas: con eso prefiere paginar anonimo antes que soltar cache. Un proceso que sirve no
-    # puede estar en swap — el bench de club-3090 invalida la corrida entera cuando lo detecta
-    # ("every number in this run is suspect").
-    #
-    # OJO CON LA PERILLA: `mem_swappiness: 0` NO sirve. Es cgroup v1, y este host corre cgroup
-    # v2 (`stat -fc %T /sys/fs/cgroup` -> cgroup2fs), donde docker lo ignora EN SILENCIO. En v2
-    # la unica forma de decir "sin swap" es memswap_limit == mem_limit, que docker traduce a
-    # memory.swap.max=0. Verificado con un contenedor descartable antes de escribir esto.
-    #
-    # El limite NO es un presupuesto: vLLM usa ~15 GB y 26g no llega a atarlo nunca. Esta solo
-    # porque en v2 no se puede pedir memory.swap.max=0 sin un mem_limit. Si alguna vez lo toca,
-    # el contenedor muere por OOM en vez de degradarse — que a 26 GB de 30,5 es lo correcto.
+    # Sin swap (en cgroup v2 la perilla es memswap_limit == mem_limit) y con los nucleos
+    # fisicos de un solo socket para el proceso servidor.
     mem_limit: 26g
     memswap_limit: 26g
     cpuset: "0-7,16-23"
@@ -92,582 +39,156 @@ services:
       - "8360:8320"
     networks:
       lanbridge:
-        # 172.20.0.228 es la direccion CANONICA de servicio de esta maquina, no una
-        # cualquiera: la tienen cableada open-webui (OPENAI_API_BASE_URLS), jspace-proxy
-        # (VLLM_BASE_HOST, que es lo que atiende llm.saitama.com.ar) y todos los
-        # conf/engines/*.conf de ../ai. Los composes de motor son mutuamente excluyentes
-        # —corre uno a la vez— asi que TODOS comparten esta IP a proposito.
-        #
-        # Este compose habia nacido con .251, que no ruteaba a ningun lado. Mientras el
-        # motor de produccion fue otro no se noto; al pasar DFlash2 a produccion se llevo
-        # el trafico a una direccion que nadie consulta y llm.saitama.com.ar empezo a dar
-        # 502. El ultimo 200 del proxy fue el 2026-09-18 17:31.
-        ipv4_address: 172.20.0.228
-        # Alias EXPLICITO a proposito. Docker Compose ya registra el nombre de servicio
-        # (vllm-server) como alias de red, asi que esto es redundante hoy — pero ese es un
-        # contrato implicito: si alguien renombra el servicio, el alias se cae en silencio
-        # y jspace-proxy, que resuelve por este nombre, deja de encontrar el motor.
-        # Declarado, el contrato es intencional. Los dos composes de motor lo comparten:
-        # son mutuamente excluyentes, asi que vllm-server apunta siempre al que este arriba.
+        ipv4_address: 172.20.0.228       # Traefik y los clientes (opencode, Hermes) apuntan aca
         aliases:
           - vllm-server
     volumes:
-      # Caché de modelos HuggingFace host
-      - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface
-      # Tier 2 del cache de KV: NVMe
-      - /home/usuario/Proyectos/kv-offload:/kv-offload
-      # Persistencia de cachés JIT vLLM, PyTorch, Triton e Inductor dedicadas
+      - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface     # modelo y borrador
+      - /home/usuario/Proyectos/kv-offload:/kv-offload                    # tier de disco de la KV
       - /home/usuario/.cache/vllm/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/vllm
       - /home/usuario/.cache/torch/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/torch
       - /home/usuario/.cache/triton/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/triton
       - /home/usuario/.cache/torchinductor/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/torchinductor
-      # Montaje de la suite de parches Genesis en modo lectura
-      - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro
+      - ../vllm/_genesis:/usr/local/lib/python3.12/dist-packages/vllm/_genesis:ro   # los parches
+      # trazas de medicion: la captura para reajustar el borrador escribe aca (ov-captura.yml)
       - /home/usuario/Proyectos/genesis-vllm-patches/tests/bench/medicion/trazas:/traces
-      # Template de chat Froggeric v22.4 (soporte nativo Qwen 3.8, corrección de reasoning y tool-calling)
       - ../templates/qwen-froggeric-chat-template.jinja:/etc/qwen-froggeric-chat-template.jinja:ro
     environment:
-      # ── PARCHES GENESIS (ESTABILIDAD Y NAVEGACIÓN AGÉNTICA) ──────────────────────
-      - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1
-      # 2026-09-19: 30 GB dejaba a L3 MAS CHICO QUE L1 y lo volvia inutil. Medido: la KV
-      # de GPU son 566.314 tokens y el offload escribe 62,9 KB por token, asi que espejar
-      # L1 entero pide 35,6 GB. Con 30 de cuota, todo lo que sale de la GPU desborda el
-      # disco enseguida —541 desalojos en una sola corrida de 30 prompts de 20k— y como
-      # PN81 poda por mtime (lo mas viejo primero) la victima es justo el prefijo del hilo
-      # largo, que es lo unico que valia la pena guardar. 64 GB = 1,8x L1, y el disco tiene
-      # 229 GB libres. OJO: podar por mtime es antiguedad de ESCRITURA, no de uso; con la
-      # cuota holgada pesa menos, pero sigue siendo la politica equivocada para un cache.
-      # 40 y no 64: con el disco al 92% el tope de 64 lo llenaba en minutos
-      - GENESIS_KV_DISK_MAX_GB=40
+      # ── el checkpoint rotado ────────────────────────────────────────────────
+      - GENESIS_ENABLE_PN148_ROT_DOWN=1          # Hadamard 512 antes de down_proj; con SK-23 sale
+                                                 # int8 directo a Marlin (+1,4% prefill)
+      - GENESIS_ENABLE_PN149_ROT_BORRADOR=1      # borrador en su base original sobre el target rotado
+      # ── lineales W4A8 (Marlin) ──────────────────────────────────────────────
+      - VLLM_MARLIN_INPUT_DTYPE=int8             # activaciones int8 por token: W4A8
+      - VLLM_MARLIN_USE_ATOMIC_ADD=1
+      - GENESIS_ENABLE_PN130_MARLIN_S16=1        # Marlin propio: tope de registros, reduccion int32
+                                                 # entre warps (+11% prefill), corr inicializado
+      - GENESIS_ENABLE_PN125_MARLIN_W4A8_ESCALAS=1   # escalas negativas de AutoRound: aca no hay
+                                                     # (GPTQ las deja positivas), no hace nada
+      - GENESIS_ENABLE_PN139_LM_HEAD_INT4=1      # lm_head int4 g128 al cargar (rotado da el mismo error)
+      - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1        # camino fp8 del lm_head (PN139 lo reemplaza)
+      - GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD=0
+      - GENESIS_ENABLE_PN118_INT8_MLP=0          # MLP int8 para checkpoints AWQ: no aplica
+      - GENESIS_ENABLE_PN119_SK12_MLP=0          # SK-12 necesita pesos int8 de PN118
+      - GENESIS_ENABLE_PN116_PREFILL_MLP_SK=0
+      # ── atencion: KV int8 por token-cabeza con decode entero (SK-18) ────────
+      - GENESIS_ENABLE_PN131_SK18=1
+      - GENESIS_PN131_NATIVO=1                   # registrado como backend nativo (en el proceso que sirve)
+      - GENESIS_PN131_BMAX=11
+      - GENESIS_ENABLE_PN124_TRITON_AMPERE=1     # TRITON_ATTN rapido en Ampere (head 256)
+      - GENESIS_ENABLE_PN126_ROT_QK=1            # Hadamard de q/k tras RoPE (la KV int8 la necesita)
+      - GENESIS_PN126_ROT=hadamard
+      # ── TP=2: all-reduce ────────────────────────────────────────────────────
+      - GENESIS_ENABLE_PN120_AR_INT8=1           # all-reduce int8 en el prefill (+6,5%)
+      - GENESIS_PN120_M_MIN=512
+      - GENESIS_PN120_GRUPO=64
+      - GENESIS_ENABLE_B3_CUSTOM_AR=1            # all-reduce propio para TP=2 con fallback
+      # ── especulativo: DFlash2 + arbol de 8 nodos ────────────────────────────
+      - GENESIS_ENABLE_PN142_DFLASH2=1           # DFlash2 usable en v0.29.0
+      - GENESIS_PN144_ESCALA_RESIDUAL=32         # el residual del borrador desborda fp16 sin esto
+      - GENESIS_ENABLE_ARBOL=1                   # arbol de borrador (+10-11% prosa)
+      - GENESIS_ARBOL_CERRADA=0
+      - GENESIS_ENABLE_PN147_SANEO_SPEC=1        # min_p/logit_bias/thinking_budget_message con spec decode
+      - GENESIS_ENABLE_PN145_SW_BLOCK_SIZE=1     # bloque de ventana deslizante alineado (mas KV)
+      - GENESIS_ENABLE_PN146_GROUP_SIZE=1        # grupo de KV 8 (el borrador imponia 5)
+      - GENESIS_PN146_GROUP_SIZE=8
+      - GENESIS_ENABLE_PN122_GDN_CINTA=1         # rollback del estado GDN con cinta (+7,6% KV)
+      - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
+      - GENESIS_ENABLE_PN128_GDN_MTP_ASYNC_ORDER=1
+      - GENESIS_ENABLE_B5_REJECTION_SAMPLER=1
+      - GENESIS_ENABLE_P82=1
+      - GENESIS_ENABLE_P58_ASYNC_PLACEHOLDER_FIX=0   # mataba la aceptacion en v0.29.0
+      - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=0
+      - GENESIS_ENABLE_P107_MTP_TRUNCATION_DETECTOR=1
+      - GENESIS_ENABLE_PN114_MAMBA_ALIGN_BOUNDS_GUARD=1
+      - GENESIS_PN114_GUARD_BLOCK_TABLE=0
+      # ── offload de KV: RAM (2 GB) -> disco ──────────────────────────────────
+      - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1      # tope y poda del tier de disco
+      - GENESIS_KV_DISK_MAX_GB=40                # 40 y no 64: con el disco justo, 64 lo llena
       - GENESIS_KV_DISK_CHECK_SECS=60
       - GENESIS_KV_DISK_ORPHAN_DAYS=3
       - GENESIS_KV_DISK_ORPHAN_CHECK_SECS=3600
       - GENESIS_KV_DISK_TARGET_RATIO=0.85
       - GENESIS_PN81_ASYNC=1
-      # PN88/PN90: en v0.29.0 upstream reescribio el subsistema de tiering y se llevo las
-      # dos ideas adentro (TieringMetricsTracker para las metricas por tier; cascada a
-      # nivel de request con parking en pending_cascade_keys para el gateo de escritura).
-      # Quedan en 1 porque este compose tiene que seguir sirviendo para 0.27.1, pero en
-      # 0.29.0 los parches lo detectan y se saltan con mensaje claro — no pelean con lo de
-      # upstream. Pendiente: que el dashboard lea las metricas nativas de tiering.
-      - GENESIS_ENABLE_PN88_KV_TIER_METRICS=1
+      - GENESIS_ENABLE_PN88_KV_TIER_METRICS=1    # (upstream ya lo trae: se saltea solo)
       - GENESIS_KV_AGENTS=coach,primary,primary_low,primary_high,primary_nothink,planner,planner_nothink,coder,verifier,utility,explorer,vision,art
       - GENESIS_ENABLE_PN90_KV_DISK_WRITE_GATING=1
       - GENESIS_PN90_MAX_PENDING_MB=256
       - GENESIS_ENABLE_PN91_KV_LAZY_STREAMING=1
-      # 2026-09-19: PN97 prohibe que una promocion L3->L2 desaloje ("solo slots realmente
-      # libres"). Se escribio cuando L2 tenia 222 slots y un prompt costaba ~36: entraban
-      # seis y la regla era sana. PN145/PN146 subieron el bloque de GPU a 880 tokens, el
-      # slot de offload quedo en 29,8 MB y L2 en 72 slots, con ~28 por request: ahora L2
-      # vive clavada al 100% (bytes_used == capacity_bytes) y "solo slots libres" significa
-      # NUNCA. Medido: 7.347 consultas al tier primario contra 32 al de disco (1 acierto);
-      # apagandolo, 73 consultas y 42 aciertos. Mientras L2 no entre al menos un par de
-      # requests, PN97 es un interbloqueo.
-      - GENESIS_DISABLE_PN97=1
-      # PN126: rotacion Hadamard de q/k despues de RoPE. Medido 2026-09-20 sobre
-      # volcados propios: baja el error de salida del KV int8 de 0,31%/0,79% a
-      # 0,22%/0,39% (capas 3/35) — a la mitad en la 35. Antes lo teniamos apagado
-      # por una lectura mal hecha de una medicion vieja.
-      - GENESIS_ENABLE_PN126_ROT_QK=1
-      - GENESIS_PN126_ROT=hadamard
-      # 2026-09-19: ERA EL BUG QUE HACIA QUE EL OFFLOAD ESCRIBIERA Y NUNCA LEYERA, y el
-      # presupuesto hay que darlo con holgura. PN91 pasa a modo estricto al agotarse, y en
-      # estricto un bloque EN VUELO cuenta como MISS: corta la racha de la ventana
-      # deslizante y el lookup ENTERO devuelve 0. Las promociones L3->L2 son asincronas y
-      # resuelven de a poco, asi que con 0,2 s / 4 pasos no resolvia ninguna y con 3 s / 60
-      # resolvia solo una parte (medido: el prefijo de atencion acertaba 0, 8, 12 o 16 de 20
-      # chunks segun la corrida, y cualquier truncado lo vetaba algun grupo de ventana).
-      # Con 15 s / 400 aciertan los NUEVE grupos, 20/20 y 19/19, de forma reproducible.
-      # No cuesta latencia en el caso malo: sin nada en cache el backend devuelve MISS al
-      # toque, no HIT_PENDING. Medido, TTFT en frio 6,76-6,81 s, igual que antes.
       - GENESIS_PN91_MAX_DEFER_SECONDS=15.0
       - GENESIS_PN91_MAX_DEFER_STEPS=400
-      # PN92 (codec de 4 bits del tier de disco): APAGADO 2026-09-20. Solo sabe leer la KV
-      # como fp8_e4m3 o fp16 (kv_fp4_codec.kv_dtype_code) y la KV es int8 por token-cabeza:
-      # estaba inerte (COMPRESS_ON_WRITE=0), pero prenderlo interpretaba mal los bytes.
-      # Para volver necesita un modo int8 (agrupar los int8 ya cuantizados, sin pasar por
-      # float). Sin el: mismos parches aplicados salvo este, misma KV, mismo rendimiento.
+      - GENESIS_PN100_RING_BLOCKS=32             # anillo de staging del offload
+      - GENESIS_DISABLE_PN97=1                   # trababa el offload
       - GENESIS_ENABLE_PN92_KV_FP4_COMPRESSION=0
       - GENESIS_ENABLE_PN93_SPARSE_GDN=0
-      - GENESIS_PN93_GDN_CHECKPOINT_STRIDE=16
-      # PN99 comprime a 4 bits asumiendo que el KV es fp8; con el KV en int8 por
-      # token-cabeza el layout no le corresponde.
       - GENESIS_ENABLE_PN99_GPU_COMPRESSED_L2=0
-      - GENESIS_PN100_RING_BLOCKS=32
-      - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
-      - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
-      - GENESIS_ENABLE_P62_STRUCT_OUT_SPEC_TIMING=1
-      - GENESIS_ENABLE_PN51_QWEN3_STREAMING_THINKING_DISABLED=1
-      - GENESIS_ENABLE_PN66=1
-      # ── lm_head ────────────────────────────────────────────────────────────
-      # El lm_head viene en BF16 y con un vocabulario de 150k+ es de los tensores
-      # mas pesados del modelo, y se lee ENTERO en cada paso de decode.
-      # PN77 lo baja a fp8 y PN108 hace lo mismo para el borrador del MTP.
-      # PN77 queda prendido SOLO como enganche de PN139 (el walker): con PN139 activo el swap
-      # a int4 tiene prioridad y ningun lm_head termina en fp8. Verificar en el arranque:
-      # dos lineas "PN139: lm_head ? a int4 g128" por worker (target y borrador).
-      - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1
-      # PN108 (lm_head del borrador a fp8): apagado 2026-09-20, PN139 llega igual al borrador.
-      - GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD=0
-      #
-      # PN139: el mismo lm_head en int4 por grupo (g128) en vez de fp8 — la MITAD
-      # de los bytes, y el decode esta limitado por trafico, no por aritmetica.
-      # Medido: +8,9% de decode (167,7 -> 182,6 tok/s) con la calidad intacta.
-      # Se cuelga del mismo walker que PN77 y tiene prioridad sobre el, asi que
-      # PN77 tiene que quedar PRENDIDO: es el enganche.
-      # PN139 (lm_head a int4 g128): apagado POR PRECAUCION mientras se investiga el
-      # arranque no determinista de v0.29.0 (ver el bloque de PN122 abajo). NO esta probado
-      # que PN139 sea la causa — al contrario, hubo un arranque roto con PN139 ya apagado.
-      # En v0.27.1 sigue prendido y andando (+8,9% de decode, 318 MB contra 646 por GPU).
-      # 2026-09-20: PRENDIDO de nuevo en v0.29.0. A/B con banco greedy (3 corridas, +-0,3):
-      # pasos/s +3%, prosa 118,2 -> 124,4 tok/s, codigo 270 -> 273,6 (ruido), aceptacion
-      # igual, KV 566.314 -> 583.790. El arranque roto que motivo apagarlo era otra cosa
-      # (la referencia ek de PN131 y los ganchos v2 de PN122, los dos arreglados hoy).
-      - GENESIS_ENABLE_PN139_LM_HEAD_INT4=1
-
-      # ── APAGADOS A PROPOSITO, con el motivo medido ─────────────────────────
-      # Sin esto nadie sabe si ya se probo, y se reintenta cada seis meses.
-      #
-      # PN137 (suavizado por grupo plegado en los pesos): EMPATA, no gana. El
-      #   kernel de cuantizacion pesa por TRAFICO, no por la reduccion que se
-      #   ahorra, asi que quitarle la reduccion no mueve el reloj.
-      #
-      # PN140 (QServe: el nibble crudo al tensor core, offset corregido en el
-      #   acumulador): el algebra cierra BIT A BIT y aislado da 1,92x en el
-      #   desempaque, pero dentro de Marlin sale MAS LENTO — el lazo no tiene
-      #   registros libres para la correccion. Queda implementado y apagado.
-      #   OJO: prenderlo exige que el llamador pase a_sums; con a_sums nulo el
-      #   kernel restaba registros sin inicializar (arreglado, pero es la trampa).
-      #
-      # PN131 (SK-18, decode de atencion entero en PTX con KV int8/int4): NO es
-      #   de la tanda de optimizacion de Marlin. Da paridad con FlashInfer fp8 en
-      #   calidad y velocidad, con KV int8 que tiene 4x menos error que fp8; en
-      #   int4 duplica la KV pero cuesta -27% de prefill y -21% de decode largo.
-      #   Sin activar porque el KV dtype se decide aparte (ver la nota de abajo).
-      #
-      # PN126 (rotacion q/k tipo WUSH): baja ~12% el MSE de los logits y la
-      #   salida no cambia. No paga el costo.
-      - GENESIS_ENABLE_B3_CUSTOM_AR=1
-      - GENESIS_ENABLE_B2_FULL_CG=0
-      # P100 y PN129 son especificos de FlashInfer (cudagraph FULL para spec-decode
-      # y el workspace de decode sin pin). Con TRITON_ATTN no tienen donde aplicarse.
-      - GENESIS_ENABLE_P100=0
-      # PN115: admision por headroom de bloques KV + bypass por prioridad.
-      # El gating de KV protege de fallos de allocate_slots y tormentas de
-      # preemption. El PID de latencia va APAGADO: cambia throughput por
-      # latencia, y con --async-scheduling no puede observar la latencia del
-      # forward desde schedule() (se auto-desactiva igual si se enciende).
+      - GENESIS_ENABLE_PN121_PREEMPT_GUARD=1     # corta la cascada de preempcion por frees diferidos
+      # ── scheduling: TTFT de prompts cortos, admision por headroom ───────────
       - GENESIS_ENABLE_PN115_PID_GATING=1
       - GENESIS_PN115_KV_GATING=1
       - GENESIS_PN115_LATENCY_PID=0
-      # Serializacion de prefills. El prefill esta al 80-85% del roofline de
-      # computo (1.500 tok/s = 39,4 TFLOPS/GPU, modelo DENSO de 26,3e9 params)
-      # y no escala: 1,00x con 2 concurrentes, 0,99x con 4. Correr N prefills
-      # juntos le da 1/N a cada uno y no entrega ninguno hasta el final.
-      # Con 6 subagentes de 50k: el primero usable a los 33 s en vez de 200 s,
-      # mismo tiempo total. 0 lo desactiva.
       - GENESIS_PN115_MAX_CONCURRENT_PREFILLS=1
-      # Prioridad AUTOMATICA (2026-09-20): un prompt de hasta 2000 tokens no espera detras del
-      # prefill en curso. La FORZADA (`priority` < 0 o `genesis_agent`) sigue igual y es la unica
-      # que saltea el headroom de KV o desaloja. Medido, pedido de 300 tok bajo un prefill de
-      # 59k, SIN marcar prioridad: 26 s -> 1,6-3,3 s. Los largos siguen de a uno: 3 de 30k a la
-      # vez dan TTFT 16 / 28 / 40 s, con los cortos del medio en 0,5-3 s.
-      # Necesita --long-prefill-token-threshold < max-num-batched-tokens (ver abajo): con 8192
-      # el largo se lleva el paso entero y el corto admitido igual espera 7,5-13 s.
       - GENESIS_PN115_PROMPT_CORTO_TOKENS=2000
-      # PN116: super kernel de MLP (SK-05) AISLADO al prefill grande.
-      # El MLP es el 70,2% de los FLOPs de GEMM del modelo, asi que es el unico
-      # bloque que justifica un super kernel.
-      #
-      # APAGADO, y para prenderlo hacen falta DOS cosas mas:
-      #   1) PN110 encendido — PN116 dispatchea sobre el estado INT8 por capa
-      #      que deja PN110 (sk_id == "SK-05"). Sin eso no hace nada.
-      #   2) --long-prefill-token-threshold >= 4096 — medido en P113, cutlass
-      #      gana 1.55x a M=512 y 1.13x a M=1664 y recien empatan a M=8000. Con
-      #      el chunk en 2048 el kernel se llamaria justo donde PIERDE. Subir el
-      #      chunk de 2048 a 8192 no cuesta throughput (medido 2026-09-12:
-      #      1.504 vs 1.466 tok/s agregados), asi que habilitarlo es gratis.
-      #
-      # Mutuamente excluyente con GENESIS_P113_MLP_FUSED_SILU.
-      # GENESIS_PN116_AB=N corre los dos caminos en las primeras N invocaciones
-      # y loguea tiempo y error numerico. Es el modo para tunear el kernel.
-      # PN118: convierte el MLP de AWQ int4 a INT8 per-canal EN LA CARGA,
-      # libera los int4 y despacha el forward por cutlass_scaled_mm.
-      # Medido con relojes estabilizados, forma real del MLP:
-      #   Marlin W4A16 + SiLU  6,460 ms  <- lo que corre sin esto
-      #   cutlass INT8 + SiLU  3,207 ms  = 2,01x
-      # Cuesta +3,33 GiB de pesos por GPU; vLLM achica el KV cache solo porque
-      # la conversion cae antes de su profiling de memoria.
-      # NO hay fallback a Marlin: si una capa falla, el arranque falla.
-      - GENESIS_ENABLE_PN118_INT8_MLP=0  # W4A8: Marlin hace todo
-      # Convierte TODAS las capas int4, no solo .mlp. El perfil de nsys mostro
-      # que Marlin W4A16 se lleva el 24,7% del prefill: son las proyecciones de
-      # atencion y de las capas GDN, que PN118 estaba salteando.
-      - GENESIS_PN118_ALL_LAYERS=0
-      # Que capas convierte PN118 a INT8, por subcadena del nombre. Marlin
-      # W4A16 se lleva el 25,3% del prefill (nsys) y son justo las que `.mlp.`
-      # saltea. Convertirlas TODAS no entra en VRAM.
-      - GENESIS_PN118_CAPAS=.mlp.,self_attn
-      - GENESIS_PN118_AUDIT=1
-      # PN119: el MLP de prefill lo hace SK-12, nuestro kernel fusionado
-      # (gate_up + SiLU en una pasada, sin intermedio a VRAM). Consume los
-      # pesos INT8 que deja PN118. Solo con M >= 512, o sea prefill: en decode
-      # SK-12 esta fuera de su rango de tile.
-      # ENCENDIDO 2026-09-12. Estuvo apagado porque SK-12 perdia 1,20x, y la
-      # causa no era la que buscabamos: no es el bucle interno ni la geometria.
-      # Copiar el intercalado 1:1 de ldmatrix/mma de cutlass no movio nada
-      # (ptxas RE-AGRUPA al bajar a SASS) y pasar de 4 a 8 warps tampoco. Era
-      # TRAFICO: con BM=128 el grid es 272x16 y cada bloque lee BM*K + 2*BN*K,
-      # o sea 5,7 GB para operandos que pesan 100 MB. BM=256 + swizzle de
-      # rasterizacion GROUP_M=8 lo dio vuelta.
-      #
-      # vs cutlass INT8+SiLU por talla (minimo de 15 rondas intercaladas):
-      #   M=512  0,83x | M=1024 0,96x | M=2048 0,75x
-      #   M=4096 1,02x | M=8192 1,22x  (129,6 TOPS)
-      # Por eso M_MIN sube de 512 a 4096: abajo de eso SK-12 PIERDE y hay que
-      # dejar que despache cutlass. Y por eso --max-num-batched-tokens y
-      # --long-prefill-token-threshold van los dos a 8192: el threshold capa
-      # el chunk por request (scheduler.py:530), asi que dejarlo en 2048
-      # clavaba M ahi, que es justo nuestro peor punto.
-      - GENESIS_ENABLE_PN119_SK12_MLP=0  # W4A8: sin PN118 no hay pesos INT8
-      # PN120: manda los parciales del all-reduce de TP en int8 (la mitad de
-      # bytes) y los suma en fp16. El all-reduce es el 24,4% del prefill y NCCL
-      # ya corre al 96% del limite del PCIe, asi que la unica via es el volumen.
-      # Medido end-to-end: prefill 2116 -> 2213-2220 tok/s (+4,7%) SIN tocar
-      # decode ni la aceptacion de MTP (TAR 40,6%/74,6% igual que sin PN120).
-      # OJO: el gate por talla vive en un custom op OPACO a proposito. Adentro
-      # del forward trazado se hornea (evaluate_guards=False) y degradaba el
-      # decode un 12%.
-      - GENESIS_ENABLE_PN120_AR_INT8=1
-      - GENESIS_PN120_M_MIN=512
-      # Elementos por escala. Una sola escala por token (5120 valores) es
-      # inaceptable con activaciones reales: un outlier la arruina entera.
-      # Medido con outliers: por token 0,0419 de error / grupo 64 0,0084.
-      - GENESIS_PN120_GRUPO=64
-      # PN121: con L2 (kv-transfer) + async scheduling los bloques preemptados
-      # se liberan diferidos y el bucle de preempcion vaciaba la KV entera
-      # (medido: 3 preempciones en un paso, KV 99% -> 14%; 59 en un minuto).
-      - GENESIS_ENABLE_PN121_PREEMPT_GUARD=1
-      # PN127-129: estabilidad MTP + prefix caching + async en hibrido GDN (portados de club-3090).
-      # PN127 vllm#48375: MambaManager no reusa el estado de la ultima pagina (borrador rechazado).
-      - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
-      # PN128: input-prep async espera el postproceso del spec decode (Xid 31 VIRT_WRITE).
-      # PN142: las dos mitades que le faltan a DFlash2 en v0.29.0 — vllm#51581 (ABIERTO:
-      # qwen3_dflash.py rebana .weight sin saber de cuantizacion, y con un borrador
-      # cuantizado revienta o corrompe en silencio) y el port de fa5017a5 (aterrizo en main
-      # un dia DESPUES del corte de v0.29.0; sin el, dflash/dspark reciben el retroceso de
-      # eagle y toda busqueda de prefix-cache y de offload converge a 0).
-      # APAGADO: sin un checkpoint de borrador DFlash2 no sirve de nada. Para usarlo hace
-      # falta uno (club-3090 usa gratex/Qwen3.8-27B-DFlash2-W4A16-g128-sym-GPTQ) y cambiar
-      # --speculative-config al metodo dflash. Con MTP, la mitad de fa5017a5 no cambia nada:
-      # "mtp" esta en el conjunto que SI preserva la KV del target.
-      - GENESIS_ENABLE_PN142_DFLASH2=1
-      # PN144: divide por 32 el residual del borrador (o_proj/down_proj de las 5 capas, la
-      # semilla del embedding, y el epsilon de las 11 normas que lo ven, por c^2). Sin esto
-      # el borrador desborda fp16 despues de UNA capa —su residual corre ~100x mas caliente
-      # que un modelo normal, pico 50.080 contra un techo de 65.504— da NaN y acepta 0. La
-      # alternativa era --dtype bfloat16, que es global y nos sacaba de PN130/W4A8/KV int8:
-      # costaba -13% de decode y +40% de TTFT a 50k. Esto es exacto (la norma es invariante
-      # a escala) y no cuesta nada: 10 tensores de escalas divididos una vez al cargar.
-      - GENESIS_PN144_ESCALA_RESIDUAL=32
-      # PN145 + PN146: la KV con DFlash2 pasa de 178.823 a 483.076 tokens (+170%) y la
-      # concurrencia de 1,09x a 2,95x. Medido, no estimado.
-      #
-      # PN145 — el grupo de ventana deslizante del borrador se llevaba 1153 de los 2001
-      # bloques por request (mas que las 64 capas del modelo grande juntas) porque elegia
-      # block_size=16 para una pagina padeada a 0,87 MB. Dos bugs encadenados: el call site
-      # pasa skip_page_size_padded, que fuera de TurboQuant es None, y sin presupuesto cae al
-      # bloque mas chico; y el backend declara MultipleOf(16) pero la funcion toma solo
-      # s.base, asi que no puede elegir un multiplo ni con presupuesto. Paso a 22 bloques.
-      #
-      # PN146 — group_size = min(capas por bucket) y el minimo son las 5 capas del borrador,
-      # que le imponen el tamano de grupo a las 64 del target. Como bytes_per_block lo fija el
-      # grupo MAS GRANDE (un max, no una suma), bajarlo a 4 da mas bloques totales: 2689 en
-      # vez de 2151. Con 4 quedan 18 grupos y no se paga nada en el scheduler — a 50k dio
-      # 201,7 tok/s, el mejor de toda la serie.
-      - GENESIS_ENABLE_PN145_SW_BLOCK_SIZE=1
-      - GENESIS_ENABLE_PN146_GROUP_SIZE=1
-      # PN147 (2026-09-24): lo que hacia el proxy j-space y hace falta para servir vLLM DIRECTO.
-      # Con decodificacion especulativa vLLM rechaza el pedido entero si trae min_p o
-      # logit_bias (en streaming: HTTP 200 con el error adentro del SSE), y opencode manda
-      # min_p en casi todos sus proveedores. PN147 los anula y descarta
-      # thinking_budget_message (cicla con spec decode). Sin esto, opencode se rompe.
-      - GENESIS_ENABLE_PN147_SANEO_SPEC=1
-      # PN148: Hadamard 512 antes de down_proj (el checkpoint la pide: down_proj = R W Hd). Con
-      # SK-23 sale int8 directo a Marlin (+1,4% prefill, +0,6% decode). GENESIS_PN148_INT8=0 /
-      # GENESIS_PN148_FUSIONADO=0 vuelven a los caminos anteriores. SIN esto el modelo da basura.
-      - GENESIS_ENABLE_PN148_ROT_DOWN=1
-      # PN149: el borrador comparte embedding/lm_head rotados; queda en su base original.
-      - GENESIS_ENABLE_PN149_ROT_BORRADOR=1
-      # Medido con 10 requests de 8k en paralelo, que es la forma de la carga real:
-      #   g=4  18 grupos  KV 526.414  43,4 tok/s agregado
-      #   g=8   9 grupos  KV 526.221  49,6 tok/s   <- misma KV, +14%
-      #   g=16  5 grupos  KV 509.308  51,3 tok/s   <- 3% mas rapido, 17k tokens menos de KV
-      # g=8 es el punto dulce. La KV total casi no se mueve entre 4 y 8 porque el costo en
-      # BYTES es el mismo (menos grupos, pero cada bloque mas grande); lo que mejora es el
-      # trabajo por request, que baja de 912 bloques a 678.
-      - GENESIS_PN146_GROUP_SIZE=8
-      - GENESIS_ENABLE_PN128_GDN_MTP_ASYNC_ORDER=1
-      # PN129: buffer de decode de FlashInfer sin pin (Xid 31 VIRT_READ con >=4 requests MTP; visto 2026-09-13).
-      - GENESIS_ENABLE_PN129_FLASHINFER_DECODE_UNPIN=0
-      # PN122: el rollback del MTP en GDN usa una cinta en vez de K copias del
-      # estado. Medido: ~18 bloques GDN por request con K=3.
-      # PN122 (cinta GDN: rollback del MTP sin bloques especulativos). PRENDIDO.
-      #
-      # ATENCION AL MEDIR EN v0.29.0: el arranque es NO DETERMINISTA. Con la MISMA config,
-      # algunos arranques dejan el modelo roto — el chat corta a los 2 tokens con content
-      # vacio — y otros andan perfecto. Dentro de un arranque es estable: 5 de 5 iguales.
-      # Se comprobo reiniciando el mismo compose sin tocar nada: paso de 2 tokens a 60.
-      # Por eso NINGUNA atribucion de un solo arranque vale aca. Se necesita repetir el
-      # arranque N veces por variante y contar; asi se encontro el bug analogo de PN118
-      # ("modelo mal en ~50% de arranques" por una cache que mezclaba ranks), y PN118 hoy
-      # esta apagado, o sea que esto es otra cosa.
-      #
-      # Lo que SI esta verificado de PN122 en v0.29.0, porque es deterministico y medible:
-      # v0.29.0 le agrego `self._allocated_block_reqs.add(request_id)` al early-return de
-      # MambaManager.allocate_new_blocks. PN122 pone num_speculative_blocks=0 (de ahi sale
-      # todo su beneficio), y con K=0 ese early-return se toma mucho mas seguido, asi que el
-      # request queda marcado antes de tiempo; `blocks_allocated` cambia de rama y con el
-      # cambia `last_state_block_idx`, que es el indice con el que remove_skipped_blocks
-      # libera el bloque de estado viejo. El sub-parche saltea ese `add` con la cinta activa,
-      # que es inocuo porque la marca existe para no re-sumar num_speculative_blocks y vale 0.
-      # Medido y reproducible: KV 628.186 tokens con PN122, 611.402 sin el. +16.776 tokens.
-      # PN122 (cinta GDN): APAGADO EN v0.29.0 — con MTP CORROMPE LA SALIDA.
-      # Medido con prod_tetris, que compila y corre el codigo generado:
-      #   MTP + PN122=1 .... 167,1 tok/s pero 0 de 3 corridas dieron codigo valido
-      #                      (dos sin cerrar el bloque, una con SyntaxError)
-      #   MTP + PN122=0 .... 148,8 tok/s y codigo correcto, 790 lineas, 6/6 pruebas
-      #   sin MTP .......... 56,3 tok/s y codigo correcto, 2 de 2
-      # PN122 es el rollback del estado recurrente de GDN tras los drafts RECHAZADOS.
-      # Si ese rollback no es exacto, el estado queda viejo y la degradacion se acumula a
-      # lo largo de la generacion: rapido y sutilmente mal, que es lo peor de los dos.
-      # Nunca se valido en v0.29.0 — la biseccion con la que se "arreglo" antes (el
-      # early-return de allocate_new_blocks) resulto medida con una sola corrida y se
-      # retracto. Ese arreglo sigue puesto y es correcto por su cuenta, pero no alcanza.
-      # Costo de apagarlo: se pierde el ahorro de -9 bloques GDN por request.
-      # PN122 PRENDIDO (2026-09-19). Estaba apagado desde que se lo acuso de corromper con
-      # MTP en v0.29.0. Con DFlash2 se verifico que NO corrompe: quality-test.sh --quick da
-      # 27/30 en los dos brazos (y TC-05 + IF-04 fallan en ambos, o sea que son del modelo).
-      #
-      # Que compra: KV 526.221 -> 566.314 tokens (+7,6%), y la huella de una request CORTA
-      # baja 2,5x — el estado GDN pasa de 10 a 2 bloques por grupo Mamba, porque la formula
-      # es (2 + num_speculative_blocks) y la cinta lo pone en 0. Medido con 10 requests de
-      # 8k: el pico de KV cae de 59,1% a 23,8%.
-      #
-      # Que cuesta: -2,6% de decode, medido con A/B INTERCALADO (A/B/A/B, 3 calentamientos +
-      # 5 medidas por arranque, CV 0,05%). La deriva entre arranques del mismo brazo es 0,7%,
-      # asi que el delta se le puede creer. OJO: una sonda sin calentar habia dado -7,6%.
-      #
-      # 2026-09-20: con DFlash2 corre el model runner v2 (el v1 lo rechaza), que migra el
-      # estado GDN desde mamba_hybrid.py y no pasaba por los ganchos de la cinta: el estado
-      # quedaba viejo en cada borde de bloque (880 tok) y la salida degeneraba a los ~1000
-      # tokens. Arreglado con gdn_cinta.v2_pre/v2_post + pn122_mh_*. OJO: el quality-test
-      # --quick no lo ve (no cruza un borde); el oraculo es una generacion de >2000 tokens.
-      - GENESIS_ENABLE_PN122_GDN_CINTA=1
-      # Arbol de borrador de 8 nodos para DFlash2. En vez de verificar UN camino goloso (donde el
-      # primer fallo tira el resto), verifica los 8 nodos de mayor probabilidad de camino, con el
-      # mismo costo de paso: mismos 8 slots, misma profundidad.
-      #   prosa/mixto  +10,3% (mi banco) y +11,0% (bench de club-3090), reproducible
-      #   codigo       -0,8% con 1 pedido, -8,4% con 6 (ahi el drafter ya acierta 6,6 de 9 y el
-      #                arbol no aporta aceptacion: 6,59 en los dos brazos)
-      # El prefill y el TTFT no se tocan. Necesita PN122 (la cinta) y el decode entero de PN131.
-      # Apagarlo: GENESIS_ENABLE_ARBOL=0.
-      - GENESIS_ENABLE_ARBOL=1
-      # Forma cerrada del GDN en int8: APAGADA. Es exacta en el estado que se propaga (3e-17) y
-      # mas rapida de kernel, pero aporta ~0 end-to-end y mete 0,6% de error en las salidas de
-      # draft. El camino secuencial es bit a bit identico a produccion cuando no hay arbol.
-      - GENESIS_ARBOL_CERRADA=0
-      # 5824 = 7 x 832 (un bloque KV). Medido contra el camino REAL de produccion
-      # (cutlass + SiLU fusionado por inductor, NO el SiLU suelto con el que lo
-      # habia medido mal): el cruce esta entre 4992 (0,93x) y 5824 (1,04x).
-      #   M=4096 0,90x | 4992 0,93x | 5824 1,04x | 7488 1,08x | 9152 1,12x
-      # Con M_MIN=4096 el chunk de cola de 4992 caia en el camino donde PERDEMOS
-      # y se comia lo que ganabamos en el chunk grande.
-      - GENESIS_PN119_M_MIN=5824
-      # Vuelca los contadores de despacho cada N llamadas. 0 = apagado.
-      - GENESIS_PN119_DEBUG=0
-      - GENESIS_ENABLE_PN116_PREFILL_MLP_SK=0
-      - GENESIS_PN116_M_MIN=4096
-      - GENESIS_PN116_AB=0
-      # Fraccion de bloques GPU que nunca se compromete a un request nuevo.
       - GENESIS_PID_HEADROOM_RATIO=0.10
-      # Nunca se difiere por debajo de esta concurrencia (invariante anti-deadlock).
       - GENESIS_PID_MIN_CONCURRENCY=2
-      # prioridad < threshold = bypass de emergencia (puede desalojar).
-      # Solo dispara si el cliente manda priority o fija el request_id (X-Request-Id).
       - GENESIS_PID_HIGH_PRIO_THRESHOLD=0
-      - GENESIS_ENABLE_B5_REJECTION_SAMPLER=1
-      - GENESIS_ENABLE_B7_LM_HEAD=0
-      - GENESIS_ENABLE_P82=1
-      - GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=0
+      # ── grafos CUDA ─────────────────────────────────────────────────────────
       - GENESIS_ENABLE_P66_CUDAGRAPH_SIZE_FILTER=1
-      # 2026-09-21: P66 GENERA las tallas de CUDA graph como (K+1)*n en vez de filtrar la lista
-      # de abajo, que son multiplos de 4 (de cuando el drafter era MTP K=3): con K=8 solo
-      # sobrevivian [9, 36], y con K=10/12 ninguna (K=10 a 37k: 133 -> 223 tok/s al generarlas).
-      # Hasta 4 pedidos y no mas: medido con K=8, las tallas ayudan con pocos pedidos y restan
-      # con muchos (a 6-8 pedidos el camino sin grafo es 5-7% mas rapido).
       - GENESIS_P66_GENERAR_TALLAS=1
       - GENESIS_P66_MAX_REQS=4
-      - GENESIS_ENABLE_P5B=1
-      - GENESIS_ENABLE_P69_LONG_CTX_TOOL_REMINDER=1
+      - GENESIS_ENABLE_B2_FULL_CG=0
+      - GENESIS_ENABLE_P100=0
+      - GENESIS_ENABLE_PN129_FLASHINFER_DECODE_UNPIN=0
+      # ── tools, razonamiento y streaming (agente de codigo) ──────────────────
+      - GENESIS_ENABLE_PN56_QWEN3CODER_XML_FALLBACK=1
+      - GENESIS_ENABLE_P59_QWEN3_TOOL_RECOVERY=1
+      - GENESIS_ENABLE_P69_LONG_CTX_TOOL_REMINDER=1  # recordatorio de formato de tools en contexto largo
       - GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS=1000
       - GENESIS_P69_REMINDER_STYLE=qwen3_coder
-      # P58 (fix del placeholder -1 del async scheduler, backport de vllm#40768):
-      # APAGADO EN v0.29.0 — era lo que mataba el MTP. Con P58 prendido el decode
-      # especulativo no acepta NADA y encima cuesta 27%; apagandolo el coding pasa de
-      # 40,9 a 167,1 tok/s. Aislado midiendo: se apagaron los cuatro parches de
-      # spec-decode juntos (144,7 tok/s), despues P58+PN128 (144,9) y despues solo
-      # P58 (144,6): es P58 solo, y P107/PN108/PN128/B5 son inocentes.
-      #
-      # Por que rompe: su `_consume_spec_decode_tokens_for_step` decide cuantos tokens
-      # especulativos agendar con
-      #     num_new_tokens + num_computed_tokens - num_tokens - num_output_placeholders
-      # y si da <= 0 devuelve None, o sea NINGUN draft. Esa contabilidad quedo vieja
-      # contra el scheduler.py de v0.29.0, que cambio 373 lineas. Las cinco anclas
-      # siguen enganchando, asi que el parche "aplica" y falla en silencio.
-      #
-      # Se puede apagar porque upstream ya maneja el caso: async_scheduler.py es
-      # IDENTICO entre v0.27.1 y v0.29.0 y ya dimensiona los placeholders por los
-      # tokens realmente agendados (`[-1] * num_spec_tokens_to_schedule`) y saltea los
-      # chunks de prefill. Verificado con la bateria que dispara el bug que P58 cubre
-      # — contexto largo, prefill por trozos y concurrencia hasta 24 — sin un crash.
-      # En v0.27.1 sigue PRENDIDO: ahi el parche hace su trabajo.
-      - GENESIS_ENABLE_P58_ASYNC_PLACEHOLDER_FIX=0
-      - GENESIS_ENABLE_P59_QWEN3_TOOL_RECOVERY=1
-      - GENESIS_ENABLE_P107_MTP_TRUNCATION_DETECTOR=1
-      # PN114: guardas aritmeticas de limites en la copia de alineacion mamba.
-      # Las guardas sobre el VALOR del block table van aparte y apagadas: no
-      # arreglan el caso "fresh" sino que ocultan una inconsistencia, dejando
-      # estado recurrente rancio en el bloque destino. Encender solo si vuelve
-      # el illegal memory access, y midiendo la calidad de salida.
-      - GENESIS_ENABLE_PN114_MAMBA_ALIGN_BOUNDS_GUARD=1
-      - GENESIS_PN114_GUARD_BLOCK_TABLE=0
+      - GENESIS_ENABLE_PN51_QWEN3_STREAMING_THINKING_DISABLED=1
+      - GENESIS_ENABLE_PN66=1                    # fuga de </think> en multiturno
+      - GENESIS_ENABLE_P61B_STREAMING_OVERLAP=1
+      - GENESIS_ENABLE_P62_STRUCT_OUT_SPEC_TIMING=1
+      - GENESIS_ENABLE_P5B=1
+      # ── GDN y memoria ───────────────────────────────────────────────────────
       - GENESIS_ENABLE_PN50_GDN_FUSED_PROJ=1
+      - GENESIS_ENABLE_PN54_GDN_CONTIGUOUS_DEDUP=1
       - GENESIS_ENABLE_PN59_STREAMING_GDN=1
       - GENESIS_PN59_MIN_T=256
-      - GENESIS_ENABLE_PN54_GDN_CONTIGUOUS_DEDUP=1
-      - GENESIS_ENABLE_PN57_TQ_CENTROIDS_DISK_CACHE=1
       - GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE=0
       - GENESIS_ENABLE_PN25_SILU_INDUCTOR_SAFE=1
       - GENESIS_ENABLE_PN12_FFN_INTERMEDIATE_POOL=1
-      # PN19: upstream ya trae `_scoped_allocator_max_split(max_split_size_mb=20)` — de
-      # hecho ya lo traia en 0.27.1, asi que este parche viene saltandose hace rato.
-      - GENESIS_ENABLE_PN19_SCOPED_MAX_SPLIT=1
-      - GENESIS_PN80_EVERY=2000
-      - GENESIS_PN80_MIN_T=256
-      - GENESIS_PN80_TARGET_FREE_MIB=100
-
-      # ── OPTIMIZACIÓN DE KERNELS GEMM / TENSOR CORES (AWQ W4A16) ──────────────
-      - VLLM_FLOAT32_MATMUL_PRECISION=high
-      - VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD=1024
-      - VLLM_MARLIN_USE_ATOMIC_ADD=1
-      # ── W4A8: el camino int4 x int8 sobre los tensor cores ──────────────────
-      # Manda las activaciones a Marlin en int8 en vez de fp16. Es lo que habilita
-      # el mma entero (m16n8k32.s8), que consume el doble de K por instruccion que
-      # el HMMA de fp16. Sin esto el peso se desempaqueta a fp16 y se pierde todo.
-      - VLLM_MARLIN_INPUT_DTYPE=int8
-      #
-      # PN125: red de contencion para las escalas NEGATIVAS de AutoRound. El Marlin
-      # oficial asume escalas positivas y con estas devuelve BASURA SILENCIOSA (sin
-      # error, sin warning, el modelo simplemente delira). Con PN130 cargado este no
-      # llega a tocar los pesos, pero queda como respaldo si PN130 falla al compilar.
-      - GENESIS_ENABLE_PN125_MARLIN_W4A8_ESCALAS=1
-      #
-      # PN130: Marlin propio con escalas int16 CON signo — el kernel de verdad.
-      # Es exacto contra float64 (2,8e-5, que es el redondeo del fp16 de salida) y
-      # se compila desde vllm/_genesis/kernels/marlin_s16/. Lleva adentro, todo
-      # medido en esta maquina:
-      #   * reduccion entre warps en int32 en vez de fp32 ........... +9,5% prefill
-      #   * division magica en el prologo (sin div/rem enteros) ..... -7% a -18% en M=96-144
-      #   * serie completa de tiles + tope por tramo de M ........... -32% en M=70-88
-      #   * tope de thread_m_blocks en 5 hasta M=80 ................. hasta 4,9x en M=104-112
-      #     (con >=6 el kernel toca los 255 registros y DERRAMA a memoria local:
-      #      845 MB de trafico de DRAM para un peso de 44,6 MB)
-      #   * `corr` inicializado en matmul_a8 ........................ correctitud
-      #     (sin eso, con PN140 apagado se restaban registros basura: sesgo de
-      #      -8*escala por grupo y resultados distintos en cada llamada)
-      # La .so se recompila sola cuando cambia el fuente (huella en huella.txt).
-      - GENESIS_ENABLE_PN130_MARLIN_S16=1
-      #
-      # PN131 (SK-18g): el decode de la atencion en un kernel entero propio (PTX)
-      # que lee la KV en int8. Sin esto, --kv-cache-dtype int8_per_token_head no
-      # tiene quien lo atienda.
-      # ── Diagnostico: volcado con los locales del frame que falla ─────────────
-      # vLLM tira el traceback y se muere, pero el traceback dice DONDE fallo, no con QUE.
-      # Esto deja un archivo por incidente con la excepcion y, por cada frame, sus variables
-      # resumidas (tensores como forma/dtype, listas como largo + extremos). Para el
-      # IndexError de block_pool eso es directamente `i` contra `len(new_block_hashes)`.
-      # Engancha el excepthook Y un handler del logger raiz, porque el EngineCore de vLLM
-      # atrapa el error, lo loguea y sale ordenado — por ahi un excepthook no se entera.
-      # Cuesta cero mientras no explote nada. Apagar: GENESIS_VOLCADO=0.
-      - GENESIS_VOLCADO=1
+      - GENESIS_ENABLE_PN19_SCOPED_MAX_SPLIT=1   # (upstream ya lo trae: se saltea solo)
+      - GENESIS_ENABLE_PN57_TQ_CENTROIDS_DISK_CACHE=1
+      - GENESIS_ENABLE_B7_LM_HEAD=0
+      # ── diagnostico ─────────────────────────────────────────────────────────
+      - GENESIS_VOLCADO=1                        # si algo revienta, deja los locales del frame
       - GENESIS_VOLCADO_DIR=/root/.cache/vllm/genesis_volcados
-      # Logs a archivo ademas de consola, por la palanca NATIVA de vLLM. Con TP=2 son tres
-      # procesos escribiendo al mismo stdout; el formato lleva el pid y los loggers de Genesis
-      # van en DEBUG mientras vLLM se queda en INFO, para que el detalle propio no se pierda.
-      - VLLM_LOGGING_CONFIG_PATH=/root/.cache/vllm/genesis_logs/logging.json
-      # Solo para cazar el arranque roto; prender a mano cuando haga falta (ver diag_lm_head.py)
       - GENESIS_DIAG_LMHEAD=0
-      - GENESIS_ENABLE_PN131_SK18=1
-      # PN131 por el registro nativo de backends en vez de por cirugia de texto.
-      # Antes: 5 anclas dentro de triton_attn.py, un archivo que upstream movio 81 lineas
-      # entre v0.27.1 y v0.29.0. Ahora: UNA ancla en el cuerpo de load_general_plugins()
-      # — identico en las dos versiones — y el resto por herencia (BackendSK18 / ImplSK18 /
-      # BuilderSK18 en vllm/_genesis/sk18_backend.py). Si upstream renombra algo que
-      # reemplazamos, revienta al importar y dice cual, en vez de saltearse en silencio.
-      # Verificada la paridad contra el camino de anclas, tres medidas:
-      #   decode 43,4 vs 43,2 tok/s | KV 611.402 vs 611.402 | "decode entero ACTIVO" en los dos
-      # Poner en 0 para volver al camino de anclas (los dos son excluyentes).
-      - GENESIS_PN131_NATIVO=1
-      #
-      # PN124: TRITON_ATTN viene sin afinar para Ampere y pierde 40% de prefill y
-      # 3-4x de decode largo. Dos causas, las dos arregladas aca: BLOCK_M=16 deja
-      # 2 queries por programa (el afinado para head 256 esta atado a Blackwell y
-      # ademas no entra en la SRAM de Ampere), y el kernel 3D paralelo exige
-      # max_seqlen_q==1, que con MTP K=3 nunca se cumple. OBLIGATORIO con
-      # TRITON_ATTN: sin el, el cambio no compensa.
-      - GENESIS_ENABLE_PN124_TRITON_AMPERE=1
-      #
-      # PN131 dimensiona sus acumuladores para un lote MAXIMO y tira el pedido si
-      # se pasa. Deberia leerlo de --max-num-seqs, pero el contexto de config de
-      # vLLM no esta disponible cuando arma los buffers (corre en la primera
-      # inferencia del worker), asi que cae a 10 y el servidor se muere al llegar
-      # el lote 11: "RuntimeError: PN131: lote 12 > GENESIS_PN131_BMAX 10".
-      # Tiene que ACOMPAÑAR a --max-num-seqs de mas abajo.
-      - GENESIS_PN131_BMAX=11
-      - VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
+      - VLLM_LOGGING_CONFIG_PATH=/root/.cache/vllm/genesis_logs/logging.json
       - VLLM_LOGGING_LEVEL=INFO
       - GENESIS_VERBOSE=0
       - GENESIS_LOG_LEVEL=INFO
-      - NVIDIA_VISIBLE_DEVICES=all
+      # ── vLLM / torch ────────────────────────────────────────────────────────
+      - VLLM_FLOAT32_MATMUL_PRECISION=high
+      - VLLM_MULTI_STREAM_GEMM_TOKEN_THRESHOLD=1024
+      - VLLM_USE_FUSED_MOE_GROUPED_TOPK=1
+      - VLLM_USE_FLASHINFER_SAMPLER=1
       - VLLM_WORKER_MULTIPROC_METHOD=spawn
       - VLLM_NO_USAGE_STATS=0
+      - NVIDIA_VISIBLE_DEVICES=all
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512
       - CUDA_DEVICE_SCHEDULE=1
       - OMP_NUM_THREADS=1
-      - VLLM_API_KEY=${VLLM_API_KEY:-}
-      # Opcional. Si esta definida, las rutas de Genesis que MUTAN el servidor (reset de caches,
-      # config de PN115) exigen ESTA clave en vez de la de inferencia. Ver vllm/_genesis/api_auth.py
-      - GENESIS_ADMIN_API_KEY=${GENESIS_ADMIN_API_KEY:-}
+      - PYTHONHASHSEED=0
       - TORCHINDUCTOR_CACHE_DIR=/root/.cache/torchinductor
       - TRITON_CACHE_DIR=/root/.cache/triton
-      - VLLM_USE_FLASHINFER_SAMPLER=1
-      - PYTHONHASHSEED=0
+      # ── claves (del .env; nunca en el archivo) ──────────────────────────────
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      - GENESIS_ADMIN_API_KEY=${GENESIS_ADMIN_API_KEY:-}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
-    # ── Chequeo de salud que GENERA, no que hace ping ────────────────────────────
-    # Aproximadamente 1 de cada 12 arranques de v0.29.0 deja el modelo roto: responde
-    # /health con 200, sirve, y devuelve 2 tokens con el contenido vacio a cualquier cosa.
-    # Medido: ~4 rotos en ~47 arranques. Dentro de un arranque es 100% consistente, asi que
-    # UNA sonda alcanza para detectarlo — y por eso preguntar /health no sirve de nada.
-    # Esto pide una generacion de verdad y exige mas de 5 tokens; con menos el contenedor
-    # queda marcado "unhealthy" en `docker ps`, que es lo que convierte la falla de silenciosa
-    # en visible. OJO: Docker NO reinicia por unhealthy — `restart:` solo actua cuando el
-    # contenedor SALE. Para que se recupere solo hace falta un watchdog externo (o mirar el
-    # estado antes de mandarle trafico). Reiniciar a mano alcanza: sin tocar nada, el arranque
-    # siguiente sale sano.
-    # start_period generoso: la carga de pesos mas la compilacion tardan varios minutos, y
-    # durante esa ventana los fallos del chequeo no cuentan.
+    # Sano = genera de verdad (no solo /health): 16 tokens con la clave.
     healthcheck:
       test:
         - CMD-SHELL
@@ -685,9 +206,6 @@ services:
     restart: unless-stopped
     shm_size: "16gb"
     ipc: host
-    # Permite adjuntar profilers (py-spy, gdb) a los workers desde el host
-    # o desde adentro. Sin esto ptrace falla con "Permission denied" y no
-    # se puede ver donde se va el tiempo de un paso.
     cap_add:
       - SYS_PTRACE
     deploy:
@@ -697,37 +215,30 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+    # Los parches se aplican en un proceso aparte y despues se hace exec de vllm serve
+    # (lo que se registra en memoria lo carga vllm._genesis.plugins_arranque en cada proceso).
     entrypoint:
       - /bin/bash
       - -c
       - |
         pip install pandas scipy xxhash -q
-        # Escribe el dictConfig de logging ANTES de que arranque vLLM: este proceso muere en
-        # el exec, pero el archivo queda y lo leen los tres procesos que vienen despues.
-        # La variable se VACIA para esta linea a proposito: importar vllm dispara su
-        # _configure_vllm_root_logger, que revienta si el archivo todavia no existe. Huevo y
-        # gallina — con la variable vacia vLLM se saltea esa carga y podemos escribirlo.
         VLLM_LOGGING_CONFIG_PATH= python3 -m vllm._genesis.volcado
         python3 -m vllm._genesis.patches.apply_all
         exec vllm serve "$@"
       - --
     command:
-      # Checkpoint AWQ W4A16 con MTP nativo preservado
       - /root/.cache/huggingface/qwen3.8_27b_idiotSavant_sm_86
       - --served-model-name
       - qwen3.8_27b_idiotSavant_sm_86
-      - qwen3.8
+      - qwen3.8                        # alias que usan opencode, Hermes y el healthcheck
       - qwen3.6
       - qwen3.8-27b-uncensored
       - --disable-access-log-for-endpoints
       - "/metrics,/health"
       - --enable-prompt-tokens-details
       - --trust-remote-code
-      # PN131 corre sobre TRITON_ATTN, no sobre FlashInfer: reemplaza el kernel de
-      # decode de la atencion por el propio (SK-18g en PTX). FlashInfer no expone
-      # el punto de enganche ni acepta un KV entero por token-cabeza.
       - --attention-backend
-      - TRITON_ATTN
+      - TRITON_ATTN                    # PN131 (SK-18) corre sobre TRITON_ATTN
       - --moe-backend
       - flashinfer_trtllm
       - --generation-config
@@ -740,70 +251,14 @@ services:
       - float16
       - --mamba-ssm-cache-dtype
       - "float16"
-      # KV de la atencion en int8 asimetrico POR TOKEN-CABEZA, con el kernel propio
-      # de PN131. Reemplaza al fp8_e4m3 que habia antes, y no es un capricho:
-      #   * una nota de julio registra que fp8 DEGRADA la calidad en este hibrido
-      #     (corrupcion a baja tasa: parentesis que se caen, palabras truncadas)
-      #   * int8 por token-cabeza tiene 4x MENOS error de cuantizacion que fp8
-      #   * ocupa lo mismo (1 byte), asi que la KV no se achica
-      #   * y esta medida la paridad con FlashInfer+fp8 en decode y prefill
-      # Es el nombre exacto que mira PN131 para elegir su camino: con cualquier
-      # otro valor el parche no engancha y el KV cae al generico de vLLM.
       - --kv-cache-dtype
-      - "int8_per_token_head"
-      # Se queda en 10. Medido con bench.sh (3 calentamientos + 5 medidas) el 2026-09-19:
-      # subir a 24 NO da nada en single-stream —narrativa 129,1 vs 128,0 y codigo 251,9 vs
-      # 256,0, todo dentro del CV— y cuesta 70.000 tokens de KV (566.314 -> 496.409, -12%),
-      # porque PN131 reserva acumuladores por slot. O sea que se come casi todo lo que
-      # PN122 acaba de liberar.
-      # OJO, esto contradice la nota vieja de "+35-49% con 24" y a una prueba propia de carga
-      # dominada por decode que daba 408 vs 304 tok/s agregados: esa comparacion estaba
-      # viciada porque el brazo de 10 se midio recien arrancado, sin calentar. Si alguna vez
-      # la carga real pasa a ser muchos streams cortos a la vez, hay que volver a medirlo
-      # CON calentamiento antes de subirlo.
-      # GENESIS_PN131_BMAX de arriba tiene que seguir a este numero.
-      # 6 y no 10 (2026-09-21): el agregado hace meseta en 6 pedidos (942 tok/s con 6, 943-951
-      # con 8, dos arranques por brazo): pasar de 6 solo reparte lo mismo entre mas pedidos
-      # (157 -> 118 tok/s cada uno). Y PN131 dimensiona sus acumuladores por pedido maximo:
-      # 785 -> 471 MiB, KV 583.790 -> 600.434 tokens. Con P66 generando tallas hasta 4, contra
-      # la config anterior (tok/s agregados, codigo, greedy):
-      #    1 pedido 274 -> 298 (+9%) | 2: 378 -> 450 (+19%) | 4: 677 -> 732 (+8%) | 6: 942 -> 937
-      # GENESIS_PN131_BMAX tiene que seguir a este numero.
+      - "int8_per_token_head"          # KV int8: 4x menos error que fp8 y +30% decode a 50k
       - --max-num-seqs
       - "11"
       - --tensor-parallel-size
       - "2"
       - --max-model-len
-      # 262144, el mismo largo que la config de MTP. Habia bajado a 163840 cuando la KV no
-      # entraba; con PN145+PN146 ya no hace falta, y subirlo es GRATIS: num_blocks NO depende
-      # de max_model_len (medido: 2689 bloques con los dos valores), asi que un request de
-      # 100k consume lo mismo en cualquiera de las dos. Solo cambia el largo maximo aceptado
-      # y el numero del cartel ("GPU KV cache size" es concurrencia x max_model_len, un
-      # derivado). A 262144: 519.841 tokens, 1,98x.
       - "262144"
-      # 0.90 -> 0.915 (2026-09-17), buscado POR MEDICION, no por regla del pulgar.
-      # El margen que hay que dejar no es "por las dudas": los buffers de PN131 (el
-      # espejo int8 de la ventana reciente) crecen MIENTRAS corre, despues de que
-      # vLLM ya reservo su parte, asi que la VRAM libre BAJA a medida que la KV se
-      # llena. Con 0.90 iba de 907 MiB al 50% de KV a 587 MiB al 89%.
-      #
-      # Se busco el borde saturando la KV al maximo en cada escalon:
-      #     0.90    KV 625.788 tok   pico 92%    10/10 OK   587 MiB libres
-      #     0.915   KV 647.367 tok   pico 98%    10/10 OK   173 MiB libres
-      #     0.93    KV 668.147 tok   OOM al 80% de KV, engine muerto
-      #             ("Tried to allocate 48 MiB. GPU 0 has 22.31 MiB free")
-      #
-      # 0.915 son 21.579 tokens mas de KV que 0.90, con la KV al 98% y el servidor
-      # entero. SUBIR MAS NO ENTRA: 0.93 ya revienta, y el salto entre uno y otro
-      # es de solo 0,015.
-      #
-      # Ojo: los 173 MiB son el peor caso de ESTE patron (10 pedidos de 55k). Otro
-      # perfil de carga puede necesitar mas — si aparece un OOM, bajar a 0.91.
-      # 0.915, igual que en v0.27.1. Se probo bajarlo a 0.90 por si la presion de memoria
-      # explicaba los arranques que salen con el modelo roto, y NO: cuatro ciclos completos
-      # de down+up por variante, 4 sanos de 4 en las dos. Lo unico que cambia es la KV:
-      #   0.915 -> 611.402 tokens     0.90 -> 590.623 tokens     (cuesta 20.779)
-      # Asi que se queda en 0.915 y el arranque no determinista se caza por otro lado.
       - --gpu-memory-utilization
       - "0.92"
       - --limit-mm-per-prompt
@@ -817,86 +272,20 @@ services:
       - --tool-call-parser
       - qwen3_coder
       - --enable-cumem-allocator
-      # REACTIVADO 2026-09-14 con el dimensionamiento CORRECTO.
-      #
-      # Estuvo apagado porque medi CERO hits, pero ese test tenia un error de
-      # bulto: L2 era mas CHICA que L1 (395 bloques contra 413), asi que todo lo
-      # que se caia de L1 ya se habia caido de L2. Por construccion no podia
-      # pegar. cpu_bytes_to_use=12 GiB da 790 bloques = 1,91x L1.
-      #
-      # El caso de uso es el ciclo que se midio bajo carga real: 4 hilos llenan
-      # la KV -> se desalojan prefijos -> el turno siguiente re-prefillea 50-100k
-      # tokens. Medido: 2,5x mas prefill despues de KV>85%, y el hit rate del
-      # prefix cache queda en 50% cuando deberia estar cerca de 90%.
-      # ── El tier L2 en RAM: 12 GiB -> 2 GiB ────────────────────────────────
-      # v0.29.0 agrego `check_shm_free_space` antes del ftruncate Y ahora PUEBLA la
-      # region (MADV_POPULATE_WRITE). v0.27.1 no chequeaba y tmpfs no reserva en el
-      # ftruncate, asi que los 12 GiB eran nominales y solo se ocupaba lo que se tocaba:
-      # el arranque pasaba sin que nadie viera el problema. Con TP=2 son un scheduler
-      # mas DOS regiones de worker — 36 GiB pedidos en una maquina de 30.
-      #
-      # Que bajen a 2 GiB no pierde nada, y esta medido: L2 y L3 devuelven CERO hits, y
-      # es estructural. Un hit de prefijo necesita los cuatro grupos de KV, y g0-g2 son
-      # GDN con estado recurrente: no hay nada que rescatar de un tier externo. El tier
-      # queda chico solo para que el conector exista (PN81/PN88/PN90/PN91 cuelgan de el).
-      # Tambien es lo que corresponde a la regla del proyecto: nada en RAM de la placa.
+      # offload de KV: 2 GB de RAM + disco (/kv-offload), con los PN81/PN90/PN91 de arriba
       - --kv-transfer-config
       - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 2147483648, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload", "n_read_threads": 4, "n_write_threads": 4}]}}'
-      # NO usar --enable-dbo aca. Es micro-batching con solapamiento, que es
-      # justo lo que queriamos, pero vLLM lo tiene atado al all2all de MoE:
-      #   "Microbatching currently only supports the deepep_low_latency,
-      #    deepep_high_throughput, and nixl_ep all2all backends."
-      # Este modelo es DENSO, asi que el backend es allgather_reducescatter y
-      # el arranque falla con ValidationError.
       - --enable-prefix-caching
+      # profiler apagado salvo PROF_KIND/PROF_DIR en el entorno
       - --profiler-config
       - '{"profiler": ${PROF_KIND:-null}, "torch_profiler_dir": "${PROF_DIR:-}", "torch_profiler_with_stack": false, "torch_profiler_record_shapes": false, "torch_profiler_use_gzip": true, "ignore_frontend": true, "delay_iterations": ${PROF_DELAY:-0}, "max_iterations": ${PROF_MAX:-0}}'
       - --enable-chunked-prefill
-      # OJO: el chunk real NO es este numero. vLLM le resta el delta de spec
-      # decoding (slots_de_draft x max_num_seqs) y despues lo CUANTIZA a
-      # multiplos del bloque KV, que en este hibrido GDN es de 832 tokens
-      # ("attention page size >= mamba page size"). Con 8192 el chunk real es
-      # 9x832 = 7488.
-      #
-      # Se probo 9216 (da 11x832 = 9152, donde SK-12 rinde 1,14x en vez de
-      # 1,08x): costo ~12.000 tokens de KV en L1 y NO se cobro end-to-end.
-      # Revertido a 8192. L1 es lo unico que demostro dar 23x en reuso.
-      # NO activar async TP / sequence parallelism en esta config. MEDIDO:
-      #   sin SP  2052-2090 tok/s de prefill
-      #   con SP  1968-2002 tok/s   <- 3-4% PEOR
-      # vLLM las apaga solo ("Model hidden_size too small for the SP threshold
-      # heuristic") y tiene razon: con hidden_size=5120 y TP=2 sobre PCIe,
-      # partir el all-reduce en reduce-scatter + all-gather agrega kernels sin
-      # conseguir solapamiento. Para forzarlo haria falta:
-      #   - --compilation-config
-      #   - '{"pass_config": {"enable_sp": true, "fuse_gemm_comms": true,
-      #                       "sp_min_token_num": 2048}}'
-      # NO hay nada que ganar del lado del all-reduce. MEDIDO el 2026-09-13:
-      #   copia P2P pura de 79,7 MB   6,06 ms  = 13,1 GB/s
-      #   all-reduce de NCCL          6,30 ms  <- 96% del limite fisico
-      # El bus es la pared. Probado y descartado, todo neutro o peor:
-      #   - async TP + sequence parallelism (sp_min_token_num=2048): 3-4% PEOR
-      #   - fusion allreduce+RMSNorm de FlashInfer (fi_allreduce_fusion_max_size_mb=128,
-      #     hace falta explicito o el mapa de defaults no trae TP=2): SIN CAMBIO
-      #   - pipeline parallel en vez de TP: NotImplementedError para este modelo
-      # Y el techo del solapamiento es bajo igual: el GEMM que precede al
-      # all-reduce (down_proj) dura 2,4 ms contra 6,3 de comunicacion.
       - --max-num-batched-tokens
       - "8192"
-      # 1760 = 2 bloques de 880. Dos efectos, medidos 2026-09-20 (A/B 8192 / 3520 / 1760):
-      #  * el estado GDN se guarda al final de cada chunk, asi que el chunk ES el grano del
-      #    prefix-cache: prompt repetido de 7,4k 2,49 -> 0,91 s (0 -> 5.280 tok cacheados), de
-      #    22k 2,61 -> 1,28 s. Con 8192 todo prompt < 7.920 tokens no cacheaba NADA.
-      #  * deja lugar en el paso para los pedidos cortos (ver PN115_PROMPT_CORTO_TOKENS).
-      # NO cuesta prefill medible: 5 corridas de 90k por brazo dan 1.867 tok/s (8192) contra
-      # 1.861 (1760). La primera medicion decia -5,5% con UNA corrida por brazo y era deriva
-      # del reloj por el cap de potencia (ver README, "What the power cap costs"). KV sin
-      # cambio. Tiene que ser >= 880 y < 8192.
       - --long-prefill-token-threshold
-      - "1760"
+      - "1760"                         # con PN115: los prompts cortos no esperan detras de uno largo
       - --performance-mode
       - "throughput"
-      # Tallas de CUDA Graph para MTP K=3 (cada secuencia aporta K+1=4 tokens por paso)
       - --cudagraph-capture-sizes
       - "4"
       - "8"
@@ -911,30 +300,9 @@ services:
       - --async-scheduling
       - --scheduling-policy
       - priority
-      # K=8 (num_speculative_tokens): cuantos tokens propone el borrador por paso, que el
-      # target verifica en UNA pasada. Medido en este rig, decode tok/s:
-      #        1k                      50k
-      #   K=7  242,7  accept 5,69      196,2  accept 5,26
-      #   K=8  250,6  accept 5,72      200,7  accept 5,21
-      #   K=9  285,2  accept 6,42      185,6  accept 5,08
-      # K=9 gana 17% en contexto corto y PIERDE 8% a 50k: cada token propuesto de mas se
-      # verifica aunque se rechace, y a contexto largo esa verificacion cuesta mas que lo que
-      # rinde la cola de la aceptacion. La carga real de opencode vive en 60-100k, asi que el
-      # optimo es K=8. Si alguna vez el uso se corre a prompts cortos, K=9 es mejor ahi.
-      # El borrador HEREDA el kv-cache-dtype del target (int8_per_token_head). No poner
-      # "kv_cache_dtype":"auto" aca: con PN145 eso cuesta 483.076 -> 248.993 tokens de KV.
-      # OJO, porque la medicion previa decia lo contrario: antes de PN145 el dtype del
-      # borrador daba EXACTAMENTE lo mismo (178.823 de las dos formas), porque el block_size
-      # de 16 tapaba todo lo demas. Arreglado eso, el dtype pasa a valer un 94%.
+      # borrador DFlash2 reajustado contra este modelo; K=8 es el optimo medido para
+      # contextos de agente de 60-100k (hereda el kv-cache-dtype del target)
       - --speculative-config
-      # DFlash2: borrador EXTERNO (syvai/Qwen3.8-27B-DFlash2-W4A16, 5 capas, 1,2 GB) en vez
-      # del cabezal MTP interno. K=7 es el default de club-3090 para este borrador.
-      # La arquitectura DFlash2DraftModel es nativa desde v0.28.0; lo que falta lo pone PN142.
-      # 2026-09-24: el borrador AJUSTADO contra noon (incoai DFlash2 + LoRA sobre 1209 pedidos
-      # de agente de codigo capturados de este mismo runtime, variante AUF, RTN W4A16 g128).
-      # Banco de 40 pedidos de agente con arbol: 5,46 -> 5,64 aceptados/paso, 214 -> 245 tok/s;
-      # bench.sh de club-3090: prosa 140,2 -> 146,6, codigo empata. Ver entrenamiento/borrador/.
-      # Para volver al de syvai: ".../qwen3.8-27b-dflash2-w4a16".
       - '{"method":"dflash","model":"/root/.cache/huggingface/qwen3.8_27b_idiotSavant_sm_86_dflash2","num_speculative_tokens":8}'
       - --host
       - "0.0.0.0"
