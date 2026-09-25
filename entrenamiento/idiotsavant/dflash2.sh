@@ -20,9 +20,9 @@
 #  Lanzarlo desacoplado para corridas largas:  setsid nohup ./dflash2.sh > dflash2.log 2>&1 &
 #
 #  Variables (defaults entre corchetes):
-#     BASE      borrador BF16 de partida [trazas/borrador_ft_auf: el ajustado contra noon]. Desde el
-#               original de Inco (/models/incoai-qwen3.8-27b-dflash2-bf16) sale un poco peor (5,63 vs
-#               5,69 aceptados por paso en el A/B del 25-09).
+#     BASE      borrador BF16 de partida [/models/incoai-qwen3.8-27b-dflash2-bf16: el DFlash2 original
+#               de Inco]. Se ajusta DIRECTO contra idiotSavant, sin modelos intermedios (asi es el
+#               publicado: 5,70 -> 6,13 greedy offline; 5,63 aceptados/paso y ~216 tok/s servido).
 #     NOMBRE    nombre de la corrida [idiotsavant_dflash2]: dirs de captura, entrenamiento y estado
 #     SALIDA    borrador W4A16 final en models-cache [qwen3.8_27b_idiotSavant_sm_86_dflash2_$NOMBRE]
 #     MIN_DISCO_GB  la captura frena por debajo de esto [12] (~24 MB por pedido)
@@ -40,7 +40,7 @@ MC=/home/usuario/Proyectos/models-cache
 IMG=vllm/vllm-openai:v0.29.0
 COMPOSE=$R/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml
 MODELO=/models/qwen3.8_27b_idiotSavant_sm_86
-BASE=${BASE:-/traces/borrador_ft_auf}
+BASE=${BASE:-/models/incoai-qwen3.8-27b-dflash2-bf16}
 NOMBRE=${NOMBRE:-idiotsavant_dflash2}
 SALIDA=${SALIDA:-qwen3.8_27b_idiotSavant_sm_86_dflash2_$NOMBRE}
 MIN_DISCO_GB=${MIN_DISCO_GB:-12}

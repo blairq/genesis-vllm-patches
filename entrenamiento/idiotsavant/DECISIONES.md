@@ -162,11 +162,13 @@ Son Hadamard por bloques: costo por paso no medible (pasos/s 38,3 contra 38,4).
 árbol y perfil coder; las features, las del fc servido. El entrenador simula exactamente el embedding
 y el lm_head efectivos, int4 incluido.
 
-**E3. Base de partida: el borrador ya ajustado contra noon.**
-- offline: 6,10 → 6,18 desde el ajustado; 5,70 → 6,13 desde el original de Inco;
-- en vLLM: 5,69 contra 5,63 aceptados por paso.
+**E3. Base de partida: el DFlash2 original de Inco, ajustado DIRECTO contra idiotSavant.** Offline
+(greedy, 3% de pedidos apartados): 5,70 → 6,13. Servido: 5,63 aceptados por paso y ~216 tok/s.
+Partir de un borrador ya ajustado contra otro cuant (noon) daba 5,69 y 217: la misma velocidad dentro
+del ruido entre réplicas, pero con un linaje que depende de otro modelo. Se publica el directo (el
+otro queda en models-cache como `..._dflash2_desde_noon`).
 
-**E4. Receta** (la misma que funcionó contra noon, +7% offline y +14% de tok/s en agente):
+**E4. Receta** (validada antes en otro cuant: +7% offline y +14% de tok/s en agente):
 - LoRA r=64 en las 7 lineales, 1 época, lr 1e-4, lote 32;
 - pérdida 0,9 TV + 0,1 CE contra el top-16;
 - AUF: corta en la primera posición que fallaría, o sea entrena lo que el árbol realmente usa;
@@ -180,15 +182,9 @@ el fc servido durante la captura es exactamente el del borrador final.
 acotado a 5 GB. El tráfico ajeno contamina los contadores de aceptación, que son globales. Con el tope
 de 64 GB, el disco se llenó en minutos.
 
-**E7. Resultado** (banco de 40 pedidos de agente, árbol, 3 réplicas, totales):
-
-| | largo aceptado | tok/s de decode |
-|---|---|---|
-| sin reajustar | 5,58 | 213 |
-| **reajustado** | **5,69** | **217** |
-| referencia: noon + su borrador | 5,67 | 216 |
-
-Empata la velocidad de noon con un modelo que tiene la mitad de error.
+**E7. Resultado** (banco de 40 pedidos de agente, árbol, 3 réplicas, totales): 5,65 / 5,69 / 5,54 →
+**5,63 aceptados por paso**, 218 / 218 / 212 → **~216 tok/s de decode**. Es la misma velocidad que tenía
+el stack anterior (5,67 / 216), sobre un modelo con la mitad de error.
 
 ## F. Ejecución
 

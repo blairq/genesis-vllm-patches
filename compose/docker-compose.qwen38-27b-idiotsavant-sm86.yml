@@ -9,9 +9,9 @@
 #   * Hadamard de 512 antes de down_proj, en linea: PN148 con SK-23 (SiluAndMul + Hadamard +
 #     int8 por token en un kernel, directo a Marlin)
 #   * KL sobre respuestas vs BF16 (vLLM, W4A8): 0,0194 contra 0,0385 de noon
-# Borrador DFlash2 reajustado contra este modelo (LoRA AUF sobre 840 pedidos de agente) y
-# servido en su base original con PN149 (desrota el embedding, rota antes del lm_head).
-# Banco de 40 pedidos de agente con arbol: 5,69 aceptados/paso, 217 tok/s de decode.
+# Borrador DFlash2: el original de Inco ajustado DIRECTO contra este modelo (LoRA AUF sobre 840
+# pedidos de agente) y servido en su base original con PN149 (desrota el embedding, rota antes del
+# lm_head). Banco de 40 pedidos de agente con arbol: 5,63 aceptados/paso, ~216 tok/s de decode.
 #
 # Mismo IP/puerto que el compose de noon (no pueden correr juntos). Cachés JIT propias.
 # Al cambiar de checkpoint, VACIAR /home/usuario/Proyectos/kv-offload (misma ruta).
