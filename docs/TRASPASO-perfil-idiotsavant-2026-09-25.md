@@ -372,14 +372,7 @@ Todas deben dar la **misma salida** (bit a bit o dentro del ruido fp16): verific
 | Realista (la mitad) | **+20–25%** | **+20–25%** |
 
 - **Prefill:** P9 y P10 dan ~−7–9%. P8 (PN136) y P7 (PN135) hay que medirlos sobre idiotSavant antes de estimar.
-- **Orden sugerido:**
-  1. P1 (barato y seguro);
-  2. re-medir PN135 y PN136 sobre idiotSavant (solo flags: cuesta un perfil cada uno);
-  3. P3 junto con el all-reduce int8 de decode (4b);
-  4. P2;
-  5. lm_head W4A8 (4b);
-  6. P4 → P6 → P5;
-  7. P9/P10 cuando haya que tocar prefill.
+- **Orden:** ver la sección 4c, que mezcla mejoras de código y de capas.
 
 ---
 
@@ -399,6 +392,50 @@ todo lo que lee el residuo tiene cresta ~2,7, así que vale la pena revisarlo:
 El criterio es el mismo que en la cuantización: medir la cresta y el error A8 por lineal con
 `entrenamiento/cuant/error_a8.py` y `sensibilidad.py` sobre idiotSavant, y el KL sobre las respuestas. Ver
 `entrenamiento/idiotsavant/DECISIONES.md`.
+
+## 4c. Plan unificado: código y capas del modelo, en un solo orden
+
+Tipos: **código** (kernel o scheduling, salida idéntica), **capa** (cambia cómo se cuantiza o rota una lineal:
+exige KL sobre respuestas y generación larga), **flag** (algo que ya existe, solo se mide).
+
+El criterio es: primero lo barato y seguro; después juntar los cambios que tocan el mismo kernel, para
+reescribirlo una sola vez; y los cambios de capa en tandas, porque cada tanda paga una validación de calidad.
+
+| # | Paso | Tipo | Ahorro (1 / 4 pedidos, prefill) | Costo | Por qué va acá |
+|---|---|---|---|---|---|
+| 1 | **P1:** `_k_escribir` y `_k_salidas` en paralelo | código | −7% / −7% | bajo | el más barato; bit a bit; no depende de nada |
+| 2 | **Re-medir PN135 y PN136** sobre idiotSavant | flag | ? / ? / ? | un perfil cada uno | decide si 8 y 13 son fusiones nuevas o ya están hechas |
+| 3 | **lm_head en W4A8** + **P6:** logits sin AllGather (gumbel-max por rango) | capa + código | −0,7% / −3% | bajo | los dos tocan la misma región (lm_head → muestreo). El lm_head no se re-cuantiza: mismos int4, cambia solo la activación; basta el KL. También acelera el lm_head del borrador |
+| 4 | **P3 + AR int8 en decode:** all-reduce P2P crudo de una pasada, en int8 por grupo | código + capa | −6% / −11% | medio | el mayor de 4 pedidos. Con la cresta de 2,7 el int8 del residuo es seguro (medir KL); int8 = mitad de bytes = menos latencia en el mismo kernel nuevo |
+| 5 | **P2 + Hadamard en o_proj:** reescribir la atención de decode (ocupación de `batch2`, `union4`+`salida` fusionados) y que la **salida escriba la entrada de o_proj ya rotada con Hadamard y en int8** | código + capa | −9% / −11% | medio-alto | `sk18h_salida` hay que reescribirla igual; ahí la Hadamard y el int8 salen gratis y desaparece el `_per_token_quant` antes de o_proj. Exige re-cuantizar o_proj como `W·H` (una etapa de `idiotsavant.py` para 16 capas) |
+| 6 | **Hadamard en out_proj** (GDN): la norma con compuerta escribe la entrada rotada en int8 | capa + código | −0,5% | medio | mismo patrón que el paso 5, del lado GDN; va en la misma tanda de re-cuantización y de KL que o_proj |
+| 7 | **P7:** norma que escribe int8 (SK-20 con g = 1), cableada como SK-23 | código | −2–4% | medio | según lo que dé el paso 2. Con 5–7 hechos, las entradas de todas las lineales ya llegan en int8 desde el kernel anterior |
+| 8 | **in_proj_a/b en int8, concatenadas a in_proj_qkvz** (un solo Marlin) | capa + código | −1% | medio | se va el cutlass fp16 + split-K de cada capa GDN. Son las compuertas: medir la sensibilidad por capa antes; si alguna no aguanta W4, queda fp16 solo esa |
+| 9 | **P4:** armado del árbol y verificación en 1–2 kernels / grafo | código | −5% / −2,5% | medio | independiente del modelo; conviene después de 3, que cambia la verificación |
+| 10 | **Borrador:** GEMM fp16 → W4A8 (rotar sus entradas si la cresta lo pide), atención con KV partida o SK-18h, vocab podado | capa + código | −3% / −3% | medio | todo lo del borrador en una tanda: se valida con la aceptación y, si hace falta, se re-ajusta el DFlash2 con `dflash2.sh` |
+| 11 | **P10:** páginas únicas una vez por paso | código | prefill −1–3% | bajo | puede ir en cualquier momento; es chico |
+| 12 | **Grupo del AR int8 de prefill** 64 → 128/256 | capa (flag) | prefill −1–2% | bajo | menos escalas; la cresta baja lo permite. Mismo KL que el paso 4 |
+| 13 | **PN136 o solape propio** del all-reduce de prefill | código | prefill 0 a −15% | según paso 2 | solo si el paso 2 muestra que el solape esconde la transferencia en idiotSavant |
+| 14 | **P9:** atención de prefill entera sobre KV int8 (SK-18) | código | prefill −6% a 15k, −20% a 64k; pasos mixtos −10–20 ms | alto | el más caro. Primero el intermedio: descuantizar solo las páginas nuevas |
+
+**Tandas de validación de calidad** (KL en respuestas + generación larga + banco de agente):
+- **A:** paso 3 (lm_head) y paso 4 (AR int8 en decode). No re-cuantizan pesos.
+- **B:** pasos 5, 6 y 8. Re-cuantizan o_proj, out_proj e in_proj_a/b: nuevo armado con `idiotsavant.py` (etapa
+  `cuantizar` solo de esas lineales, el resto de la caché sirve) y nuevo informe por capa.
+- **C:** paso 10 (borrador): aceptación y, si baja, re-ajuste.
+
+**Acumulado aproximado** (máximos, sin contar PN135/PN136), paso con 1 pedido / 4 pedidos:
+
+| Hasta el paso | 1 pedido | 4 pedidos |
+|---|---|---|
+| 1 | −7% | −7% |
+| 3 | −8% | −10% |
+| 4 | −14% | −21% |
+| 6 | −24% | −33% |
+| 10 | −35% | −42% |
+
+La mitad realista de eso es **+20–25% de tokens por segundo**. El prefill suma −8–10% con los pasos 11, 12 y 14,
+más lo que diga el paso 2 sobre el solape.
 
 ## 5. Protocolo para cada cambio
 
