@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""analizar_perfil.py <dir_traza> [rank]: el paso de idiotSavant kernel por kernel, capa por capa.
+"""analizar_perfil.py: el paso de idiotSavant kernel por kernel, capa por capa.
+
+Uso:
+  analizar_perfil.py <dir_traza> [rank]            decode (fases decode1/decode4 de perfil_idiotsavant.sh)
+  analizar_perfil.py --prefill <dir_traza> [rank]  prefill (fase prefill): reparto por categoria y por capa
+  analizar_perfil.py --comparar <a.json> <b.json>  A/B de dos analisis (analisis_perfil/*.json)
+Los resultados quedan en tests/bench/medicion/analisis_perfil/<traza>_rank<r>.json.
 
 Lee una traza torch de perfil_idiotsavant.sh y corta cada paso del engine en regiones:
   embedding     vocab_parallel_embedding + su all-reduce (inicio del forward del target)
@@ -204,5 +210,69 @@ def main():
     json.dump(res, open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "analisis_perfil", f"{os.path.basename(d.rstrip('/'))}_rank{rank}.json"), "w"), indent=1, ensure_ascii=False)
 
 
+def prefill(d, rank):
+    """Reparto del prefill: toda la traza por categoria, y cada chunk (64 SK-23) por capa GDN / atencion."""
+    ker = cargar(d, rank)
+    nom = [k["name"] for k in ker]
+    cat = collections.defaultdict(float)
+    for k, n in zip(ker, nom):
+        c = corto(n); g = k["args"].get("grid", [0])[0]
+        if c.startswith("Marlin W4A8"): x = "GEMM (Marlin W4A8)"
+        elif "AllGather" in n or "cross_device" in n or "AllReduce" in n: x = "all-reduce (int8 PN120 + P2P)"
+        elif c == "triton inductor otros" and g in (4400, 8800): x = "all-reduce (int8 PN120 + P2P)"   # (des)cuantizar y sumar del AR int8 con chunks de 1760
+        elif any(t in n for t in ("BatchPrefill", "sk18", "qk_rmsnorm", "fwht", "unified_attention")): x = "atención"
+        elif any(t in n for t in ("chunk_", "merge_16x16", "recompute_w_u", "causal_conv1d", "_fused_post_conv", "solve_tril", "l2norm")): x = "GDN (chunk fla)"
+        elif "Marlin" in c: x = "lm_head"
+        else: x = "normas, cuant, fusiones, resto"
+        cat[x] += k["dur"]
+    t0 = ker[0]["ts"]; t1 = max(k["ts"] + k["dur"] for k in ker)
+    pared, gpu = t1 - t0, union(ker)
+    cat["GPU ociosa"] = pared - gpu
+    sk = [i for i, n in enumerate(nom) if "sk23_silu_had_q8" in n]
+    chunks = []
+    for i in range(0, len(sk) - 63, 64):
+        fw = sk[i:i + 64]
+        a = fw[0]
+        while a > 0 and "embedding" not in nom[a]: a -= 1
+        b = fw[-1]
+        while b < len(nom) - 1 and not es_ar(nom[b]): b += 1
+        chunks.append({"filas": ker[fw[0]]["args"].get("grid", [0])[0],
+                       "ms": (ker[b]["ts"] + ker[b]["dur"] - ker[a]["ts"]) / 1e3})
+    res = {"modo": "prefill", "pared_ms": pared / 1e3, "gpu_ms": gpu / 1e3, "kernels": len(ker),
+           "categorias_ms": {k: v / 1e3 for k, v in sorted(cat.items(), key=lambda kv: -kv[1])}, "chunks": chunks}
+    print(f"{os.path.basename(d.rstrip('/'))} rank{rank}: pared {pared / 1e3:.0f} ms, GPU {gpu / 1e3:.0f} ms, {len(ker)} kernels")
+    for k, v in res["categorias_ms"].items():
+        print(f"  {k:34} {v:8.0f} ms {100 * v * 1e3 / pared:5.1f}%")
+    print("chunks (filas, ms):", [(c["filas"], round(c["ms"])) for c in chunks])
+    json.dump(res, open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "analisis_perfil",
+                                     f"{os.path.basename(d.rstrip('/'))}_rank{rank}.json"), "w"), indent=1, ensure_ascii=False)
+
+
+def comparar(fa, fb):
+    """A/B entre dos analisis del mismo modo: cuanto cambio cada region / categoria."""
+    a, b = json.load(open(fa)), json.load(open(fb))
+    print(f"A = {fa}\nB = {fb}")
+    if a.get("modo") == "prefill":
+        print(f"{'pared ms':34} {a['pared_ms']:9.0f} {b['pared_ms']:9.0f} {100 * (b['pared_ms'] / a['pared_ms'] - 1):+6.1f}%")
+        for k in a["categorias_ms"]:
+            va, vb = a["categorias_ms"][k], b["categorias_ms"].get(k, 0.0)
+            print(f"{k:34} {va:9.0f} {vb:9.0f} {100 * (vb / va - 1) if va else 0:+6.1f}%")
+        return
+    print(f"{'paso (pared us)':34} {a['paso_pared_us']:9.0f} {b['paso_pared_us']:9.0f} {100 * (b['paso_pared_us'] / a['paso_pared_us'] - 1):+6.1f}%")
+    for k in a["regiones"]:
+        va, vb = a["regiones"][k]["pared_us"], b["regiones"].get(k, {}).get("pared_us", 0.0)
+        print(f"{k:34} {va:9.0f} {vb:9.0f} {100 * (vb / va - 1) if va else 0:+6.1f}%")
+    for g in ("capa GDN", "capa atención"):
+        ka = {x["kernel"]: x["us"] for x in a["kernels"][g]}; kb = {x["kernel"]: x["us"] for x in b["kernels"][g]}
+        print(f"-- {g} (us por capa)")
+        for k in sorted(set(ka) | set(kb), key=lambda k: -max(ka.get(k, 0), kb.get(k, 0)))[:12]:
+            print(f"   {k:40} {ka.get(k, 0):8.1f} {kb.get(k, 0):8.1f}")
+
+
 if __name__ == "__main__":
-    main()
+    if sys.argv[1] == "--prefill":
+        prefill(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else "0")
+    elif sys.argv[1] == "--comparar":
+        comparar(sys.argv[2], sys.argv[3])
+    else:
+        main()

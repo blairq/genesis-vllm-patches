@@ -707,7 +707,7 @@
     <p>Cada fila es un cambio que no toca los números del modelo: la salida es la misma, bit a bit o dentro del
       ruido de fp16. El ahorro es lo medido menos el techo del kernel, así que es un máximo. Si todo saliera,
       el paso de un pedido bajaría de 29,7 a ~19,6 ms y el de cuatro de 41,2 a ~25,6 ms. Contando que en la
-      práctica se consigue la mitad: <strong>+20–25% de tokens por segundo en decode y +12–15% en prefill</strong>.</p>
+      práctica se consigue la mitad: <strong>+20–25% de tokens por segundo en decode y ~+8% seguro en prefill</strong> (más si se explica por qué PN136 no ganó).</p>
     <div class="tabla-caja">
       <table class="pipe">
         <thead><tr><th>Palanca</th><th>Qué se mide hoy</th><th class="n">1 pedido</th><th class="n">4 pedidos</th><th class="n">Prefill</th><th>Costo</th></tr></thead>
@@ -732,12 +732,12 @@
             <td class="porq">Se juntan los logits enteros para muestrear; el máximo de logit + ruido gumbel se puede tomar por rango y juntar solo (valor, índice)</td>
             <td class="n">−0,2 ms · 1%</td><td class="n">−0,8 ms · 2%</td><td class="n">—</td><td><span class="chip ch-ok">bajo</span></td></tr>
           <tr><td class="k">7 · Norma que escribe int8<small>SK-20 cableado como SK-23</small></td>
-            <td class="porq">Normas, cuantización y a_scales sueltos: 1,7–1,9 ms por paso</td>
-            <td class="n">−0,6 ms · 2%</td><td class="n">−0,6 ms · 1,5%</td><td class="n">−2%</td><td><span class="chip ch-forma">medio</span></td></tr>
+            <td class="porq">1,7–1,9 ms por paso en kernels de 1–3 µs. Ya existe (PN135): midió +0,4% en decode y +0,7% en prefill punta a punta, y está apagado</td>
+            <td class="n">−0,5%</td><td class="n">−0,5%</td><td class="n">−0,7%</td><td><span class="chip ch-neu">premio chico</span></td></tr>
           <tr class="grupo"><td colspan="6">Prefill</td></tr>
           <tr><td class="k">8 · Solapar el all-reduce<small>mitades del chunk, P2P con 10% de SM</small></td>
-            <td class="porq">22% del prefill, PCIe al ~96% y nada en paralelo. El kernel P2P propio solapó 93% en el banco</td>
-            <td class="n">—</td><td class="n">—</td><td class="n">−12–18%</td><td><span class="chip ch-forma">medio-alto</span></td></tr>
+            <td class="porq">22% del prefill, transferencia real (9 MB a 10,3 GB/s, igual en los dos rangos) y nada en paralelo. Pero PN136, que solapa el del MLP por DMA, midió 0% con noon: hay que reconciliarlo antes de estimar</td>
+            <td class="n">—</td><td class="n">—</td><td class="n">0 a −15%</td><td><span class="chip ch-forma">medio-alto</span></td></tr>
           <tr><td class="k">9 · Atención de prefill entera<small>SK-18 sobre la KV int8</small></td>
             <td class="porq">FlashInfer fp16/f32 (media tasa en GA102) + descuantizar la KV; 10–20 ms por paso mixto</td>
             <td class="n">—</td><td class="n">mixtos</td><td class="n">−6% a 15k · −20% a 64k</td><td><span class="chip ch-forma">alto</span></td></tr>
@@ -771,11 +771,12 @@
       </article>
       <article class="frente">
         <div class="orden">Tercero · el grande en prefill</div>
-        <h3>Solapar el all-reduce</h3>
-        <div class="premio">−12–18% del prefill</div>
-        <p>Partir el chunk en dos y mandar el all-reduce de una mitad mientras se calcula la otra. Con el transporte
-          P2P propio ocupa ~10% de los SM, y las GEMM de prefill ya están limitadas por el reloj, no por los SM.</p>
-        <div class="costo">Costo medio-alto · toca el forward de las dos clases de capa</div>
+        <h3>Atención de prefill sin descuantizar</h3>
+        <div class="premio">−6% a 15k, −20% a 64k, y 10–20 ms por paso mixto</div>
+        <p>SK-18 en el prefill, sobre la KV int8. Mientras tanto, descuantizar solo las páginas nuevas y calcular las
+          páginas únicas una vez por paso, no por capa. El solape del all-reduce (22%) queda como diagnóstico: PN136 ya
+          lo hacía y no ganó con noon.</p>
+        <div class="costo">Costo alto · kernel nuevo; el intermedio es bajo</div>
       </article>
     </div>
   </section>
