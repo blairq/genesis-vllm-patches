@@ -8,6 +8,9 @@ todo para medir si un cambio mejora.
   "El paso medido…" y "Dónde queda margen"). Fuente: `docs/informe-tipos-sm86-2026-09-25.html`.
 - Commit del perfil: `fdddf65`.
 - **Este es un servidor de desarrollo, no hay producción:** se pueden bajar y recrear contenedores para medir.
+- **Regla de esta etapa: todo se vuelve a medir sobre idiotSavant.** Los resultados obtenidos con noon (PN135,
+  PN136, el umbral de PN120, etc.) son hipótesis, no conclusiones. idiotSavant tiene el residuo rotado (cresta
+  ~2,7 contra ~56 de noon) y la norma plegada, así que cambia lo que el int8 aguanta y lo que cuesta cada fusión.
 
 ---
 
@@ -315,18 +318,19 @@ Todas deben dar la **misma salida** (bit a bit o dentro del ruido fp16): verific
 - **Extra:** con 36 filas, el lm_head W4A16 (972 µs) pasa a limitar por cómputo HMMA. Probar W4A8 en el lm_head
   (≈ −0,4 ms), midiendo la calidad.
 
-### P7 · Norma que escribe int8 (PN135 / SK-20) — **~−0,5%, bajo premio**
+### P7 · Norma que escribe int8 (PN135 / SK-20) — **re-medir sobre idiotSavant**
 
-- **Ya existe:** `vllm/_genesis/norm_quant.py`, `kernels/cuda/sk20_norm_quant.cu`. El premio medido punta a
-  punta fue **+0,4% en decode y +0,7% en prefill**, y no está prendido en el compose.
-- En el perfil se ven 1,7–1,9 ms por paso de normas, cuantización y a_scales, pero son kernels de 1–3 µs y fusionar
-  ahorra poco. Solo vale si sale gratis junto con otra cosa (el patrón de SK-23).
+- **Ya existe:** `vllm/_genesis/norm_quant.py`, `kernels/cuda/sk20_norm_quant.cu`. Con noon dio +0,4% en decode y
+  +0,7% en prefill. **En idiotSavant cambia:** el peso de la norma está plegado (g = 1), así que el kernel se
+  simplifica y el patrón de SK-23 (la lineal llama a Marlin directo) permite cablearlo sin pasar el int8 por
+  Python.
+- En el perfil hay 1,7–1,9 ms por paso de normas, cuantización y a_scales (5,9% con 1 pedido). **Techo: −2–4%.**
 
-### P8 · Prefill: solapar el all-reduce — **0 a −15%: hay que reconciliarlo primero**
+### P8 · Prefill: solapar el all-reduce — **0 a −15%: medir PN136 sobre idiotSavant**
 
 - **El perfil:** el all-reduce int8 es 22,3% del prefill, sin solapar (transferencia real, igual en los dos rangos).
 - **Ya existe PN136** (`vllm/_genesis/mlp_solapado.py`, transporte `p2p_buzon.py` por DMA a 13 GB/s y 105% de
-  solape). **Se midió punta a punta con noon y no ganó nada** (2.383 contra 2.390 tok/s a 42k), y quedó apagado.
+  solape). Con noon no ganó (2.383 contra 2.390 tok/s a 42k), pero **eso no vale para idiotSavant**: hay que medirlo de nuevo.
 - **Primera tarea:** perfilar PN136 prendido con idiotSavant (misma fase `prefill`, agregando la variable) y
   ver en la traza si la transferencia realmente queda escondida y dónde reaparece el tiempo. Posibles
   explicaciones a comprobar:
@@ -367,11 +371,34 @@ Todas deben dar la **misma salida** (bit a bit o dentro del ruido fp16): verific
 | Si todo sale al máximo, paso | 29,7 → ~20 ms (+45–50% tok/s) | 41,2 → ~26 ms (+55–60%) |
 | Realista (la mitad) | **+20–25%** | **+20–25%** |
 
-- **Prefill:** P9 y P10 dan ~−7–9% seguro. P8 depende de la reconciliación con PN136.
-- **Orden sugerido:** P1 (barato y seguro) → P3 y P2 (los grandes de decode) → P4 → P6 → P5, con P8
-  (diagnóstico) y P9/P10 en paralelo cuando haya que tocar prefill.
+- **Prefill:** P9 y P10 dan ~−7–9%. P8 (PN136) y P7 (PN135) hay que medirlos sobre idiotSavant antes de estimar.
+- **Orden sugerido:**
+  1. P1 (barato y seguro);
+  2. re-medir PN135 y PN136 sobre idiotSavant (solo flags: cuesta un perfil cada uno);
+  3. P3 junto con el all-reduce int8 de decode (4b);
+  4. P2;
+  5. lm_head W4A8 (4b);
+  6. P4 → P6 → P5;
+  7. P9/P10 cuando haya que tocar prefill.
 
 ---
+
+## 4b. Capas que se pueden alinear mejor ahora que el residuo está rotado
+
+Con noon, el int8 en estas entradas perdía calidad por los picos del residuo. Con la rotación, la entrada de
+todo lo que lee el residuo tiene cresta ~2,7, así que vale la pena revisarlo:
+
+| Capa | Hoy | Propuesta | Por qué ahora | Premio |
+|---|---|---|---|---|
+| **lm_head** del target y del borrador (compartido) | W4A16, HMMA fp16 | **W4A8** (IMMA s8) | lee la salida de la norma final, rotada. Con 36 filas el W4A16 limita por cómputo: 972 µs contra 402 con 9 | −0,5 ms (target) y −0,3 ms (borrador) con 4 pedidos. Medir el KL en la respuesta |
+| **All-reduce de decode** | fp16 (PN120 solo con M ≥ 512) | **int8** también en decode, o grupo más grande en prefill | el residuo rotado tiene cresta baja: el error del int8 por grupo cae mucho respecto de noon | combinado con P3: menos bytes y menos latencia. En prefill, grupo 128/256 = menos escalas |
+| **in_proj_a / in_proj_b** (GDN) | denso fp16 (cutlass + split-K, 6,2 µs por capa) | int8 × int8 o W8A8 | la entrada ya es la norma rotada. Son las compuertas: medir la sensibilidad por capa antes | −0,2 ms por paso; más importante, un kernel menos si se fusiona con in_proj_qkvz |
+| **GEMM fp16 del borrador** (proyección K/V del contexto y otras, 298 µs) | fp16 sin cuantizar | W4A8 | el borrador está en su base original (PN149), así que hay que medir la cresta de sus entradas; si es alta, rotarlas como en el target | −0,2 ms |
+| **o_proj / out_proj** | entrada sin rotar (cresta 12–21, A8 ~2%) | Hadamard online como down_proj (PN148) | el único sitio con error A8 apreciable que queda | calidad, no velocidad (el Hadamard fusionado cuesta ~0) |
+
+El criterio es el mismo que en la cuantización: medir la cresta y el error A8 por lineal con
+`entrenamiento/cuant/error_a8.py` y `sensibilidad.py` sobre idiotSavant, y el KL sobre las respuestas. Ver
+`entrenamiento/idiotsavant/DECISIONES.md`.
 
 ## 5. Protocolo para cada cambio
 
