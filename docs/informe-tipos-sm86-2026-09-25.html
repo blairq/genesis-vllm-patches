@@ -707,7 +707,7 @@
     <p>Cada fila es un cambio que no toca los números del modelo: la salida es la misma, bit a bit o dentro del
       ruido de fp16. El ahorro es lo medido menos el techo del kernel, así que es un máximo. Si todo saliera,
       el paso de un pedido bajaría de 29,7 a ~19,6 ms y el de cuatro de 41,2 a ~25,6 ms. Contando que en la
-      práctica se consigue la mitad: <strong>+20–25% de tokens por segundo en decode y ~+8% seguro en prefill</strong> (más si se explica por qué PN136 no ganó).</p>
+      práctica se consigue la mitad: <strong>+20–25% de tokens por segundo en decode y ~+8% seguro en prefill</strong> (más lo que dé PN136 re-medido sobre idiotSavant).</p>
     <div class="tabla-caja">
       <table class="pipe">
         <thead><tr><th>Palanca</th><th>Qué se mide hoy</th><th class="n">1 pedido</th><th class="n">4 pedidos</th><th class="n">Prefill</th><th>Costo</th></tr></thead>
@@ -732,11 +732,11 @@
             <td class="porq">Se juntan los logits enteros para muestrear; el máximo de logit + ruido gumbel se puede tomar por rango y juntar solo (valor, índice)</td>
             <td class="n">−0,2 ms · 1%</td><td class="n">−0,8 ms · 2%</td><td class="n">—</td><td><span class="chip ch-ok">bajo</span></td></tr>
           <tr><td class="k">7 · Norma que escribe int8<small>SK-20 cableado como SK-23</small></td>
-            <td class="porq">1,7–1,9 ms por paso en kernels de 1–3 µs. Ya existe (PN135): midió +0,4% en decode y +0,7% en prefill punta a punta, y está apagado</td>
-            <td class="n">−0,5%</td><td class="n">−0,5%</td><td class="n">−0,7%</td><td><span class="chip ch-neu">premio chico</span></td></tr>
+            <td class="porq">1,7–1,9 ms por paso en kernels de 1–3 µs. Ya existe (PN135), medido con noon; con la norma plegada de idiotSavant el kernel se simplifica: re-medir</td>
+            <td class="n">−2–4%</td><td class="n">−2–4%</td><td class="n">−2%</td><td><span class="chip ch-forma">re-medir</span></td></tr>
           <tr class="grupo"><td colspan="6">Prefill</td></tr>
           <tr><td class="k">8 · Solapar el all-reduce<small>mitades del chunk, P2P con 10% de SM</small></td>
-            <td class="porq">22% del prefill, transferencia real (9 MB a 10,3 GB/s, igual en los dos rangos) y nada en paralelo. Pero PN136, que solapa el del MLP por DMA, midió 0% con noon: hay que reconciliarlo antes de estimar</td>
+            <td class="porq">22% del prefill, transferencia real (9 MB a 10,3 GB/s, igual en los dos rangos) y nada en paralelo. PN136 ya lo solapa por DMA; con noon no ganó, pero eso no vale para idiotSavant: re-medir</td>
             <td class="n">—</td><td class="n">—</td><td class="n">0 a −15%</td><td><span class="chip ch-forma">medio-alto</span></td></tr>
           <tr><td class="k">9 · Atención de prefill entera<small>SK-18 sobre la KV int8</small></td>
             <td class="porq">FlashInfer fp16/f32 (media tasa en GA102) + descuantizar la KV; 10–20 ms por paso mixto</td>
@@ -751,35 +751,91 @@
         </tbody>
       </table>
     </div>
-    <div class="frentes">
-      <article class="frente mayor">
-        <div class="orden">Primero · el más barato</div>
-        <h3>La cinta y la conv del árbol</h3>
-        <div class="premio">−7% del paso, en los dos casos</div>
-        <p><span class="m">_k_escribir</span> pasa de una grilla <span class="m">(N,)</span> a <span class="m">(N, T−1, H)</span>: cada fila
-          de la cinta es independiente y hoy un solo bloque las escribe en serie. Lo mismo con <span class="m">_k_salidas</span>.
-          No cambia ningún número: se verifica bit a bit.</p>
-        <div class="costo">Costo bajo · dos kernels de Triton</div>
-      </article>
-      <article class="frente">
-        <div class="orden">Segundo · el más grande en decode</div>
-        <h3>Atención de decode y all-reduce</h3>
-        <div class="premio">−15% con 1 pedido, −21% con 4</div>
-        <p>SK-18h con más warps por SM y una salida que no sea de un warp por bloque; y el all-reduce de decode por
-          el P2P crudo, de una sola pasada, que ya midió 11,4 GB/s contra los ~3–6 de NCCL LL con estos tamaños.</p>
-        <div class="costo">Costo medio-alto · dos kernels propios, los dos ya prototipados</div>
-      </article>
-      <article class="frente">
-        <div class="orden">Tercero · el grande en prefill</div>
-        <h3>Atención de prefill sin descuantizar</h3>
-        <div class="premio">−6% a 15k, −20% a 64k, y 10–20 ms por paso mixto</div>
-        <p>SK-18 en el prefill, sobre la KV int8. Mientras tanto, descuantizar solo las páginas nuevas y calcular las
-          páginas únicas una vez por paso, no por capa. El solape del all-reduce (22%) queda como diagnóstico: PN136 ya
-          lo hacía y no ganó con noon.</p>
-        <div class="costo">Costo alto · kernel nuevo; el intermedio es bajo</div>
-      </article>
+</section>
+
+  <section id="mejoras">
+    <h2>Mejoras posibles, en orden</h2>
+    <p>Un solo orden que mezcla dos tipos de cambio. Los de <strong>código</strong> dan la misma salida, bit a bit. Los de
+      <strong>capa</strong> cambian cómo se rota o cuantiza una lineal, y ahora se pueden hacer porque el residuo rotado
+      tiene cresta ~2,7 en vez de ~56. Todo lo que se midió con noon se vuelve a medir sobre idiotSavant.
+      El criterio: primero lo barato y seguro, después juntar los cambios que tocan el mismo kernel, y los de capa en
+      tandas, porque cada tanda paga una validación de calidad.</p>
+    <div class="tabla-caja">
+      <table class="pipe">
+        <thead><tr><th class="n">#</th><th>Paso</th><th>Tipo</th><th class="n">1 pedido</th><th class="n">4 pedidos</th><th>Por qué va acá</th></tr></thead>
+        <tbody>
+          <tr><td class="n">1</td><td class="k">Cinta y conv del árbol en paralelo<small>_k_escribir, _k_salidas</small></td>
+            <td><span class="chip ch-lat">código</span></td><td class="n">−7%</td><td class="n">−7%</td>
+            <td class="porq">El más barato. Un bloque que escribe en serie pasa a una grilla (N, T−1). Se verifica bit a bit.</td></tr>
+          <tr><td class="n">2</td><td class="k">Re-medir PN135 y PN136<small>sobre idiotSavant</small></td>
+            <td><span class="chip ch-neu">flag</span></td><td class="n">?</td><td class="n">?</td>
+            <td class="porq">Ya existen. Un perfil cada uno decide si los pasos 7 y 13 son trabajo nuevo.</td></tr>
+          <tr><td class="n">3</td><td class="k">lm_head en W4A8 + logits sin AllGather<small>gumbel-max por rango</small></td>
+            <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−1%</td><td class="n">−3%</td>
+            <td class="porq">Misma región. El lm_head lee la norma final ya rotada y con 36 filas limita por cómputo en fp16. No se re-cuantiza: mismos int4, basta el KL.</td></tr>
+          <tr><td class="n">4</td><td class="k">All-reduce P2P de una pasada, int8 también en decode</td>
+            <td><span class="chip ch-lat">código</span> <span class="chip ch-cambio">capa</span></td><td class="n">−6%</td><td class="n">−11%</td>
+            <td class="porq">El mayor con 4 pedidos. Con la cresta baja el int8 del residuo es seguro, y la mitad de bytes va en el mismo kernel nuevo.</td></tr>
+          <tr><td class="n">5</td><td class="k">Atención de decode + Hadamard en o_proj<small>la salida escribe int8 rotado</small></td>
+            <td><span class="chip ch-lat">código</span> <span class="chip ch-cambio">capa</span></td><td class="n">−9%</td><td class="n">−11%</td>
+            <td class="porq">sk18h_salida hay que reescribirla igual: ahí la Hadamard y el int8 salen gratis y desaparece la cuantización antes de o_proj. o_proj se re-cuantiza como W·H.</td></tr>
+          <tr><td class="n">6</td><td class="k">Hadamard en out_proj<small>la norma con compuerta escribe int8 rotado</small></td>
+            <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−0,5%</td><td class="n">−0,5%</td>
+            <td class="porq">El mismo patrón del lado GDN, en la misma tanda que o_proj.</td></tr>
+          <tr><td class="n">7</td><td class="k">Norma que escribe int8<small>SK-20 con g = 1, cableada como SK-23</small></td>
+            <td><span class="chip ch-lat">código</span></td><td class="n">−2–4%</td><td class="n">−2–4%</td>
+            <td class="porq">Según el paso 2. Con 5–7 hechos, todas las lineales reciben el int8 del kernel anterior.</td></tr>
+          <tr><td class="n">8</td><td class="k">in_proj_a/b en int8, dentro de in_proj_qkvz<small>un solo Marlin</small></td>
+            <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−1%</td><td class="n">−1%</td>
+            <td class="porq">Se va el cutlass fp16 + split-K de cada capa GDN. Son las compuertas: primero la sensibilidad por capa.</td></tr>
+          <tr><td class="n">9</td><td class="k">Árbol y verificación en 1–2 kernels</td>
+            <td><span class="chip ch-lat">código</span></td><td class="n">−5%</td><td class="n">−2,5%</td>
+            <td class="porq">~110 kernels chicos y la GPU esperando a Python. Después del paso 3, que cambia la verificación.</td></tr>
+          <tr><td class="n">10</td><td class="k">Borrador<small>GEMM W4A8, atención partida, vocab podado</small></td>
+            <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−3%</td><td class="n">−3%</td>
+            <td class="porq">Todo el borrador en una tanda: se valida con la aceptación y, si baja, se re-ajusta con dflash2.sh.</td></tr>
+          <tr class="grupo"><td colspan="6">Prefill</td></tr>
+          <tr><td class="n">11</td><td class="k">Páginas únicas una vez por paso</td><td><span class="chip ch-lat">código</span></td>
+            <td class="n" colspan="2">prefill −1–3%</td><td class="porq">Chico; va en cualquier momento.</td></tr>
+          <tr><td class="n">12</td><td class="k">Grupo del AR int8 de prefill 64 → 128/256</td><td><span class="chip ch-cambio">capa</span></td>
+            <td class="n" colspan="2">prefill −1–2%</td><td class="porq">Menos escalas; la cresta baja lo permite. Mismo KL que el paso 4.</td></tr>
+          <tr><td class="n">13</td><td class="k">Solapar el all-reduce de prefill</td><td><span class="chip ch-lat">código</span></td>
+            <td class="n" colspan="2">prefill 0 a −15%</td><td class="porq">Solo si el paso 2 muestra que PN136 esconde la transferencia en idiotSavant.</td></tr>
+          <tr><td class="n">14</td><td class="k">Atención de prefill entera sobre KV int8</td><td><span class="chip ch-lat">código</span></td>
+            <td class="n" colspan="2">−6% a 15k · −20% a 64k</td><td class="porq">El más caro. Antes, el intermedio: descuantizar solo las páginas nuevas (los pasos mixtos pierden 10–20 ms).</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="dos">
+      <div class="caja">
+        <h3>Tandas de validación de calidad</h3>
+        <ol class="flujo-lista">
+          <li><strong>A, pasos 3 y 4:</strong> no re-cuantizan pesos. KL sobre respuestas y generación larga.</li>
+          <li><strong>B, pasos 5, 6 y 8:</strong> re-cuantizan o_proj, out_proj e in_proj_a/b con <span class="m">idiotsavant.py</span>
+            (solo esas lineales; el resto de la caché sirve) y dan un informe por capa nuevo.</li>
+          <li><strong>C, paso 10:</strong> aceptación del borrador; re-ajuste si baja.</li>
+        </ol>
+        <p class="nota">Los pasos de código se verifican bit a bit contra el camino actual antes de medir velocidad.</p>
+      </div>
+      <div class="caja">
+        <h3>Acumulado, como máximo</h3>
+        <table class="chica">
+          <thead><tr><th>Hasta el paso</th><th class="n">1 pedido</th><th class="n">4 pedidos</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td class="n">−7%</td><td class="n">−7%</td></tr>
+            <tr><td>3</td><td class="n">−8%</td><td class="n">−10%</td></tr>
+            <tr><td>4</td><td class="n">−14%</td><td class="n">−21%</td></tr>
+            <tr><td>6</td><td class="n">−24%</td><td class="n">−33%</td></tr>
+            <tr><td>10</td><td class="n mejor">−35%</td><td class="n mejor">−42%</td></tr>
+          </tbody>
+        </table>
+        <p class="nota">Realista, la mitad: +20–25% de tokens por segundo en decode. El prefill suma −8–10% con los pasos
+          11, 12 y 14, más lo que dé el solape.</p>
+      </div>
     </div>
   </section>
+
 
   <footer>
     <span>Modelos: <a href="https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86">BlairQ/qwen3.8_27b_idiotSavant_sm_86</a> ·
