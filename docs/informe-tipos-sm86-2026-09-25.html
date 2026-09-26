@@ -4,7 +4,7 @@
   :root {
     --fondo: #f7f6f3; --panel: #ffffff; --panel2: #f1efea; --tinta: #15181c; --tinta2: #5b6169;
     --linea: #ddd9d1; --acento: #b25419; --frio: #2b6b78; --ok: #4a7c3f; --aviso: #9a6b12;
-    --violeta: #6b4a86; --gris: #a39e94;
+    --violeta: #6b4a86; --gris: #a39e94; --rojo: #c0392b;
     --sombra: 0 1px 2px rgba(20,23,28,.06), 0 8px 24px -16px rgba(20,23,28,.25);
     --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
     --cuerpo: "Source Serif 4", Georgia, "Times New Roman", serif;
@@ -15,7 +15,7 @@
       color-scheme: dark;
       --fondo: #0e1114; --panel: #161a1f; --panel2: #1b2027; --tinta: #e8ecf1; --tinta2: #9aa3ad;
       --linea: #252b33; --acento: #e08a4e; --frio: #5fb3c4; --ok: #82c06f; --aviso: #d9ad4a;
-      --violeta: #b394cf; --gris: #4d555f;
+      --violeta: #b394cf; --gris: #4d555f; --rojo: #d9574a;
       --sombra: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -20px rgba(0,0,0,.8);
     }
   }
@@ -23,7 +23,7 @@
     color-scheme: dark;
     --fondo: #0e1114; --panel: #161a1f; --panel2: #1b2027; --tinta: #e8ecf1; --tinta2: #9aa3ad;
     --linea: #252b33; --acento: #e08a4e; --frio: #5fb3c4; --ok: #82c06f; --aviso: #d9ad4a;
-    --violeta: #b394cf; --gris: #4d555f;
+    --violeta: #b394cf; --gris: #4d555f; --rojo: #d9574a;
     --sombra: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px -20px rgba(0,0,0,.8);
   }
   * { box-sizing: border-box; }
@@ -207,6 +207,10 @@
   ol.flujo-lista { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
   ol.flujo-lista li { max-width: 74ch; }
   ol.flujo-lista li::marker { font-family: var(--dato); color: var(--frio); font-size: 13px; }
+  .s-gemm { background: var(--ok); } .s-att { background: var(--violeta); } .s-ar { background: var(--frio); }
+  .s-gdn { background: var(--aviso); } .s-borr { background: var(--acento); } .s-ocio { background: var(--rojo); }
+  .s-resto { background: var(--gris); }
+  .leyenda i.s-gemm, .leyenda i.s-att, .leyenda i.s-ar, .leyenda i.s-gdn, .leyenda i.s-borr, .leyenda i.s-ocio, .leyenda i.s-resto { display: inline-block; }
 </style>
 
 <div class="marco">
@@ -418,7 +422,7 @@
 
   <section>
     <h2>El pipeline, operación por operación</h2>
-    <p>Los porcentajes son de las trazas del 20 y 21-09 (con noon). Con idiotSavant los pasos por segundo quedaron
+    <p>Los porcentajes de esta tabla son de las trazas del 20 y 21-09 (con noon); el perfil nuevo, con idiotSavant y a 62k de contexto, está <a href="#perfil">más abajo</a>. Con idiotSavant los pasos por segundo quedaron
       iguales, así que el reparto se mantiene; lo que cambió es el tipo de dato de las filas marcadas con la raya verde.</p>
     <div class="tabla-caja">
       <table class="pipe">
@@ -526,6 +530,142 @@
       <span class="m">&lt;float16, uint4b8, float16, float16&gt;</span> para el lm_head.</p>
   </section>
 
+  <section id="perfil">
+    <h2>El paso medido, capa por capa y kernel por kernel</h2>
+    <p>Trazas del 25-09 sobre el stack que sirve hoy (idiotSavant + DFlash2 + árbol de 8 nodos, compose de
+      producción en una instancia aislada, sin tráfico ajeno), con el profiler de torch en los dos rangos.
+      Tres cargas: <strong>un pedido</strong> con 62k de contexto (9 filas por paso: la raíz y 8 nodos),
+      <strong>cuatro pedidos</strong> de ~15k (36 filas) y un <strong>prefill frío</strong> de 15,4k en
+      chunks de 1760. Cada paso se corta en regiones con SK-23 como ancla: corre una vez por capa del target y
+      cada capa termina en el all-reduce que sigue a su down_proj. Los dos rangos dan lo mismo con una
+      diferencia de 0,1%, así que el desbalance de TP no aparece acá.</p>
+    <div class="cifras">
+      <div><span>Decode · 1 pedido · 62k</span><b>29,7 ms</b><span class="antes">por paso · GPU ocupada 92%</span></div>
+      <div><span>Decode · 4 pedidos · ~15k</span><b>41,2 ms</b><span class="antes">por paso · GPU ocupada 95%</span></div>
+      <div><span>Prefill · 15,4k frío</span><b>2.730 tok/s</b><span class="antes">con profiler · GPU ocupada 94%</span></div>
+      <div><span>Capas, entre sí</span><b>±1%</b><span class="antes">GDN 297–303 µs · atención 550–559 µs</span></div>
+    </div>
+
+    <h3>A dónde va el tiempo</h3>
+    <div class="compo">
+      <div class="fila-compo"><span class="et">1 pedido</span>
+        <div class="barra">
+          <span class="s-gemm" style="width:30.2%" title="GEMM del target, Marlin W4A8: 30,2%">30%</span>
+          <span class="s-att" style="width:18.3%" title="Atención SK-18: 18,3%">18%</span>
+          <span class="s-ar" style="width:11.7%" title="All-reduce del target: 11,7%">12%</span>
+          <span class="s-gdn" style="width:12.1%" title="GDN: recurrencia del árbol 10,1% + in_proj_a/b y copias 2,0%">12%</span>
+          <span class="s-borr" style="width:10.2%" title="Borrador DFlash2: 10,2%">10%</span>
+          <span class="s-ocio" style="width:8.4%" title="GPU ociosa: 8,4%">8%</span>
+          <span class="s-resto" style="width:9.1%" title="Normas, cuantización y fusiones 5,9% · lm_head + gather 2,1% · verificación y árbol 1,1%">9%</span>
+        </div></div>
+      <div class="fila-compo"><span class="et">4 pedidos</span>
+        <div class="barra">
+          <span class="s-gemm" style="width:26.3%" title="GEMM del target: 26,3%">26%</span>
+          <span class="s-att" style="width:17.3%" title="Atención SK-18: 17,3%">17%</span>
+          <span class="s-ar" style="width:19.2%" title="All-reduce del target: 19,2%">19%</span>
+          <span class="s-gdn" style="width:12.6%" title="GDN: recurrencia 10,5% + otros 2,1%">13%</span>
+          <span class="s-borr" style="width:9.9%" title="Borrador: 9,9%">10%</span>
+          <span class="s-ocio" style="width:4.9%" title="GPU ociosa: 4,9%">5%</span>
+          <span class="s-resto" style="width:9.8%" title="Normas y cuantización 4,7% · lm_head + gather 4,4% · verificación y árbol 1,0%">10%</span>
+        </div></div>
+      <div class="fila-compo"><span class="et">prefill</span>
+        <div class="barra">
+          <span class="s-gemm" style="width:48.6%" title="GEMM Marlin W4A8: 48,6%">49%</span>
+          <span class="s-att" style="width:11.6%" title="Atención (FlashInfer fp16 + descuantizar la KV): 11,6%">12%</span>
+          <span class="s-ar" style="width:22.3%" title="All-reduce int8 (PN120), con su cuantización y suma: 22,3%">22%</span>
+          <span class="s-gdn" style="width:4.5%" title="GDN chunk (fla): 4,5%">4%</span>
+          <span class="s-ocio" style="width:6.4%" title="GPU ociosa: 6,4%">6%</span>
+          <span class="s-resto" style="width:6.6%" title="Normas, cuantización, fusiones, lm_head: 6,6%">7%</span>
+        </div></div>
+      <div class="leyenda">
+        <span><i class="s-gemm"></i>GEMM del target</span><span><i class="s-att"></i>atención</span>
+        <span><i class="s-ar"></i>all-reduce</span><span><i class="s-gdn"></i>GDN</span>
+        <span><i class="s-borr"></i>borrador</span><span><i class="s-ocio"></i>GPU ociosa</span><span><i class="s-resto"></i>resto</span>
+      </div>
+    </div>
+    <p class="nota">Las GEMM del target son el piso: 30% del paso con un pedido y ya al techo de DRAM (gate_up lee
+      44,6 MB en 60,5 µs, 737 GB/s). El lm_head también está en el techo (318 MB en 402 µs). Todo lo demás, 70%
+      del paso, está lejos de su techo.</p>
+
+    <h3>Una capa, kernel por kernel (1 pedido, 9 filas)</h3>
+    <div class="dos">
+      <div class="tabla-caja">
+        <table class="chica">
+          <thead><tr><th>GDN · 300 µs</th><th>Tipo</th><th class="n" style="text-transform:none">µs</th><th>Techo</th></tr></thead>
+          <tbody>
+            <tr><td class="k">RMSNorm + residuo, int8</td><td class="flujo">fp16 → f32 → int8</td><td class="n">5,6</td><td><span class="chip ch-neu">fusionable</span></td></tr>
+            <tr><td class="k">in_proj_a/b<small>cutlass + split-K</small></td><td class="flujo">fp16 HMMA</td><td class="n">6,2</td><td><span class="chip ch-neu">menor</span></td></tr>
+            <tr><td class="k">in_proj_qkvz<small>Marlin, 21 MB</small></td><td class="flujo">int8 × int4 → s32</td><td class="n">33,4</td><td><span class="chip ch-ok">techo</span></td></tr>
+            <tr><td class="k">conv del árbol<small>_k_salidas, 5 bloques</small></td><td class="flujo">f32 → fp16</td><td class="n">9,0</td><td><span class="chip ch-marg">latencia</span></td></tr>
+            <tr><td class="k">copias de torch</td><td class="flujo">fp16</td><td class="n">6,6</td><td><span class="chip ch-marg">sobra</span></td></tr>
+            <tr><td class="k">recurrencia<small>_k_spec_arbol, 96 bloques</small></td><td class="flujo">fp16 → f32</td><td class="n">18,7</td><td><span class="chip ch-marg">~2×</span></td></tr>
+            <tr><td class="k">cinta del rollback<small>_k_escribir, 1 bloque</small></td><td class="flujo">f32 → f32</td><td class="n">34,7</td><td><span class="chip ch-marg">~10×</span></td></tr>
+            <tr><td class="k">norma con compuerta + int8</td><td class="flujo">f32 → int8</td><td class="n">5,2</td><td><span class="chip ch-neu">fusionable</span></td></tr>
+            <tr><td class="k">out_proj<small>Marlin</small></td><td class="flujo">int8 × int4</td><td class="n">15,6</td><td><span class="chip ch-ok">techo</span></td></tr>
+            <tr><td class="k">all-reduce<small>NCCL LL, 92 KB</small></td><td class="flujo">fp16</td><td class="n">46,0</td><td><span class="chip ch-lat">latencia</span></td></tr>
+            <tr><td class="k">RMSNorm + residuo, int8</td><td class="flujo">fp16 → int8</td><td class="n">6,5</td><td><span class="chip ch-neu">fusionable</span></td></tr>
+            <tr><td class="k">gate_up<small>Marlin, 44,6 MB</small></td><td class="flujo">int8 × int4</td><td class="n">60,5</td><td><span class="chip ch-ok">techo</span></td></tr>
+            <tr><td class="k">SK-23</td><td class="flujo">fp16 → f32 → int8</td><td class="n">5,0</td><td><span class="chip ch-ok">hecho</span></td></tr>
+            <tr><td class="k">down_proj<small>Marlin</small></td><td class="flujo">int8 × int4</td><td class="n">32,4</td><td><span class="chip ch-ok">techo</span></td></tr>
+            <tr><td class="k">all-reduce</td><td class="flujo">fp16</td><td class="n">27,1</td><td><span class="chip ch-lat">latencia</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tabla-caja">
+        <table class="chica">
+          <thead><tr><th>Atención · 554 µs</th><th>Tipo</th><th class="n" style="text-transform:none">µs</th><th>Techo</th></tr></thead>
+          <tbody>
+            <tr><td class="k">RMSNorm + residuo, int8</td><td class="flujo">fp16 → int8</td><td class="n">7,0</td><td><span class="chip ch-neu">fusionable</span></td></tr>
+            <tr><td class="k">qkv<small>Marlin</small></td><td class="flujo">int8 × int4</td><td class="n">28,0</td><td><span class="chip ch-ok">techo</span></td></tr>
+            <tr><td class="k">norma q/k + RoPE + compuerta</td><td class="flujo">fp16 → f32 → fp16</td><td class="n">2,9</td><td><span class="chip ch-ok">fusionado</span></td></tr>
+            <tr><td class="k">escribir KV + preparar q<small>sk18h_escribir2, prep2</small></td><td class="flujo">fp16 → int8</td><td class="n">7,6</td><td><span class="chip ch-ok">bien</span></td></tr>
+            <tr><td class="k">atención<small>sk18h_batch2, 63 MB de KV</small></td><td class="flujo">int8 IMMA</td><td class="n">284,4</td><td><span class="chip ch-marg">35% DRAM</span></td></tr>
+            <tr><td class="k">unir particiones<small>sk18h_union4</small></td><td class="flujo">f32</td><td class="n">30,0</td><td><span class="chip ch-marg">sobra</span></td></tr>
+            <tr><td class="k">salida<small>sk18h_salida, 1 warp por bloque</small></td><td class="flujo">f32 → fp16</td><td class="n">16,5</td><td><span class="chip ch-marg">latencia</span></td></tr>
+            <tr><td class="k">o_proj<small>Marlin</small></td><td class="flujo">int8 × int4</td><td class="n">16,0</td><td><span class="chip ch-ok">techo</span></td></tr>
+            <tr><td class="k">all-reduce</td><td class="flujo">fp16</td><td class="n">47,9</td><td><span class="chip ch-lat">latencia</span></td></tr>
+            <tr><td class="k">MLP completa<small>norma, gate_up, SK-23, down</small></td><td class="flujo">int8 × int4</td><td class="n">104,6</td><td><span class="chip ch-ok">techo</span></td></tr>
+            <tr><td class="k">all-reduce</td><td class="flujo">fp16</td><td class="n">27,2</td><td><span class="chip ch-lat">latencia</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="nota">La atención de decode lee 63 MB de KV int8 por capa y rango (62k × 2 cabezas × 256 × K y V) en
+      284 µs: 224 GB/s, el 35% de lo que da la placa capada. Corre con un bloque de 4 warps por SM (254 registros,
+      77 KB de memoria compartida), y el ancho de banda lo fijan los warps por SM. Con 4 pedidos, <span class="m">sk18h_salida</span>
+      sube a 84 µs por capa: 432 bloques de un solo warp.</p>
+
+    <h3>Fuera de las capas</h3>
+    <div class="tabla-caja">
+      <table class="chica">
+        <thead><tr><th>Región</th><th class="n">1 pedido</th><th class="n">4 pedidos</th><th>Qué hay adentro</th></tr></thead>
+        <tbody>
+          <tr><td class="k">lm_head + gather de logits</td><td class="n">644 µs</td><td class="n">1.841 µs</td>
+            <td class="porq">Marlin W4A16, 402 µs en el techo con 9 filas, pero 972 µs con 36 (HMMA fp16 pasa a limitar por cómputo).
+              Después, un AllGather de los logits completos del vocabulario: 220 y 844 µs.</td></tr>
+          <tr><td class="k">verificación</td><td class="n">453 µs</td><td class="n">556 µs</td>
+            <td class="porq">Muestreo gumbel, rechazo, compactar, estado mamba: 82 µs de GPU, el resto es la GPU esperando a Python.</td></tr>
+          <tr><td class="k">borrador: 5 capas</td><td class="n">3.306 µs</td><td class="n">3.992 µs</td>
+            <td class="porq">Atención Triton <span class="m">kernel_unified_attention</span> sobre todo el contexto: 1.014 µs con
+              <strong>12 bloques</strong> en 82 SM (sin partir la KV). GEMM fp16 sin cuantizar 298 µs, all-reduce 320–695 µs, 734 µs ociosa.</td></tr>
+          <tr><td class="k">borrador: lm_head + top-k</td><td class="n">468 µs</td><td class="n">796 µs</td>
+            <td class="porq">El lm_head entero (248k) para quedarse con 16 candidatos por posición.</td></tr>
+          <tr><td class="k">árbol + preparar el paso</td><td class="n">964 µs</td><td class="n">489 µs</td>
+            <td class="porq">~110 kernels de torch de 1–3 µs lanzados desde Python: 235 µs de GPU, el resto esperando.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Prefill, un chunk de 1760</h3>
+    <p>Un chunk tarda 575–650 ms. Las GEMM son la mitad y están al 90% del pico int8 a los 810 MHz del cap de 220 W
+      (gate_up: 314 GOP en 2,55 ms, 123 TOPS). El all-reduce int8 es 22%: dos por capa de ~0,95 ms cada uno,
+      9 MB por PCIe a ~10,5 GB/s, sin solapar con nada. La atención de prefill (FlashInfer fp16 con acumulador f32,
+      media tasa en GA102) es 11,6% a 15k, más 0,5 ms por capa de GPU ociosa en su preparación (sort y unique en el host).</p>
+    <p class="nota">En los pasos mixtos (un pedido en prefill mientras otros decodifican), <span class="m">sk18h_decuant</span>
+      descuantiza la KV a fp16 antes de FlashInfer: 0,6–1,3 ms por capa de atención, 10–20 ms por paso. En un prefill solo
+      son 0,14 ms. Es el patrón de opencode: subagentes que entran mientras el hilo principal genera.</p>
+  </section>
+
   <section id="borrador">
     <h2>El borrador: qwen3.8_27b_idiotSavant_sm_86_dflash2</h2>
     <p>Es el DFlash2 de Inco (5 capas, bloque de 8, selector top-16 para el árbol) ajustado directo contra idiotSavant
@@ -562,33 +702,80 @@
     </div>
   </section>
 
-  <section>
-    <h2>Lo que queda, por premio</h2>
+  <section id="margen">
+    <h2>Dónde queda margen, y cuánto</h2>
+    <p>Cada fila es un cambio que no toca los números del modelo: la salida es la misma, bit a bit o dentro del
+      ruido de fp16. El ahorro es lo medido menos el techo del kernel, así que es un máximo. Si todo saliera,
+      el paso de un pedido bajaría de 29,7 a ~19,6 ms y el de cuatro de 41,2 a ~25,6 ms. Contando que en la
+      práctica se consigue la mitad: <strong>+20–25% de tokens por segundo en decode y +12–15% en prefill</strong>.</p>
+    <div class="tabla-caja">
+      <table class="pipe">
+        <thead><tr><th>Palanca</th><th>Qué se mide hoy</th><th class="n">1 pedido</th><th class="n">4 pedidos</th><th class="n">Prefill</th><th>Costo</th></tr></thead>
+        <tbody>
+          <tr class="grupo"><td colspan="6">Decode</td></tr>
+          <tr><td class="k">1 · Atención de decode<small>SK-18h: ocupación y salida</small></td>
+            <td class="porq">batch2 al 35% de DRAM con 4 warps por SM; salida con bloques de 1 warp (84 µs con 4 pedidos)</td>
+            <td class="n">−2,8 ms · 9%</td><td class="n">−4,1 ms · 10%</td><td class="n">—</td><td><span class="chip ch-forma">medio-alto</span></td></tr>
+          <tr><td class="k">2 · All-reduce de decode<small>P2P crudo de una pasada</small></td>
+            <td class="porq">NCCL LL: 26 µs por 92 KB, 61 µs por 369 KB, ×128 por paso. El kernel P2P propio llegó a 11,4 GB/s</td>
+            <td class="n">−1,8 ms · 6%</td><td class="n">−4,6 ms · 11%</td><td class="n">—</td><td><span class="chip ch-forma">medio</span></td></tr>
+          <tr><td class="k">3 · Recurrencia del árbol GDN<small>_k_escribir, _k_salidas, _k_spec_arbol</small></td>
+            <td class="porq">La cinta en 1 bloque que recorre 8 tokens × 8 cabezas en serie (34 µs para 33 KB); la conv en 5 bloques</td>
+            <td class="n">−2,2 ms · 7%</td><td class="n">−2,8 ms · 7%</td><td class="n">—</td><td><span class="chip ch-ok">bajo</span></td></tr>
+          <tr><td class="k">4 · GPU ociosa entre fases<small>verificación, borrador, árbol</small></td>
+            <td class="porq">2,0–2,5 ms por paso esperando a Python; ~110 kernels de torch de 1–3 µs en el armado del árbol</td>
+            <td class="n">−1,5 ms · 5%</td><td class="n">−1,0 ms · 2,5%</td><td class="n">—</td><td><span class="chip ch-forma">medio</span></td></tr>
+          <tr><td class="k">5 · Borrador<small>atención partida, W4A8, vocab podado</small></td>
+            <td class="porq">Atención con 12 bloques (1 ms); GEMM fp16 (0,3 ms); lm_head entero para 16 candidatos (0,4–0,7 ms)</td>
+            <td class="n">−1,0 ms · 3%</td><td class="n">−1,3 ms · 3%</td><td class="n">—</td><td><span class="chip ch-forma">medio</span></td></tr>
+          <tr><td class="k">6 · Logits sin AllGather<small>gumbel-max local por rango</small></td>
+            <td class="porq">Se juntan los logits enteros para muestrear; el máximo de logit + ruido gumbel se puede tomar por rango y juntar solo (valor, índice)</td>
+            <td class="n">−0,2 ms · 1%</td><td class="n">−0,8 ms · 2%</td><td class="n">—</td><td><span class="chip ch-ok">bajo</span></td></tr>
+          <tr><td class="k">7 · Norma que escribe int8<small>SK-20 cableado como SK-23</small></td>
+            <td class="porq">Normas, cuantización y a_scales sueltos: 1,7–1,9 ms por paso</td>
+            <td class="n">−0,6 ms · 2%</td><td class="n">−0,6 ms · 1,5%</td><td class="n">−2%</td><td><span class="chip ch-forma">medio</span></td></tr>
+          <tr class="grupo"><td colspan="6">Prefill</td></tr>
+          <tr><td class="k">8 · Solapar el all-reduce<small>mitades del chunk, P2P con 10% de SM</small></td>
+            <td class="porq">22% del prefill, PCIe al ~96% y nada en paralelo. El kernel P2P propio solapó 93% en el banco</td>
+            <td class="n">—</td><td class="n">—</td><td class="n">−12–18%</td><td><span class="chip ch-forma">medio-alto</span></td></tr>
+          <tr><td class="k">9 · Atención de prefill entera<small>SK-18 sobre la KV int8</small></td>
+            <td class="porq">FlashInfer fp16/f32 (media tasa en GA102) + descuantizar la KV; 10–20 ms por paso mixto</td>
+            <td class="n">—</td><td class="n">mixtos</td><td class="n">−6% a 15k · −20% a 64k</td><td><span class="chip ch-forma">alto</span></td></tr>
+          <tr><td class="k">10 · Preparación de la atención<small>sort y unique en el host</small></td>
+            <td class="porq">0,5 ms por capa de atención y chunk con la GPU parada</td>
+            <td class="n">—</td><td class="n">—</td><td class="n">−1–3%</td><td><span class="chip ch-ok">bajo</span></td></tr>
+          <tr class="grupo"><td colspan="6">Piso</td></tr>
+          <tr><td class="k">GEMM del target y lm_head</td>
+            <td class="porq">Decode al techo de DRAM (98–103%); prefill al 90% del pico int8 con el cap de 220 W. Solo se mueven con menos bits o sin cap (+19,5% de prefill medido)</td>
+            <td class="n">9,6 ms</td><td class="n">11,8 ms</td><td class="n">49%</td><td><span class="chip ch-neu">no es código</span></td></tr>
+        </tbody>
+      </table>
+    </div>
     <div class="frentes">
       <article class="frente mayor">
-        <div class="orden">El grande · prefill largo</div>
-        <h3>Atención de prefill entera</h3>
-        <div class="premio">12,8% del prefill corto, 40% a 100k</div>
-        <p>SK-18f en el camino de prefill: QKᵀ en IMMA s8 sobre la KV int8, sin descuantizar. Ya empataba a
-          FlashInfer a 16k y le ganaba 1,3× a 57k, el largo real de opencode.</p>
-        <div class="costo">Costo alto · kernel nuevo en el camino de prefill</div>
+        <div class="orden">Primero · el más barato</div>
+        <h3>La cinta y la conv del árbol</h3>
+        <div class="premio">−7% del paso, en los dos casos</div>
+        <p><span class="m">_k_escribir</span> pasa de una grilla <span class="m">(N,)</span> a <span class="m">(N, T−1, H)</span>: cada fila
+          de la cinta es independiente y hoy un solo bloque las escribe en serie. Lo mismo con <span class="m">_k_salidas</span>.
+          No cambia ningún número: se verifica bit a bit.</p>
+        <div class="costo">Costo bajo · dos kernels de Triton</div>
       </article>
       <article class="frente">
-        <div class="orden">El barato · decode</div>
-        <h3>Paralelizar <span class="m">_k_escribir</span></h3>
-        <div class="premio">~7% del paso con un pedido</div>
-        <p>Grilla de <span class="m">(N,)</span> a <span class="m">(N, T−1, H)</span>. Cada fila de la cinta es independiente:
-          no cambia ningún número.</p>
-        <div class="costo">Costo bajo · un kernel de Triton, verificable bit a bit</div>
+        <div class="orden">Segundo · el más grande en decode</div>
+        <h3>Atención de decode y all-reduce</h3>
+        <div class="premio">−15% con 1 pedido, −21% con 4</div>
+        <p>SK-18h con más warps por SM y una salida que no sea de un warp por bloque; y el all-reduce de decode por
+          el P2P crudo, de una sola pasada, que ya midió 11,4 GB/s contra los ~3–6 de NCCL LL con estos tamaños.</p>
+        <div class="costo">Costo medio-alto · dos kernels propios, los dos ya prototipados</div>
       </article>
       <article class="frente">
-        <div class="orden">El de fusión · lo que SK-23 dejó afuera</div>
-        <h3>RMSNorm que escribe int8</h3>
-        <div class="premio">~2–3% del decode</div>
-        <p>SK-20 ya fusiona residuo + norma + int8. El patrón de SK-23 (la lineal llama a Marlin directo, sin pasar
-          el int8 por Python) es lo que faltaba para cablearlo sin romper torch.compile. Con el peso de la norma plegado,
-          la norma queda más simple.</p>
-        <div class="costo">Costo medio · mismo camino que SK-23</div>
+        <div class="orden">Tercero · el grande en prefill</div>
+        <h3>Solapar el all-reduce</h3>
+        <div class="premio">−12–18% del prefill</div>
+        <p>Partir el chunk en dos y mandar el all-reduce de una mitad mientras se calcula la otra. Con el transporte
+          P2P propio ocupa ~10% de los SM, y las GEMM de prefill ya están limitadas por el reloj, no por los SM.</p>
+        <div class="costo">Costo medio-alto · toca el forward de las dos clases de capa</div>
       </article>
     </div>
   </section>
@@ -600,7 +787,7 @@
       <span class="m">entrenamiento/idiotsavant/</span> con DECISIONES.md).</span>
     <span>Mediciones: error de A8 por lineal (error_a8.py), sensibilidad por capa (sensibilidad.py, 25-09), fidelidad
       servida en 48 ventanas, A/B de SK-23 con 2 arranques por brazo, banco de 40 pedidos de agente con árbol.
-      Reparto de tiempo: trazas decode_sync (21-09) y pp_thr1760 (20-09).</span>
+      Reparto de tiempo: trazas decode_sync (21-09) y pp_thr1760 (20-09); perfil del 25-09: is25_decode1, is25_decode4 e is25_prefill (tests/bench/medicion/perfil_idiotsavant.sh y analizar_perfil.py).</span>
     <span>Literatura: QuaRot 2404.00456 · SpinQuant 2405.16406 · MambaQuant 2501.13484 · KL-lens para híbridos 2604.13440 ·
       QServe 2405.04532 · OptRot 2512.24124.</span>
     <span>Servidor: <span class="m">genesis-27b-idiotsavant</span>, vLLM 0.29.0, TP=2 en dos RTX 3090.</span>
