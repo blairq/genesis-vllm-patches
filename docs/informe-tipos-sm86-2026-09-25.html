@@ -340,6 +340,65 @@
       capas culpables (las 8 peores suman el 22%), así que no hay precisión mixta. La capa 63 es la más sensible.</p>
   </section>
 
+
+  <section>
+    <h2>Lo que dice el armado, capa por capa</h2>
+    <p>El script que reconstruye el modelo deja un informe de cada capa (<span class="m">informe_idiotsavant.json</span>, publicado
+      con el modelo). Estas son sus tres lecturas.</p>
+
+    <h3>La cresta de las entradas del residuo</h3>
+    <p>Máximo sobre rms por token, en la mediana de los tokens de calibración, para la entrada de la atención y la de la
+      MLP de cada capa. Sin rotar arranca en ~71 y baja con la profundidad; rotada queda entre 2,6 y 4,1 en todas. La
+      capa 0 es la excepción en la entrada de la atención (6,7): la activación masiva recién la crea su MLP.</p>
+    <div class="grafico">
+      <svg id="g-cresta" viewBox="0 0 960 250" role="img" aria-label="Cresta por capa de las entradas del residuo, sin rotar y rotada"></svg>
+      <div class="ley">
+        <span><i style="background: var(--acento)"></i>sin rotar · atención</span>
+        <span><i style="background: var(--aviso)"></i>sin rotar · MLP</span>
+        <span><i style="background: var(--ok)"></i>rotada · atención y MLP (casi superpuestas)</span>
+      </div>
+    </div>
+
+    <h3>El error local de cada capa servida</h3>
+    <p>Error de la salida de la capa ya en su forma servible (pesos int4 rotados, normas plegadas, Hadamard en
+      down_proj) sobre las muestras apartadas de la calibración, relativo a lo que la capa agrega al residuo. Es el
+      error de los pesos; el de A8 se mide aparte. Mediana 10,3% en las GatedDeltaNet y 9,2% en las de atención.</p>
+    <div class="grafico">
+      <svg id="g-error" viewBox="0 0 960 230" role="img" aria-label="Error local por capa del modelo servido"></svg>
+      <div class="ley">
+        <span><i style="background: var(--frio)"></i>GatedDeltaNet</span>
+        <span><i style="background: var(--violeta)"></i>atención completa</span>
+        <span>▼ capa 7: el canal 3994 con g = 0 (la Hessiana se toma antes de la norma)</span>
+      </div>
+    </div>
+    <p class="nota">El error local orienta pero no decide: su correlación con el KL que causa cada capa es 0,6. La capa 0
+      tiene el menor error (0,9%) porque lo que agrega al residuo es grande comparado con su error; la 63 tiene 5,3% de
+      error y es la más sensible del modelo.</p>
+
+    <h3>El error int4 de los pesos, por tipo de lineal</h3>
+    <div class="tabla-caja">
+      <table class="chica" style="min-width:620px">
+        <thead><tr><th>Lineal</th><th>Rol</th><th class="n">capas</th><th class="n">mediana</th><th class="n">mínimo</th><th class="n">peor</th></tr></thead>
+        <tbody>
+<tr><td class="k">q_proj</td><td class="porq">lee el residuo</td><td class="n">16</td><td class="n">12.8%</td><td class="n">12.4%</td><td class="n">13.1% <span class="nota">(capa 55)</span></td></tr>
+<tr><td class="k">k_proj</td><td class="porq">lee el residuo</td><td class="n">16</td><td class="n">12.8%</td><td class="n">12.4%</td><td class="n">13.1% <span class="nota">(capa 55)</span></td></tr>
+<tr><td class="k">v_proj</td><td class="porq">lee el residuo</td><td class="n">16</td><td class="n">12.8%</td><td class="n">12.4%</td><td class="n">13.1% <span class="nota">(capa 55)</span></td></tr>
+<tr><td class="k">in_proj_qkv</td><td class="porq">lee el residuo</td><td class="n">48</td><td class="n">12.7%</td><td class="n">11.9%</td><td class="n">14.4% <span class="nota">(capa 0)</span></td></tr>
+<tr><td class="k">in_proj_z</td><td class="porq">lee el residuo</td><td class="n">48</td><td class="n">12.7%</td><td class="n">11.9%</td><td class="n">14.4% <span class="nota">(capa 0)</span></td></tr>
+<tr><td class="k">o_proj</td><td class="porq">escribe el residuo</td><td class="n">16</td><td class="n">13.6%</td><td class="n">13.3%</td><td class="n">15.5% <span class="nota">(capa 3)</span></td></tr>
+<tr><td class="k">out_proj</td><td class="porq">escribe el residuo</td><td class="n">48</td><td class="n">13.3%</td><td class="n">12.4%</td><td class="n">14.7% <span class="nota">(capa 61)</span></td></tr>
+<tr><td class="k">gate_proj</td><td class="porq">lee el residuo</td><td class="n">64</td><td class="n">12.7%</td><td class="n">11.7%</td><td class="n">13.1% <span class="nota">(capa 52)</span></td></tr>
+<tr><td class="k">up_proj</td><td class="porq">lee el residuo</td><td class="n">64</td><td class="n">12.7%</td><td class="n">11.7%</td><td class="n">13.1% <span class="nota">(capa 52)</span></td></tr>
+<tr><td class="k">down_proj</td><td class="porq">escribe + Hadamard 512</td><td class="n">64</td><td class="n">13.2%</td><td class="n">12.5%</td><td class="n">15.7% <span class="nota">(capa 0)</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="nota">Error relativo de Frobenius entre el peso rotado y su cuantización (int4 simétrico g128, GPTQ). Es
+      parejo, porque la rotación reparte los atípicos también en los pesos. Las que escriben el residuo quedan apenas
+      arriba, y la capa 0 es la peor en qkv y down_proj. Un solo canal muerto en todo el modelo: capa 7, entrada de la
+      MLP, canal 3994.</p>
+  </section>
+
   <section>
     <h2>Calidad del modelo entero</h2>
     <div class="tabla-caja">
@@ -585,5 +644,56 @@
     if (d[0] % 8 === 0 || d[0] === 63) el("text", { x: x0 + pw / 2, y: H - 6, "text-anchor": "middle", "font-size": 11 }, d[0]);
   });
   el("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), stroke: "var(--tinta2)", "stroke-width": 1 });
+})();
+</script>
+
+<script>
+(function () {
+  // [capa, atencion?, error local %, cresta atn sin, atn con, mlp sin, mlp con]
+  var D = [[0, 0, 0.94, 6.7, 3.8, 71.2, 2.6], [1, 0, 3.0, 71.0, 2.6, 71.0, 2.6], [2, 0, 7.17, 70.9, 2.7, 70.7, 2.7], [3, 1, 2.12, 70.2, 2.8, 70.8, 2.7], [4, 0, 7.11, 70.7, 2.7, 70.7, 2.7], [5, 0, 6.98, 70.6, 2.7, 70.6, 2.8], [6, 0, 7.68, 70.5, 2.8, 70.3, 2.8], [7, 1, 5.17, 70.0, 2.9, 70.2, 2.8], [8, 0, 7.6, 70.1, 2.9, 70.1, 2.9], [9, 0, 8.02, 70.1, 2.9, 70.0, 2.9], [10, 0, 7.66, 69.9, 2.9, 69.8, 2.9], [11, 1, 4.65, 69.6, 2.9, 69.8, 2.9], [12, 0, 7.77, 69.8, 2.9, 69.8, 2.9], [13, 0, 8.91, 69.7, 2.9, 69.6, 2.9], [14, 0, 8.5, 69.5, 3.0, 69.3, 3.0], [15, 1, 7.72, 69.2, 3.0, 69.2, 3.0], [16, 0, 9.71, 69.0, 3.0, 69.0, 3.0], [17, 0, 9.79, 68.8, 3.0, 68.6, 3.1], [18, 0, 8.04, 68.3, 3.1, 68.0, 3.1], [19, 1, 8.69, 67.3, 3.2, 66.8, 3.3], [20, 0, 9.52, 65.9, 3.3, 65.9, 3.3], [21, 0, 10.77, 65.0, 3.4, 65.2, 3.4], [22, 0, 10.77, 64.6, 3.4, 64.5, 3.4], [23, 1, 10.9, 64.0, 3.5, 63.8, 3.5], [24, 0, 11.59, 63.6, 3.5, 63.3, 3.5], [25, 0, 11.22, 63.3, 3.5, 62.9, 3.5], [26, 0, 9.9, 63.4, 3.5, 62.6, 3.6], [27, 1, 10.28, 63.0, 3.5, 62.0, 3.6], [28, 0, 11.35, 62.6, 3.6, 61.5, 3.6], [29, 0, 11.57, 61.7, 3.6, 60.9, 3.6], [30, 0, 10.8, 61.4, 3.6, 60.4, 3.7], [31, 1, 11.04, 60.8, 3.7, 60.3, 3.7], [32, 0, 11.77, 60.6, 3.7, 59.1, 3.7], [33, 0, 12.01, 59.4, 3.7, 58.2, 3.7], [34, 0, 10.22, 58.6, 3.7, 56.7, 3.8], [35, 1, 10.56, 55.6, 3.8, 54.5, 3.9], [36, 0, 10.93, 54.1, 3.9, 52.9, 3.9], [37, 0, 11.74, 52.2, 3.9, 52.7, 3.9], [38, 0, 11.08, 52.5, 3.9, 51.9, 3.9], [39, 1, 11.6, 53.5, 3.9, 52.9, 3.9], [40, 0, 11.73, 53.9, 3.9, 52.3, 3.9], [41, 0, 12.15, 53.9, 3.9, 53.0, 3.9], [42, 0, 11.12, 54.8, 3.9, 53.9, 3.9], [43, 1, 11.24, 54.6, 3.9, 53.9, 3.9], [44, 0, 12.0, 54.7, 3.9, 52.8, 3.9], [45, 0, 12.43, 53.3, 3.9, 52.3, 3.9], [46, 0, 11.27, 52.9, 3.9, 51.4, 3.9], [47, 1, 11.18, 50.6, 3.9, 50.3, 3.9], [48, 0, 11.62, 51.4, 3.9, 48.1, 3.9], [49, 0, 11.43, 49.1, 3.9, 47.8, 4.0], [50, 0, 8.7, 47.9, 4.0, 43.2, 4.0], [51, 1, 9.13, 34.9, 4.0, 35.4, 4.0], [52, 0, 10.39, 37.1, 4.0, 33.3, 4.0], [53, 0, 10.32, 34.2, 4.0, 32.9, 4.0], [54, 0, 8.57, 32.6, 4.0, 30.6, 4.0], [55, 1, 9.25, 31.8, 4.0, 30.6, 4.0], [56, 0, 11.55, 35.0, 4.1, 34.3, 4.1], [57, 0, 12.58, 34.0, 4.0, 35.0, 4.0], [58, 0, 9.83, 34.9, 4.0, 33.2, 4.0], [59, 1, 8.05, 25.3, 4.0, 35.0, 4.1], [60, 0, 10.3, 39.3, 4.1, 37.2, 4.1], [61, 0, 9.2, 38.6, 4.1, 37.8, 4.1], [62, 0, 7.74, 40.1, 4.1, 37.7, 4.0], [63, 1, 5.31, 28.9, 4.0, 36.2, 4.0]];
+  var NS = "http://www.w3.org/2000/svg";
+  function lienzo(id, H, yMax, ticks, etiqueta) {
+    var svg = document.getElementById(id), W = 960, L = 44, R = 10, T = 12, B = 34;
+    var pw = (W - L - R) / D.length;
+    function y(v) { return T + (H - T - B) * (1 - v / yMax); }
+    function el(tag, at, txt) {
+      var e = document.createElementNS(NS, tag), st = "";
+      for (var k in at) {
+        if ((k === "fill" || k === "stroke") && String(at[k]).indexOf("var(") === 0) st += k + ":" + at[k] + ";";
+        else e.setAttribute(k, at[k]);
+      }
+      if (st) e.setAttribute("style", st);
+      if (txt != null) e.textContent = txt;
+      svg.appendChild(e); return e;
+    }
+    ticks.forEach(function (v) {
+      el("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: "var(--linea)", "stroke-width": 1 });
+      el("text", { x: L - 6, y: y(v) + 4, "text-anchor": "end", "font-size": 11 }, v);
+    });
+    el("text", { x: 12, y: T + (H - T - B) / 2, "font-size": 11, "text-anchor": "middle",
+                 transform: "rotate(-90 12 " + (T + (H - T - B) / 2) + ")" }, etiqueta);
+    D.forEach(function (d, i) {
+      if (d[0] % 8 === 0 || d[0] === 63) el("text", { x: L + i * pw + pw / 2, y: H - 6, "text-anchor": "middle", "font-size": 11 }, d[0]);
+    });
+    return { el: el, y: y, pw: pw, L: L, W: W, R: R, H: H, B: B };
+  }
+  // cresta
+  var c = lienzo("g-cresta", 250, 80, [0, 20, 40, 60, 80], "cresta (máx/rms)");
+  function linea(col, color, ancho) {
+    var p = D.map(function (d, i) { return (i ? "L" : "M") + (c.L + i * c.pw + c.pw / 2).toFixed(1) + " " + c.y(d[col]).toFixed(1); }).join(" ");
+    c.el("path", { d: p, fill: "none", stroke: color, "stroke-width": ancho });
+  }
+  linea(3, "var(--acento)", 2); linea(5, "var(--aviso)", 2); linea(4, "var(--ok)", 2); linea(6, "var(--ok)", 2);
+  c.el("line", { x1: c.L, x2: c.W - c.R, y1: c.y(0), y2: c.y(0), stroke: "var(--tinta2)", "stroke-width": 1 });
+  // error local
+  var e = lienzo("g-error", 230, 14, [0, 4, 8, 12], "error local %");
+  D.forEach(function (d, i) {
+    var x0 = e.L + i * e.pw;
+    var r = e.el("rect", { x: x0 + e.pw * 0.15, y: e.y(d[2]), width: e.pw * 0.7, height: e.y(0) - e.y(d[2]),
+                           fill: d[1] ? "var(--violeta)" : "var(--frio)" });
+    r.appendChild(document.createElementNS(NS, "title")).textContent = "capa " + d[0] + ": " + d[2].toFixed(1) + "%";
+    if (d[0] === 7) e.el("text", { x: x0 + e.pw / 2, y: e.y(d[2]) - 4, "text-anchor": "middle", "font-size": 10 }, "▼");
+  });
+  e.el("line", { x1: e.L, x2: e.W - e.R, y1: e.y(0), y2: e.y(0), stroke: "var(--tinta2)", "stroke-width": 1 });
 })();
 </script>
