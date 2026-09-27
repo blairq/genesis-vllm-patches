@@ -390,7 +390,7 @@
           <tr><td class="k">lm_head con 36 filas</td><td class="porq">W4A16, HMMA fp16/acc32, limitado por cómputo</td><td class="n">1</td><td><span class="chip ch-abierto">paso 3</span></td></tr>
           <tr><td class="k">Borrador</td><td class="porq">GEMM fp16 sin cuantizar; atención Triton con 12 bloques</td><td class="n">1, 4</td><td><span class="chip ch-abierto">paso 10</span></td></tr>
           <tr><td class="k">All-reduce de decode</td><td class="porq">128 por paso por NCCL</td><td class="n">6</td><td><span class="chip ch-abierto">paso 4</span></td></tr>
-          <tr><td class="k">Cinta del árbol GDN</td><td class="porq">1 bloque para 82 SM</td><td class="n">4</td><td><span class="chip ch-abierto">paso 1</span></td></tr>
+          <tr><td class="k">Cinta del árbol GDN</td><td class="porq">PTX, bloques por fila y tramo de v</td><td class="n">4</td><td><span class="chip ch-hecho">aplicado</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -854,9 +854,9 @@
       <table class="pipe">
         <thead><tr><th class="n">#</th><th>Paso</th><th>Tipo</th><th class="n">1 pedido</th><th class="n">4 pedidos</th><th>Por qué va acá</th></tr></thead>
         <tbody>
-          <tr><td class="n">1</td><td class="k">Cinta y conv del árbol en paralelo<small>_k_escribir, _k_salidas</small></td>
-            <td><span class="chip ch-lat">código</span></td><td class="n">−7%</td><td class="n">−7%</td>
-            <td class="porq">El más barato. Un bloque que escribe en serie pasa a una grilla (N, T−1). Se verifica bit a bit.</td></tr>
+          <tr class="nuevo"><td class="n">1</td><td class="k">Cinta y conv del árbol en PTX<small>pn122_cinta.cu, arbol_conv.cu</small></td>
+            <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n mejor">−5,2%</td><td class="n mejor">−3,0%</td>
+            <td class="porq">Medido. Cinta 34 → 2,2 µs por capa, conv 9 → 3,9. Bit a bit: mismo texto y misma aceptación en el oráculo greedy. La conv gana por estructura: carga las filas de los 9 tokens junto con los ancestros y los elige de registros (dos latencias de memoria en vez de tres).</td></tr>
           <tr><td class="n">1b</td><td class="k">Pasos mixtos<small>los que decodifican van por SK-18h</small></td>
             <td><span class="chip ch-lat">código</span></td><td class="n">—</td><td class="n">hasta −20 ms por paso mixto</td>
             <td class="porq">Verificado en la traza: con un prefill en el lote, SK-18h no corre y se descuantizan las páginas de <em>todos</em> los pedidos (16 → 72 páginas). Es el patrón de opencode. Candidato a subir al segundo lugar.</td></tr>
