@@ -116,6 +116,14 @@ def ancestros3_gpu() -> torch.Tensor | None:
     return _anc3_gpu
 
 
+def tokens_arbol() -> int | None:
+    """Tokens por pedido del paso en arbol (K+1). OJO: ``ancestros3_gpu()`` es un buffer fijo de
+    ``n_slots * (K+1)`` filas para los grafos, asi que su largo NO dice cuantos tokens tiene el lote."""
+    if _anc3_gpu is None or not _n_slots:
+        return None
+    return _anc3_gpu.shape[0] // _n_slots
+
+
 # Por paso. Los grafos FULL (decode uniforme) hornean el kernel de arbol, y ahi lo unico que
 # decide es el CONTENIDO del buffer (con la mascara de cadena da bit a bit lo de siempre). En
 # eager/piecewise (lotes mezclados) Python corre cada vez y esta bandera elige el kernel. Por
@@ -832,6 +840,133 @@ def _k_escribir(A_log, a, b, dt_bias, beta_sp, threshold, k, v, cu, sidx, slots,
         tl.store(row + H * K + HV * V + HV + oh, bb.to(tl.float32), mask=mh)
 
 
+@triton.jit(do_not_specialize=["N"])
+def _k_escribir_par(A_log, a, b, dt_bias, beta_sp, threshold, k, v, cu, sidx, slots, cinta, N,
+                    H: tl.constexpr, HV: tl.constexpr, K: tl.constexpr, V: tl.constexpr,
+                    BK: tl.constexpr, BV: tl.constexpr,
+                    TM: tl.constexpr, ROW: tl.constexpr, IS_L2: tl.constexpr):
+    """Lo mismo que ``_k_escribir``, repartido en una grilla (N, TM, H + HV).
+
+    ``_k_escribir`` corre UN programa por pedido que recorre en serie los T-1 tokens y las H
+    cabezas k: con un pedido son 34 us de pura latencia en 1 bloque para 82 SM, 48 veces por
+    paso (7% del paso de decode). Cada fila de la cinta y cada tramo de la fila son
+    independientes, asi que acá cada programa escribe un tramo de una fila:
+
+      programa (n, t-1, p)   p <  H : la cabeza k ``p`` normalizada (l2), K floats
+                             p >= H : la cabeza v ``p-H`` (V floats) y sus dos escalares g y beta
+
+    Mismas cuentas y en el mismo orden que ``_k_escribir`` (la norma l2 reduce un vector de BK
+    con el mismo num_warps), asi que la cinta sale identica bit a bit.
+    """
+    i_n = tl.program_id(0)
+    t = tl.program_id(1) + 1
+    p = tl.program_id(2)
+    bos = tl.load(cu + i_n).to(tl.int64)
+    eos = tl.load(cu + i_n + 1).to(tl.int64)
+    s = tl.load(sidx + i_n).to(tl.int64)
+    if s <= 0 or t >= eos - bos:
+        return
+    slot = tl.load(slots + i_n).to(tl.int64)
+    src = bos + t
+    row = cinta + (slot * TM + t - 1) * ROW
+    if p < H:
+        ok = tl.arange(0, BK)
+        mk = ok < K
+        kk = tl.load(k + (src * H + p) * K + ok, mask=mk, other=0).to(tl.float32)
+        if IS_L2:
+            kk = kk * tl.rsqrt(tl.sum(kk * kk) + 1e-6)
+        tl.store(row + p * K + ok, kk.to(tl.float32), mask=mk)
+    else:
+        hv = p - H
+        ov = tl.arange(0, BV)
+        mv = ov < V
+        tl.store(row + H * K + hv * V + ov,
+                 tl.load(v + (src * HV + hv) * V + ov, mask=mv, other=0).to(tl.float32), mask=mv)
+        Al = tl.load(A_log + hv).to(tl.float32)
+        x = tl.load(a + src * HV + hv).to(tl.float32) + tl.load(dt_bias + hv).to(tl.float32)
+        sp = tl.where(beta_sp * x <= threshold, (1 / beta_sp) * tl.log(1 + tl.exp(beta_sp * x)), x)
+        tl.store(row + H * K + HV * V + hv, (-tl.exp(Al) * sp).to(tl.float32))
+        bb = tl.sigmoid(tl.load(b + src * HV + hv).to(tl.float32))
+        tl.store(row + H * K + HV * V + HV + hv, bb.to(tl.float32))
+
+
+_ESCRIBIR_MODO = os.environ.get("GENESIS_PN122_ESCRIBIR_PAR", "0").strip().lower()
+_ESCRIBIR_MODO = "par" if _ESCRIBIR_MODO in _TRUTHY else ("ptx" if _ESCRIBIR_MODO == "ptx" else "serie")
+_k_cinta_ptx: dict = {}
+_f32_cache: dict = {}
+_avisos_cinta: set = set()
+
+
+def _f32(t):
+    if t.dtype == torch.float32:
+        return t
+    c = _f32_cache.get(t.data_ptr())
+    if c is None:
+        if torch.cuda.is_current_stream_capturing():
+            return None
+        c = _f32_cache[t.data_ptr()] = t.float().contiguous()
+    return c
+
+
+def _avisar_cinta(motivo):
+    if motivo not in _avisos_cinta:
+        _avisos_cinta.add(motivo)
+        log.warning("[PN122 cinta] PTX no aplica, uso Triton: %s", motivo)
+
+
+def escribir_cinta(A_log, a, b, dt_bias, k, v, cu_seqlens, sidx, slots, cinta, N, H, HV, K, V,
+                   par=None):
+    """Escribe las filas 1..T-1 de la cinta. Tres caminos, mismo resultado bit a bit:
+
+    * ``serie`` (default): ``_k_escribir``, un programa por pedido (34 us por capa con un pedido);
+    * ``par`` (GENESIS_PN122_ESCRIBIR_PAR=1): ``_k_escribir_par``, Triton en grilla (2,1 us);
+    * ``ptx`` (GENESIS_PN122_ESCRIBIR_PAR=ptx): ``kernels/cuda/pn122_cinta.cu``, un bloque por fila
+      con cargas vectoriales y la reduccion sin shared (ver el encabezado del .cu).
+
+    ``par`` fuerza el modo (``False``/``True``/``"ptx"``), para los tests."""
+    TM, ROW = cinta.shape[1], cinta.shape[2]
+    BK = triton.next_power_of_2(K)
+    modo = _ESCRIBIR_MODO if par is None else ("ptx" if par == "ptx" else ("par" if par else "serie"))
+    if modo == "ptx":
+        # A_log y dt_bias: el PTX los lee en fp32. Si vienen en otro tipo, copia fp32 (exacta: Triton
+        # hacia la misma conversion), cacheada por puntero y creada FUERA de la captura de un grafo.
+        A32, db32 = _f32(A_log), _f32(dt_bias)
+        motivo = None
+        if not (K == 128 and V == 128 and H <= 8 and HV <= 32):
+            motivo = f"formas K={K} V={V} H={H} HV={HV}"
+        elif A32 is None or db32 is None:
+            motivo = "A_log/dt_bias sin copia fp32 (primera vez dentro de una captura)"
+        elif not (k.dtype == v.dtype == a.dtype == b.dtype == torch.float16 and cinta.dtype == torch.float32):
+            motivo = f"dtypes k={k.dtype} v={v.dtype} a={a.dtype} b={b.dtype} cinta={cinta.dtype}"
+        elif not (k.is_contiguous() and v.is_contiguous() and a.is_contiguous() and b.is_contiguous()):
+            motivo = "k/v/a/b no contiguos"
+        if motivo is not None:
+            _avisar_cinta(motivo)
+            modo = "par"
+        else:
+            A_log, dt_bias = A32, db32
+    if modo == "ptx":
+        clave = (H, HV, TM)
+        kern = _k_cinta_ptx.get(clave)
+        if kern is None:
+            from vllm._genesis.kernels.ptx_lab import Kernel
+            kern = _k_cinta_ptx[clave] = Kernel("pn122_cinta.cu", "pn122_cinta",
+                                                defs=[f"-DH={H}", f"-DHV={HV}", f"-DTM={TM}"], warps=8)
+        kern.lanzar((N, TM, 1 + (HV * V // 4 + 255) // 256),
+                    [A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N])
+    elif modo == "par":
+        _k_escribir_par[(N, TM, H + HV)](
+            A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N,
+            H=H, HV=HV, K=K, V=V, BK=BK, BV=triton.next_power_of_2(V), TM=TM, ROW=ROW,
+            IS_L2=True, num_warps=4, num_stages=1)
+    else:
+        _k_escribir[(N,)](
+            A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N,
+            H=H, HV=HV, K=K, V=V, BK=BK, BHV=triton.next_power_of_2(HV * V),
+            BH=triton.next_power_of_2(HV), TM=TM, ROW=ROW, IS_L2=True,
+            num_warps=4, num_stages=3)
+
+
 _DIAG_CRESTA = os.environ.get("GENESIS_DIAG_GDN_CRESTA", "0").strip().lower() in _TRUTHY
 _cresta_n = 0
 
@@ -945,11 +1080,7 @@ def spec_update(layer, A_log, a, b, dt_bias, q, k, v, ssm_state, cu_seqlens,
             num_warps=4, num_stages=3)
     if _bits & 128:
         torch.cuda.synchronize()
-    _k_escribir[(N,)](
-        A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N,
-        H=H, HV=HV, K=K, V=V, BK=BK, BHV=triton.next_power_of_2(HV * V),
-        BH=triton.next_power_of_2(HV), TM=TM, ROW=ROW, IS_L2=True,
-        num_warps=4, num_stages=3)
+    escribir_cinta(A_log, a, b, dt_bias, k, v, cu_seqlens, sidx, slots, cinta, N, H, HV, K, V)
     if _bits & 256:
         torch.cuda.synchronize()
     if sombra:

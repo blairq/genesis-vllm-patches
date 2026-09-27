@@ -57,6 +57,8 @@ post("/stop_profile", t=900)
 PY
   for i in $(seq 1 60); do n=$(ls $MED/trazas/${LABEL}_$FASE 2>/dev/null | grep -c "json"); [ "$n" -ge 2 ] && break; sleep 10; done
   sleep 20; echo "$(date +%T) [$LABEL/$FASE] trazas: $(ls $MED/trazas/${LABEL}_$FASE 2>/dev/null | tr '\n' ' ')"
+  mkdir -p $MED/analisis_perfil
+  docker logs $N 2>&1 | grep -iE "genesis|warning|error|no aplica" > $MED/analisis_perfil/${LABEL}_$FASE.log   # los avisos, antes de borrar el contenedor
 done
 docker rm -f $N >/dev/null 2>&1
 echo "$(date +%T) LISTO"

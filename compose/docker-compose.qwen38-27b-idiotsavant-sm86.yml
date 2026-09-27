@@ -93,6 +93,8 @@ services:
       - GENESIS_ENABLE_PN146_GROUP_SIZE=1        # grupo de KV 8 (el borrador imponia 5)
       - GENESIS_PN146_GROUP_SIZE=8
       - GENESIS_ENABLE_PN122_GDN_CINTA=1         # rollback del estado GDN con cinta (+7,6% KV)
+      - GENESIS_PN122_ESCRIBIR_PAR=${GENESIS_PN122_ESCRIBIR_PAR:-ptx}    # cinta de rollback en PTX (pn122_cinta.cu): 34 -> 2,2 us por capa, bit a bit (0 = Triton en serie, 1 = Triton en grilla)
+      - GENESIS_ARBOL_SALIDAS_PAR=${GENESIS_ARBOL_SALIDAS_PAR:-ptx}      # conv del arbol en PTX (arbol_conv.cu): 9 -> 3,9 us por capa, bit a bit (0 = Triton original, 1 = Triton desenrollado)
       - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
       - GENESIS_ENABLE_PN128_GDN_MTP_ASYNC_ORDER=1
       - GENESIS_ENABLE_B5_REJECTION_SAMPLER=1

@@ -145,8 +145,8 @@ class Kernel:
                 vals.append(ctypes.c_int32(int(v)))
         arr = (ctypes.c_void_p * len(vals))(
             *[ctypes.cast(ctypes.byref(x), ctypes.c_void_p) for x in vals])
-        gx, gy = grid
-        r = libcuda().cuLaunchKernel(self._fn, gx, gy, 1, self.warps * 32, 1, 1,
+        gx, gy, gz = (*grid, 1) if len(grid) == 2 else grid
+        r = libcuda().cuLaunchKernel(self._fn, gx, gy, gz, self.warps * 32, 1, 1,
                                      ctypes.c_uint(shared),
                                      ctypes.c_void_p(torch.cuda.current_stream().cuda_stream),
                                      arr, None)

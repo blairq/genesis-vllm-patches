@@ -224,6 +224,51 @@ Detalle de `borrador: capas`:
 Ahorro = medido menos el techo del kernel: **es un máximo**. Los porcentajes son del paso (1 pedido / 4 pedidos).
 Todas deben dar la **misma salida** (bit a bit o dentro del ruido fp16): verificarlo antes de medir velocidad.
 
+### ✅ P1 HECHO (27-09): cinta y conv del árbol en PTX — paso −5,2% (1 pedido), −3,0% (4 pedidos)
+
+**Resultado**
+
+| | 1 pedido | 4 pedidos |
+|---|---|---|
+| `_k_escribir` → `pn122_cinta` | 33,6 → 2,2 µs | 35,5 → 2,7 µs |
+| `_k_salidas` → `arbol_conv` | 9,0 → 3,9 µs | 9,3 → 5,1 µs |
+| Capas GDN | −11% | −7% |
+| **Paso** | **−5,2%** (perfil `is27_ptx2` contra `is27_base`) | **−3,0%** |
+
+- Ruido entre arranques (`is25` contra `is27_base`): capas ±0,4%, paso ±1%.
+- **Calidad:** bit a bit en 28 + 13 casos offline, y el oráculo greedy (`tests/bench/medicion/oraculo_greedy.sh`) dio el
+  **mismo texto** en 3 respuestas (una de 7063 caracteres) y la **misma aceptación** (832 borradores, 2406 aceptados).
+- **Prendido por omisión** en el compose: `GENESIS_PN122_ESCRIBIR_PAR=ptx`, `GENESIS_ARBOL_SALIDAS_PAR=ptx`.
+
+**Código**
+- `kernels/cuda/pn122_cinta.cu` y `kernels/cuda/arbol_conv.cu`, lanzados por `ptx_lab` (que ahora acepta grillas 3D).
+- Respaldo Triton, con el motivo en el log si el PTX no aplica: `_k_escribir_par` y `_k_salidas_par`.
+- Pruebas: `tests/proto/pn122_escribir_par.py`, `arbol_salidas_par.py`, `arbol_conv_ptx_barrido.py`.
+
+**Método aplicado** (pedido del usuario: Triton para prototipar, después PTX revisado a mano)
+1. Leer el SASS de lo que genera Triton. En la cinta: 128 hilos con cargas de 2 bytes, dos `bar.sync` por la
+   reducción, los escalares calculados por los 128 hilos y `slots` cargado después del chequeo de salida.
+2. Reescribir en CUDA con **toda la aritmética en PTX explícito**. `ptx_lab` compila con `--use_fast_math`, y eso
+   cambiaría los bits. Mismo orden de reducción que Triton (el árbol del butterfly), el `log` de libdevice copiado del
+   PTX de Triton, `div.full` y `ex2.approx`.
+3. Mirar el SASS propio y corregir:
+   - `shfl.sync` dentro de un `if` generó 14 `CALL` de respaldo: se sacó la rama;
+   - la conv con `if (i >= 0)` por fila tenía 76 `BRA` y era más lenta que Triton: cargas sin ramas;
+   - **la palanca grande: dos latencias de memoria en vez de tres.** Las filas x de los 9 tokens se cargan junto con
+     `anc3` y los ancestros se eligen de registros. Triton no puede hacerlo con su estructura.
+
+**Trampas que aparecieron**
+- `anc3` es un buffer FIJO de `n_slots·(K+1)` filas (grafos CUDA), no del largo del lote. `T = anc3.shape[0] // N`
+  dio cientos de tokens y 122 µs por capa. Ahora sale de `gdn_cinta.tokens_arbol()`.
+  **Las pruebas offline tienen que usar los buffers con la forma del servidor.**
+- En el servidor los PTX caían al respaldo: `A_log`/`dt_bias` no venían en fp32 y el estado conv tenía otro layout.
+  Solución: copia fp32 exacta y creada fuera de la captura del grafo, strides genéricos, y el motivo al log.
+  `perfil_idiotsavant.sh` ahora guarda esos avisos en `analisis_perfil/<etiqueta>_<fase>.log`.
+
+**Pendiente de este frente**
+- Las 3 copias de torch de q/k/v por capa GDN (~1%): se van cuando `_k_spec_arbol` pase a PTX leyendo con stride.
+- `_k_spec_arbol`: 19–45 µs, ocupación 10%.
+
 ### P1 · Recurrencia del árbol GDN: `_k_escribir`, `_k_salidas`, `_k_spec_arbol` — **−7% / −7%, costo bajo**
 
 - **Dónde:** `vllm/_genesis/gdn_cinta.py`
