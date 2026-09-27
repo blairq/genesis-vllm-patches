@@ -339,15 +339,92 @@ Todas deben dar la **misma salida** (bit a bit o dentro del ruido fp16): verific
   - el tiempo se mueve a otra espera.
   Sin eso no hay estimación seria.
 
-### P9 · Prefill: atención entera y sin descuantizar — **−6% a 15k, −20% a 64k; y los pasos mixtos**
+### P9 · Prefill: atención sin descuantizar, estilo SageAttention — **−10–15% del prefill a 60k; y los pasos mixtos**
 
-- **Qué pasa:** FlashInfer fp16 con acumulador f32 (media tasa en GA102) sobre KV descuantizada por
-  `sk18h_decuant` (`sk18_attn.py`: `_prefill_flashinfer`, `decuantizar_kv`).
-- **El peor caso son los pasos mixtos:** 10–20 ms por paso descuantizando páginas. Es el patrón de opencode
-  (subagentes que entran mientras el hilo principal genera).
-- **Hacer:**
-  - SK-18 de prefill: QKᵀ en IMMA s8 sobre la KV int8 (memoria sk18f: empataba a FI a 16k y ganaba 1,3× a 57k);
-  - como paso intermedio, cachear la KV descuantizada entre chunks, o descuantizar solo las páginas nuevas.
+**Qué pasa hoy**
+- FlashInfer fp16 con acumulador fp32 (media tasa en GA102) sobre KV descuantizada por `sk18h_decuant`
+  (`sk18_attn.py`: `_prefill_flashinfer`, `decuantizar_kv`; alternativa `GENESIS_PN131_PREFILL=triton`, que también
+  descuantiza).
+- En el perfil FlashInfer va a ~64 TFLOPS (3,0 ms por capa, 1760 queries contra ~9k): ya está en el techo de ese
+  tipo de dato. Un FlashInfer mejor no existe; hay que cambiar el tipo.
+- **Pasos mixtos (verificado en `is25_decode4`):** en esos pasos SK-18h **no corre**. Todo el lote, incluidos los que
+  solo decodifican, va por descuantizar + FlashInfer, y `sk18h_decuant` recorre las páginas de **todos** los pedidos
+  (16 → 72 páginas de 880): hasta ~20 ms por paso.
+
+**Qué hay hecho (ninguno es un kernel de prefill)**
+- **Numérica:** SK-18 A0 / A0-bis (`tests/proto/sk18_a0*.py`). Q8K8V8 + Hadamard, 0,5–0,65% de error; prefill 0,56–0,58%.
+  Trampa: pesos del softmax de 8 bits rompen a 22k (6,7%).
+- **Kernels `kernels/cuda/sk18{a..i}`:** todos de decode. Reparten el trabajo **por páginas de keys** y juntan parciales
+  con una unión. SK-18g acepta cualquier cantidad de filas con causal (`lim[]`), pero para un prefill el buffer parcial
+  (páginas × filas × 256 × int32 × 2) da ~3 GB a 60k: no sirve tal cual.
+- **Reutilizable:**
+  - el layout de página (K por token, V por dimensión);
+  - `prep2` (q a int8 con la Hadamard en PTX);
+  - la causal por fila;
+  - los emuladores y tests (`sk18e_test.py`, `sk18g_paginado.py`, `pn131_offline.py`);
+  - `tests/proto/attn_int8_qk_eval.py` (numérica estilo Sage, sin kernel).
+
+**Por qué NO el softmax entero de SK-18 (corrección del usuario, confirmada)**
+
+Por cada par (query, key) el camino entero hace:
+- la exp por desplazamiento + cuadrática Q15;
+- el peso partido en dos bytes (hi/lo);
+- **dos pasadas** de mma para P·V.
+
+Son ~15 operaciones enteras por par en el pipe INT32 (64 por ciclo y SM en GA102, la mitad que FP32), más el doble
+de mma en P·V y más registros. Con int4 eso ya hizo que el kernel no fuera más rápido. El pipe de float tiene el
+doble de ancho y la exp tiene su propia unidad (MUFU.EX2, 16 por ciclo y SM, que corre en paralelo con los tensor
+cores y el FMA).
+
+**Cuenta por par con head_dim 256 en GA102** (ciclos por SM, órdenes de magnitud):
+
+| Qué | Hoy (FlashInfer) | Propuesta |
+|---|---|---|
+| QKᵀ | fp16/acc32: 1 ciclo | int8 IMMA: 0,25 |
+| P·V | fp16/acc32: 1 ciclo | fp16/acc16: 0,5 |
+| exp | MUFU, 0,06 | igual |
+| FMA del softmax | ~0,04 | igual |
+
+Con head_dim 256 la exp **no** es el cuello; a diferencia de H100 con hdim 128, que es el caso de FA3/FA4. El cuello es
+el tipo de los mma. Techo: ~2 → ~0,85 ciclos por par contando el softmax (~2,3×).
+
+**Diseño propuesto (literatura, ver abajo)**
+1. **QKᵀ en int8** (IMMA): Q de `prep2` (Hadamard + int8 por token) y K int8 **leída directo de la caché paginada**, sin
+   descuantizar. La escala de K por token se aplica al score (una FMUL por par). Opcional: el suavizado de K de Sage
+   (restar la media de K, exacto bajo softmax), si el error lo pide; con la Hadamard puede no hacer falta.
+2. **Softmax en fp32** con `exp2` de MUFU. Si algún día MUFU limita, la emulación de FA4 (polinomio grado 3 en FMA,
+   Cody-Waite, 10–25% de las entradas).
+3. **Reescalado condicional de FA4:** el acumulador O solo se reescala si el máximo crece más de τ = 8 (en log2).
+   Es exacto porque todo se normaliza al final con el máximo y la suma verdaderos. Saca casi todo el ALU del reescalado.
+4. **P·V en fp16 con acumulador fp16 dentro de cada tile** (Sage-B: 2× en GA102, sin pérdida medida), y el parcial de cada
+   tile se suma a un O en fp32 en registros ("acumulación en dos niveles"). Evita que el fp16 acumule 60k términos y
+   evita leer y escribir los acumuladores del mma entre tiles, que fue la carrera de SK-18
+   (ptx-acumulador-mma-no-leer-escribir). V int8 → fp16 en registros; su escala por token se pliega en P
+   (una FMUL por par).
+5. **P en int8 NO** (variante Sage-vB): con contexto largo los pesos chicos se pierden (A0: 8 bits rompe a 22k).
+
+**Cómo hacerlo**
+- **Triton primero:** `tl.dot` int8 → int32 e `tl.dot(..., out_dtype=tl.float16)`, con paginación por tabla de bloques.
+  1–2 semanas con la validación.
+- Si Triton no llega, PTX con la base de SK-18h.
+
+**Esperable**
+- Sage reporta ~2× sobre FlashAttention2 en 3090/4090; realista **1,6–2× en la atención** y **sin `sk18h_decuant`**.
+- A 60k (atención ~30% del prefill): **−10 a −15% del prefill**, más.
+- Arregla de raíz los pasos mixtos si los que decodifican siguen yendo por SK-18h.
+
+**Mismo razonamiento para el decode (paso P2):** SK-18h usa el mismo softmax entero con hi/lo y dos pasadas de P·V.
+Está en 254 registros y 1 bloque de 4 warps por SM, al 35% del ancho de banda. Pasar su softmax a float con P·V fp16
+bajaría registros y subiría la ocupación. Probarlo como variante del paso P2.
+
+**Literatura**
+- SageAttention, arXiv 2410.02367: QKᵀ int8 por warp, P·V fp16 con acumulador fp16, suavizado de K; ~2,1× sobre FA2
+  en 4090.
+- SageAttention2, arXiv 2411.10958: Q/K int4 por hilo, P·V fp8 con acumulación en dos niveles. En Ampere no hay fp8:
+  solo sirve la idea de los dos niveles.
+- FlashAttention-3, arXiv 2407.08608: la exp como cuello en H100 y su solape con los mma.
+- FlashAttention-4, arXiv 2603.05451: exp2 emulada en FMA (grado 3, Cody-Waite, 10–25%) y reescalado condicional τ = 8.
+- INT-FlashAttention, arXiv 2409.16997: todo int8, sin softmax entero; no aporta sobre Sage.
 
 ### P10 · Preparación de la atención de prefill — **−1–3% del prefill, costo bajo**
 
@@ -404,6 +481,7 @@ reescribirlo una sola vez; y los cambios de capa en tandas, porque cada tanda pa
 | # | Paso | Tipo | Ahorro (1 / 4 pedidos, prefill) | Costo | Por qué va acá |
 |---|---|---|---|---|---|
 | 1 | **P1:** `_k_escribir` y `_k_salidas` en paralelo | código | −7% / −7% | bajo | el más barato; bit a bit; no depende de nada |
+| 1b | **Pasos mixtos:** los que decodifican van por SK-18h; descuantizar solo las páginas del pedido en prefill | código | hasta −20 ms por paso mixto (4 pedidos) | bajo-medio | verificado en `is25_decode4`: con un prefill en el lote, SK-18h no corre y `sk18h_decuant` recorre las páginas de todos (16 → 72). Es el patrón de opencode: candidato a ir segundo |
 | 2 | **Re-medir PN135 y PN136** sobre idiotSavant | flag | ? / ? / ? | un perfil cada uno | decide si 8 y 13 son fusiones nuevas o ya están hechas |
 | 3 | **lm_head en W4A8** + **P6:** logits sin AllGather (gumbel-max por rango) | capa + código | −0,7% / −3% | bajo | los dos tocan la misma región (lm_head → muestreo). El lm_head no se re-cuantiza: mismos int4, cambia solo la activación; basta el KL. También acelera el lm_head del borrador |
 | 4 | **P3 + AR int8 en decode:** all-reduce P2P crudo de una pasada, en int8 por grupo | código + capa | −6% / −11% | medio | el mayor de 4 pedidos. Con la cresta de 2,7 el int8 del residuo es seguro (medir KL); int8 = mitad de bytes = menos latencia en el mismo kernel nuevo |
@@ -416,7 +494,7 @@ reescribirlo una sola vez; y los cambios de capa en tandas, porque cada tanda pa
 | 11 | **P10:** páginas únicas una vez por paso | código | prefill −1–3% | bajo | puede ir en cualquier momento; es chico |
 | 12 | **Grupo del AR int8 de prefill** 64 → 128/256 | capa (flag) | prefill −1–2% | bajo | menos escalas; la cresta baja lo permite. Mismo KL que el paso 4 |
 | 13 | **PN136 o solape propio** del all-reduce de prefill | código | prefill 0 a −15% | según paso 2 | solo si el paso 2 muestra que el solape esconde la transferencia en idiotSavant |
-| 14 | **P9:** atención de prefill entera sobre KV int8 (SK-18) | código | prefill −6% a 15k, −20% a 64k; pasos mixtos −10–20 ms | alto | el más caro. Primero el intermedio: descuantizar solo las páginas nuevas |
+| 14 | **P9:** atención de prefill estilo SageAttention sobre la KV int8 (QKᵀ int8, softmax fp32, P·V fp16/acc16 en dos niveles) | código | prefill −10–15% a 60k; sin descuantizar | medio-alto (Triton, 1–2 semanas) | antes, el intermedio: descuantizar solo las páginas nuevas y los pasos mixtos |
 
 **Tandas de validación de calidad** (KL en respuestas + generación larga + banco de agente):
 - **A:** paso 3 (lm_head) y paso 4 (AR int8 en decode). No re-cuantizan pesos.

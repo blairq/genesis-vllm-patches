@@ -767,6 +767,9 @@
           <tr><td class="n">1</td><td class="k">Cinta y conv del árbol en paralelo<small>_k_escribir, _k_salidas</small></td>
             <td><span class="chip ch-lat">código</span></td><td class="n">−7%</td><td class="n">−7%</td>
             <td class="porq">El más barato. Un bloque que escribe en serie pasa a una grilla (N, T−1). Se verifica bit a bit.</td></tr>
+          <tr><td class="n">1b</td><td class="k">Pasos mixtos<small>los que decodifican van por SK-18h</small></td>
+            <td><span class="chip ch-lat">código</span></td><td class="n">—</td><td class="n">hasta −20 ms por paso mixto</td>
+            <td class="porq">Verificado en la traza: con un prefill en el lote, SK-18h no corre y se descuantizan las páginas de <em>todos</em> los pedidos (16 → 72 páginas). Es el patrón de opencode. Candidato a subir al segundo lugar.</td></tr>
           <tr><td class="n">2</td><td class="k">Re-medir PN135 y PN136<small>sobre idiotSavant</small></td>
             <td><span class="chip ch-neu">flag</span></td><td class="n">?</td><td class="n">?</td>
             <td class="porq">Ya existen. Un perfil cada uno decide si los pasos 7 y 13 son trabajo nuevo.</td></tr>
@@ -801,11 +804,45 @@
             <td class="n" colspan="2">prefill −1–2%</td><td class="porq">Menos escalas; la cresta baja lo permite. Mismo KL que el paso 4.</td></tr>
           <tr><td class="n">13</td><td class="k">Solapar el all-reduce de prefill</td><td><span class="chip ch-lat">código</span></td>
             <td class="n" colspan="2">prefill 0 a −15%</td><td class="porq">Solo si el paso 2 muestra que PN136 esconde la transferencia en idiotSavant.</td></tr>
-          <tr><td class="n">14</td><td class="k">Atención de prefill entera sobre KV int8</td><td><span class="chip ch-lat">código</span></td>
-            <td class="n" colspan="2">−6% a 15k · −20% a 64k</td><td class="porq">El más caro. Antes, el intermedio: descuantizar solo las páginas nuevas (los pasos mixtos pierden 10–20 ms).</td></tr>
+          <tr><td class="n">14</td><td class="k">Atención de prefill estilo SageAttention<small>QKᵀ int8 · softmax fp32 · P·V fp16/acc16</small></td><td><span class="chip ch-lat">código</span></td>
+            <td class="n" colspan="2">−10–15% a 60k</td><td class="porq">Sobre la KV int8 sin descuantizar. Triton, 1–2 semanas. Antes, el intermedio: descuantizar solo las páginas nuevas.</td></tr>
         </tbody>
       </table>
     </div>
+
+
+    <h3>Atención de prefill: por qué softmax en float y no entero</h3>
+    <p>El camino todo entero de SK-18 hace, por cada par (query, key), la exp por desplazamiento y cuadrática, el peso
+      partido en dos bytes y dos pasadas de mma para P·V. Son ~15 operaciones en el pipe INT32, que en GA102 tiene la
+      mitad de ancho que el de FP32. La exp de hardware (MUFU) es una unidad aparte que corre en paralelo con los tensor
+      cores. Con head_dim 256 la exp no es el cuello, como sí lo es en H100 con 128: lo que manda es el tipo de los mma.</p>
+    <div class="dos">
+      <div class="tabla-caja">
+        <table class="chica">
+          <thead><tr><th>Por par, GA102, hdim 256</th><th class="n">FlashInfer hoy</th><th class="n">Propuesta</th></tr></thead>
+          <tbody>
+            <tr><td class="k">QKᵀ</td><td class="n">fp16/acc32 · 1</td><td class="n mejor">int8 · 0,25</td></tr>
+            <tr><td class="k">P·V</td><td class="n">fp16/acc32 · 1</td><td class="n mejor">fp16/acc16 · 0,5</td></tr>
+            <tr><td class="k">exp (MUFU)</td><td class="n">0,06</td><td class="n">0,06</td></tr>
+            <tr><td class="k">FMA del softmax</td><td class="n">~0,04</td><td class="n">~0,04</td></tr>
+            <tr><td class="k">Total (ciclos por SM)</td><td class="n">~2</td><td class="n mejor">~0,85</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="caja">
+        <ol class="flujo-lista">
+          <li><strong>QKᵀ int8</strong>, K leída directo de la caché paginada; la escala por token al score. Opcional: restar la media de K (Sage, exacto bajo softmax).</li>
+          <li><strong>Softmax fp32</strong> con exp2 de MUFU; si limitara, la exp emulada en FMA de FA4.</li>
+          <li><strong>Reescalado condicional</strong> (FA4): O solo se reescala si el máximo sube más de 8 en log2. Exacto.</li>
+          <li><strong>P·V fp16 con acumulador fp16 por tile</strong>, sumado a un O fp32 en registros: 2× en GA102, sin tocar los acumuladores del mma entre tiles.</li>
+          <li><strong>P en int8, no:</strong> con contexto largo los pesos chicos se pierden (8 bits rompe a 22k).</li>
+        </ol>
+      </div>
+    </div>
+    <p class="nota">Esperable 1,6–2× en la atención (Sage mide ~2× sobre FlashAttention2 en 3090/4090), y sin descuantizar.
+      Lo mismo aplica al decode: SK-18h usa el softmax entero y está en 254 registros y 4 warps por SM. Pasarlo a float
+      es una variante del paso 5. Literatura: SageAttention (arXiv 2410.02367), SageAttention2 (2411.10958),
+      FlashAttention-3 (2407.08608), FlashAttention-4 (2603.05451).</p>
 
     <div class="dos">
       <div class="caja">
