@@ -306,6 +306,96 @@
       la activación masiva) es 70 veces más grande que el resto. La rotación resuelve eso sin tocar el kernel.</p>
   </section>
 
+  <section id="sm86">
+    <h2>SM86 no es SM80: cómo aprovecharlo</h2>
+    <p>Casi todo el software de atención y de GEMM (FlashAttention, FlashInfer, cuBLAS, las plantillas de Triton y de
+      Marlin) está pensado para la A100 (SM80). La 3090 (SM86, GA102) comparte el conjunto de instrucciones y corre
+      ese mismo binario, pero tiene otras proporciones entre unidades. Lo que en SM80 es gratis, acá puede costar el
+      doble, y al revés. Este es el registro de esas diferencias y de cómo conviene usarlas; se agregan filas a medida
+      que se miden.</p>
+
+    <h3>Lo que cambia, por SM y por ciclo</h3>
+    <div class="tabla-caja">
+      <table class="chica" style="min-width:760px">
+        <thead><tr><th>Recurso</th><th class="n">A100 · SM80</th><th class="n">3090 · SM86</th><th>Qué implica acá</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Tensor fp16, acumulador fp32</td><td class="n">1024 FMA</td><td class="n peor">256</td>
+            <td class="porq">La GeForce corta a la mitad el acumulador fp32. Es el default de FlashInfer, cuBLAS y Triton.</td></tr>
+          <tr><td class="k">Tensor fp16, acumulador fp16</td><td class="n">1024</td><td class="n">512</td>
+            <td class="porq">2× sobre el anterior acá; en SM80 da lo mismo.</td></tr>
+          <tr><td class="k">Tensor int8 (IMMA)</td><td class="n">2048</td><td class="n mejor">1024</td>
+            <td class="porq"><strong>4× sobre fp16/acc32</strong> (en SM80 solo 2×). El mejor negocio del chip.</td></tr>
+          <tr><td class="k">Tensor int4</td><td class="n">4096</td><td class="n">2048 (medido 2× s8)</td>
+            <td class="porq">Mismo layout de fragmentos que s8. La calidad es el límite, no el kernel.</td></tr>
+          <tr><td class="k">FP8</td><td class="n">—</td><td class="n">—</td>
+            <td class="porq">Recién en SM89. Nada de lo que depende de fp8 (SageAttention2, FA3 fp8) aplica.</td></tr>
+          <tr><td class="k">FP32 (FFMA)</td><td class="n">64</td><td class="n mejor">128 (medido)</td>
+            <td class="porq">El doble de float por SM…</td></tr>
+          <tr><td class="k">INT32 (IMAD, LOP3, SHF, PRMT) y FMNMX</td><td class="n">64, camino propio</td><td class="n peor">64, <em>compartido</em></td>
+            <td class="porq">…porque el segundo camino es FP32 <em>o</em> INT32. Cada entero le saca un lugar al float (FFMA + IADD mezclados: 46 pares por ciclo).</td></tr>
+          <tr><td class="k">MUFU (exp, rsqrt)</td><td class="n">16</td><td class="n">16 (medido)</td>
+            <td class="porq">La unidad más angosta. Corre en paralelo con el resto.</td></tr>
+          <tr><td class="k">int32 → float (I2FP)</td><td class="n">sin medir</td><td class="n mejor">64 (medido)</td>
+            <td class="porq">Barato en SM86: no hacen falta trucos de número mágico.</td></tr>
+          <tr><td class="k">Memoria compartida</td><td class="n">hasta 164 KB</td><td class="n peor">hasta 100 KB (99 por bloque)</td>
+            <td class="porq">Los tiles grandes con 3–4 etapas de SM80 no entran; con head_dim 256 es el primer límite.</td></tr>
+          <tr><td class="k">Hilos por SM</td><td class="n">2048</td><td class="n peor">1536</td>
+            <td class="porq">Dos bloques de 1024 no conviven. Menos warps para esconder latencia.</td></tr>
+          <tr><td class="k">Registros por SM</td><td class="n">64K</td><td class="n">64K</td>
+            <td class="porq">Iguales, pero con menos hilos cada warp cuesta más: 255 registros dejan 8 warps por SM.</td></tr>
+          <tr><td class="k">L2</td><td class="n">40 MB</td><td class="n peor">6 MB</td>
+            <td class="porq">No contar con que la KV o los pesos queden en L2: todo decode paga DRAM.</td></tr>
+          <tr><td class="k">Memoria</td><td class="n">1,5–2 TB/s HBM</td><td class="n">936 GB/s (~640 sostenido con cap)</td>
+            <td class="porq">El decode lo deciden los bytes: int4 en pesos, int8 en KV.</td></tr>
+          <tr><td class="k">Asincronía</td><td class="n">cp.async</td><td class="n">cp.async</td>
+            <td class="porq">Ninguno tiene wgmma ni TMA (son de SM90). El solape de FA3/FA4 no existe: se esconde latencia solo intercalando warps.</td></tr>
+          <tr><td class="k">Enlace entre placas</td><td class="n">NVLink</td><td class="n">PCIe (acá, sin puente)</td>
+            <td class="porq">El all-reduce de decode es latencia (~25 µs), no ancho de banda: importa cuántos, no cuánto.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="nota">SM86 medido con <span class="m">tests/proto/sm86_throughput.cu</span> (27-09): resultados por ciclo y SM con clock64. Tensor: la spec
+      de la 3090 (71 / 142 / 284 / 568 TFLOPS o TOPS densos a 1,695 GHz sobre 82 SM); el int4 2× s8 está medido. A100: la spec de la placa.</p>
+
+    <h3>Reglas para escribir kernels acá</h3>
+    <ol class="flujo-lista">
+      <li><strong>Todo mma fp16 con acumulador fp32 es candidato.</strong> Pasarlo a int8 da 4×, y a acumulador fp16 da 2×
+        si la suma es corta (dentro de un tile) y después se pliega en fp32. Donde vale: la atención de prefill, el chunk del GDN,
+        el lm_head con muchas filas.</li>
+      <li><strong>Sin ALU entero en el lazo caliente.</strong> Comparte camino con el float y va a mitad de ancho. Softmax y
+        epílogos en float, con exp de MUFU; lo entero, solo donde reemplaza bytes (pesos, KV).</li>
+      <li><strong>Los registros deciden la ocupación, y la ocupación esconde latencia.</strong> Sin wgmma, el solape
+        entre mma, softmax y cargas solo sale de tener ≥8 warps por SM. Con head_dim 256: acumuladores fp16 por tile,
+        partir las dimensiones entre warps y recalcular lo barato (QKᵀ int8) antes que sincronizar por shared.</li>
+      <li><strong>Tiles para 100 KB y 1536 hilos</strong>, no los de SM80. Menos etapas de cp.async y tiles más chicos,
+        y la grilla atada al hardware (warps por SM), no al problema.</li>
+      <li><strong>El decode es bytes.</strong> Con 6 MB de L2 y ~640 GB/s, un kernel de decode se mide en % del techo de
+        DRAM. Marlin está en 98–103%; SK-18h en 35%.</li>
+      <li><strong>Pocas comunicaciones.</strong> Por PCIe cada all-reduce cuesta ~25 µs aunque mueva 92 KB: fusionar o
+        eliminar all-reduces vale más que comprimirlos.</li>
+      <li><strong>Medir en SM86 y con el reloj fijo.</strong> Las cifras de los papers (H100, A100) no transfieren: la
+        exp que en H100 pesa 50% acá es ~7% del par; el fp32 que en A100 es gratis acá cuesta el doble.</li>
+    </ol>
+
+    <h3>Dónde ya se aplica y dónde falta</h3>
+    <div class="tabla-caja">
+      <table class="chica" style="min-width:680px">
+        <thead><tr><th>Lugar</th><th>Hoy</th><th>Regla</th><th>Estado</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Lineales</td><td class="porq">Marlin W4A8, IMMA s8</td><td class="n">1, 5</td><td><span class="chip ch-hecho">aplicado</span></td></tr>
+          <tr><td class="k">down_proj</td><td class="porq">SK-23 escribe int8 directo</td><td class="n">1, 2</td><td><span class="chip ch-hecho">aplicado</span></td></tr>
+          <tr><td class="k">Atención de decode</td><td class="porq">SK-18h: softmax entero, 254 registros, 4 warps por SM</td><td class="n">2, 3, 5</td><td><span class="chip ch-abierto">paso 5</span></td></tr>
+          <tr><td class="k">Atención de prefill</td><td class="porq">FlashInfer fp16/acc32 sobre KV descuantizada</td><td class="n">1, 2, 3</td><td><span class="chip ch-abierto">paso 14</span></td></tr>
+          <tr><td class="k">GDN chunk de prefill</td><td class="porq">fla, fp16/acc32</td><td class="n">1</td><td><span class="chip ch-abierto">sin plan</span></td></tr>
+          <tr><td class="k">lm_head con 36 filas</td><td class="porq">W4A16, HMMA fp16/acc32, limitado por cómputo</td><td class="n">1</td><td><span class="chip ch-abierto">paso 3</span></td></tr>
+          <tr><td class="k">Borrador</td><td class="porq">GEMM fp16 sin cuantizar; atención Triton con 12 bloques</td><td class="n">1, 4</td><td><span class="chip ch-abierto">paso 10</span></td></tr>
+          <tr><td class="k">All-reduce de decode</td><td class="porq">128 por paso por NCCL</td><td class="n">6</td><td><span class="chip ch-abierto">paso 4</span></td></tr>
+          <tr><td class="k">Cinta del árbol GDN</td><td class="porq">1 bloque para 82 SM</td><td class="n">4</td><td><span class="chip ch-abierto">paso 1</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <section>
     <h2>Por qué hubo que rotar: el error de A8 por lineal</h2>
     <p>Error relativo de la salida de cada lineal con la activación en int8 por token, sobre muestras reales apartadas
@@ -824,7 +914,7 @@
             <tr><td class="k">QKᵀ</td><td class="n">fp16/acc32 · 1</td><td class="n mejor">int8 · 0,25</td></tr>
             <tr><td class="k">P·V</td><td class="n">fp16/acc32 · 1</td><td class="n mejor">fp16/acc16 · 0,5</td></tr>
             <tr><td class="k">exp (MUFU)</td><td class="n">0,06</td><td class="n">0,06</td></tr>
-            <tr><td class="k">FMA del softmax</td><td class="n">~0,04</td><td class="n">~0,04</td></tr>
+            <tr><td class="k">resto del softmax<small>I2F, max, FFMA, FADD, pack</small></td><td class="n">~0,055</td><td class="n">~0,055</td></tr>
             <tr><td class="k">Total (ciclos por SM)</td><td class="n">~2</td><td class="n mejor">~0,85</td></tr>
           </tbody>
         </table>
@@ -840,7 +930,7 @@
       </div>
     </div>
     <p class="nota">Esperable 1,6–2× en la atención (Sage mide ~2× sobre FlashAttention2 en 3090/4090), y sin descuantizar.
-      Lo mismo aplica al decode: SK-18h usa el softmax entero y está en 254 registros y 4 warps por SM. Pasarlo a float
+      Throughput medido y reglas en <a href="#sm86">SM86 no es SM80</a>. Lo mismo aplica al decode: SK-18h usa el softmax entero y está en 254 registros y 4 warps por SM. Pasarlo a float
       es una variante del paso 5. Literatura: SageAttention (arXiv 2410.02367), SageAttention2 (2411.10958),
       FlashAttention-3 (2407.08608), FlashAttention-4 (2603.05451).</p>
 
