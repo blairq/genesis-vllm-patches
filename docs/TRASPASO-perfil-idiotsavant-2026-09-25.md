@@ -388,6 +388,46 @@ cores y el FMA).
 Con head_dim 256 la exp **no** es el cuello; a diferencia de H100 con hdim 128, que es el caso de FA3/FA4. El cuello es
 el tipo de los mma. Techo: ~2 → ~0,85 ciclos por par contando el softmax (~2,3×).
 
+**Throughput medido en SM86** (`tests/proto/sm86_throughput.cu`, resultados por ciclo y SM, 27-09):
+
+| Instrucción | por ciclo y SM | Nota |
+|---|---|---|
+| FFMA / FADD fp32 | ~128 | el pipe ancho |
+| HFMA2 | 64 instrucciones = 128 resultados fp16 | |
+| IADD3 | ~112 | corre en los dos caminos |
+| IMAD, LOP3, SHF, PRMT, FMNMX | 64 | **medio ancho**: los enteros y el max comparten el camino con FP32 |
+| I2FP (int32 → fp32) | 64 | en SM86 es rápido, no hace falta el truco del número mágico |
+| F2FP pack (2 fp32 → f16x2) | 64 instrucciones = 128 valores | |
+| **MUFU.EX2** | **16** | la unidad más angosta |
+| FFMA + IADD mezclados | 46 pares | se pisan: comparten camino |
+| FFMA + EX2 mezclados | 16 pares | la exp manda |
+
+Tensor cores de la 3090 (spec, por ciclo y SM): fp16 con acumulador fp32, 256 FMA; con acumulador fp16, 512;
+int8, 1024; int4, 2048 (medido 2× sobre s8).
+
+**Presupuesto por par (query, key), hdim 256, ciclos por SM:**
+
+| Qué | Costo |
+|---|---|
+| QKᵀ int8 | 0,25 |
+| P·V fp16/acc16 | 0,5 |
+| exp (MUFU) | 0,0625 |
+| resto del softmax: I2F + FMNMX + FFMA + FADD + ½ F2F | ~0,055, en otro camino |
+
+- **Total ~0,8–0,87** contra ~2 de FlashInfer. El softmax float pasa a ser ~13% una vez que los mma bajan: ya no es
+  despreciable y hay que **esconderlo intercalando warps**.
+- En SM86 no hay wgmma ni TMA (el solape asíncrono de FA3/FA4). Solo `mma.sync` + `cp.async`, así que el solape
+  depende de tener ≥8 warps por SM.
+- Con hdim 256, el acumulador O de un warp (16 queries × 256) en fp32 son 128 registros por hilo. Por eso FlashInfer
+  está en 243 y SK-18h en 254. Salidas:
+  - partir las 256 dimensiones entre 2 warps (O de 64 registros) y **recalcular QKᵀ en cada warp**: en int8 cuesta
+    0,25, más barato que sincronizar por shared;
+  - el acumulador fp16 por tile ocupa la mitad.
+- El softmax entero de SK-18 (~15 operaciones de 64 por ciclo por par ≈ 0,23 ciclos, más dos pasadas de P·V) cuesta
+  **~4× el ALU** del float y más registros.
+- La exp emulada de FA4 en SM86 cuesta ~0,07 ciclos por exp (grado 3 + Cody-Waite con SHF a 64 por ciclo): igual que
+  MUFU. Solo sirve para repartir carga si MUFU fuera el camino que limita.
+
 **Diseño propuesto (literatura, ver abajo)**
 1. **QKᵀ en int8** (IMMA): Q de `prep2` (Hadamard + int8 por token) y K int8 **leída directo de la caché paginada**, sin
    descuantizar. La escala de K por token se aplica al score (una FMUL por par). Opcional: el suavizado de K de Sage
