@@ -128,6 +128,15 @@ SH_H = 32 * (256 + 128) + 2 * 64 * 256 + 2 * 256 * 64 + 2 * 64 * 2 * 4
 NW8 = int(os.environ.get("GENESIS_SK18H_NW", "8"))
 
 
+# SK-30 (28-09): decode en UNA pasada (softmax en linea en fp32, K leida una vez, reparto en GMAX grupos de
+# keys segun el seq_len real). Offline, reloj fijo: 272 -> 198 us por capa a 62k, 139 -> 91 a 20k, 125 -> 39 a
+# 4k; mas preciso que batch2 contra float. P.V con P' en 16 bits (hi/lo, dos mma int8).
+SK30 = os.environ.get("GENESIS_PN131_SK30", "0") == "1"
+SK30_GMAX = int(os.environ.get("GENESIS_PN131_SK30_GMAX", "128"))
+SK30_NQ = 2
+SH_30 = 2 * 64 * 272 + 2 * 256 * 80 + 64 * 72 * 2 + 2 * 64 * 4 + 2 * SK30_NQ * 64 * 4
+
+
 def sh_h(nw: int) -> int:
     return 8 * nw * (256 + 128) + 2 * 64 * 256 + 2 * 256 * 64 + 2 * 64 * 2 * 4
 SH_I = 32 * QPLANOS * 128 + 2 * 128 * 128 + 2 * 256 * 64 + 2 * 32 * 128 + 2 * 128 * 2 * 8
@@ -262,6 +271,11 @@ def _kernels(md="int8"):
                   union=Kernel("sk18h_union4.cu", "sk18h_union4", defs=defs, warps=1),
                   decuant=Kernel("sk18h_decuant.cu", "sk18h_decuant", warps=1),
                   salida=Kernel("sk18h_salida.cu", "sk18h_salida", warps=1))
+        if SK30 and ARBOL and ROT_PTX:
+            ks["prep30"] = Kernel("sk18h_prep2.cu", "sk18h_prep2", defs=arb + ["-DQSF=1"], warps=1)
+            ks["sk30"] = Kernel("sk30_decode_1pasada.cu", "sk30_decode",
+                                defs=[f"-DNQ={SK30_NQ}", "-DPV8=1", "-DPHL=1"], warps=4 * SK30_NQ)
+            ks["sk30u"] = Kernel("sk30_decode_1pasada.cu", "sk30_union", warps=8)
         for x in ks.values():
             x.cargar()
         _k[dev] = ks
@@ -341,6 +355,12 @@ class _Bufs:
         self.Og = z(NG * R * QD, dt=torch.int64)
         self.Sg = z(NG * R, dt=torch.int64)
         self.ar = torch.arange(_max_tok_decode(), device=dev, dtype=torch.int32)
+        if SK30:
+            self.qsf = z(R, dt=torch.float32)
+            self.Op30 = z(SK30_GMAX * R * QD, dt=torch.float16)
+            self.Mp30 = z(SK30_GMAX * R, dt=torch.float32)
+            self.Lp30 = z(SK30_GMAX * R, dt=torch.float32)
+            log.info("PN131 SK-30: parciales %d grupos (%.0f MiB)", SK30_GMAX, self.Op30.numel() * 2 / 2**20)
         mb = (self.oh.numel() + self.ol.numel()) * 4 / 2**20
         log.info("PN131 buffers: bmax=%d nchmax=%d MB=%d (%.0f MiB de acumuladores)", bmax, nchmax, MB, mb)
 
@@ -691,6 +711,18 @@ def _decode_uniforme(impl, query, kv_cache, md, output, B, L, capturando):
             ks["prep8"].lanzar((nt, nh * G), [q16, seq, c.refs8, _signos_dev(dev), bf.Q8[: R * QD],
                                               bf.lim8[:R], bf.mqb8[:R], bf.dcap8[:R],
                                               L, nh, G, MB, ZSH, q16.stride(0)])
+    elif ROT_PTX and ARBOL and SK30 and MB == 64:
+        # SK-30: prep2 con la escala de fila en float, decode en una pasada y union a la salida
+        anc = mascara_arbol(dev, L, bf, capturando)
+        ks["prep30"].lanzar((nt, nh * G), [q16, seq, c.refs, _signos_dev(dev), Qb, lim, mqb, dcap, anc,
+                                           bf.abase[:R], bf.amask[:R], bf.qsf[:R], L, nh, G, MB, ZSH, q16.stride(0)])
+        ks["sk30"].lanzar((SK30_GMAX, B * nh), [Qb, bf.qsf[:R], raw, md.block_table, md.block_table.stride(0), seq,
+                                                lim, bf.abase[:R], bf.amask[:R], nh, bs, blk, c.refs, SK30_GMAX,
+                                                bf.Op30[: SK30_GMAX * R * QD], bf.Mp30[: SK30_GMAX * R],
+                                                bf.Lp30[: SK30_GMAX * R]], shared=SH_30)
+        ks["sk30u"].lanzar((MB, B * nh), [bf.Op30[: SK30_GMAX * R * QD], bf.Mp30[: SK30_GMAX * R],
+                                          bf.Lp30[: SK30_GMAX * R], seq, SK30_GMAX, B, nh, L, G, output[:nt]])
+        return
     elif ROT_PTX and ARBOL:
         anc = mascara_arbol(dev, L, bf, capturando)
         ks["prep"].lanzar((nt, nh * G), [q16, seq, c.refs, _signos_dev(dev), Qb, lim, mqb, dcap, anc,

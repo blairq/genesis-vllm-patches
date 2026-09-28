@@ -19,6 +19,11 @@
 #ifndef MQ
 #define MQ 1561327149LL
 #endif
+// QSF=1: ademas, la escala de fila en float para SK-30 (softmax en fp32, log2):
+//   qs = (mx / 256 / 127) * 2^(ek-15) * (1/16) * log2(e)     (mx en Q8, 1/16 = 1/sqrt(256))
+#ifndef QSF
+#define QSF 0
+#endif
 
 extern "C" __global__ void __launch_bounds__(32)
 sk18h_prep2(
@@ -34,6 +39,9 @@ sk18h_prep2(
     const int* __restrict__ anc,            // [B*L] bits de ancestros de cada token (0 para el ancla)
     int* __restrict__ abase,                // [B, NH, MB]
     int* __restrict__ amask,
+#endif
+#if QSF
+    float* __restrict__ qsf,                // [B, NH, MB]
 #endif
     int L, int NH, int G, int MB, int ZSH, int QS)   // QS = paso de fila de q (elementos)
 {
@@ -79,6 +87,9 @@ sk18h_prep2(
         long long dc = ((1LL << 28) + m - 1) / m;
         dc = dc < (1LL << 30) ? dc : (1LL << 30);
         lim[row] = seq[b] - L + j;
+#if QSF
+        qsf[row] = (float)mx * (1.f / (256.f * 127.f)) * exp2f((float)(ek - 15)) * (1.f / 16.f) * 1.4426950408889634f;
+#endif
         mqb[row] = (int)m;
         dcap[row] = (int)dc;
 #if ARBOL
@@ -90,6 +101,9 @@ sk18h_prep2(
                 lim[base_bh + r] = -1; mqb[base_bh + r] = 1; dcap[base_bh + r] = 0;
 #if ARBOL
                 abase[base_bh + r] = -1; amask[base_bh + r] = 0;
+#endif
+#if QSF
+                qsf[base_bh + r] = 0.f;
 #endif
             }
     }
