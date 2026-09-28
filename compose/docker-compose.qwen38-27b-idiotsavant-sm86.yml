@@ -93,6 +93,8 @@ services:
       - GENESIS_PN157_BITS_CONV=${GENESIS_PN157_BITS_CONV:-0}               # 8 = kernel_projection en int8 por canal: -0,9% de aceptacion en el banco de agente, neto cero; 0 = densa
       - GENESIS_ENABLE_PN159_VOCAB_BORRADOR=${GENESIS_ENABLE_PN159_VOCAB_BORRADOR:-1}   # candidatos del borrador sobre los tokens frecuentes de la carga real (FR-Spec): paso -2,1%, aceptacion igual con 64k
       - GENESIS_PN159_VOCAB=${GENESIS_PN159_VOCAB:-65536}                     # 32768: -3,5% de aceptacion
+      - GENESIS_PN159_SK28=${GENESIS_PN159_SK28:-0}                         # top-k de los candidatos en PTX (SK-28/29): sin flashinfer ni casts
+      - GENESIS_PN159_DINAMICO=${GENESIS_PN159_DINAMICO:-0}                 # fase 2: anillo de N filas con los tokens del prompt y lo aceptado (SK-27, NanoSpec)
       - GENESIS_PN144_ESCALA_RESIDUAL=32         # el residual del borrador desborda fp16 sin esto
       - GENESIS_ENABLE_ARBOL=1                   # arbol de borrador (+10-11% prosa)
       - GENESIS_ARBOL_CERRADA=0

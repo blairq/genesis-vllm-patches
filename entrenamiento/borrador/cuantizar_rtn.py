@@ -10,6 +10,7 @@ q = round(w / s) en [-8, 7], s = max|w| / 7,5 por grupo de 128; se guarda q + 8 
 valor i del int32 en los bits 4i..4i+3.
 
 Uso: cuantizar_rtn.py <dir_bf16> <dir_salida> [dir_referencia_w4a16 para copiar quantization_config]
+     [--escalas=<dir_w4a16>: reusar sus escalas (reajuste del borrador servido, ver decuantizar.py)]
 """
 import json
 import os
@@ -24,10 +25,13 @@ G = 128
 OBJETIVO = re.compile(r"^(layers\.\d+\.(self_attn\.(q|k|v|o)_proj|mlp\.(gate|up|down)_proj)|fc)\.weight$")
 
 
-def empaquetar(w: torch.Tensor):
+def empaquetar(w: torch.Tensor, s=None):
+    """s: escalas fp16 [out, inn/G] a reusar (--escalas): con las del W4A16 servido, lo que no se entreno
+    vuelve EXACTO a sus int4 (round(q*s/s) = q) y lo entrenado se redondea sobre la misma grilla."""
     out, inn = w.shape
     wf = w.float().view(out, inn // G, G)
-    s = (wf.abs().amax(-1) / 7.5).clamp_min(1e-10).half()           # escalas fp16
+    if s is None:
+        s = (wf.abs().amax(-1) / 7.5).clamp_min(1e-10).half()       # escalas fp16
     q = (wf / s.float().unsqueeze(-1)).round().clamp(-8, 7).to(torch.int32) + 8
     q = q.view(out, inn // 8, 8)
     sh = torch.arange(0, 32, 4, dtype=torch.int32)
@@ -38,15 +42,18 @@ def empaquetar(w: torch.Tensor):
 
 
 def main():
-    src, dst = sys.argv[1], sys.argv[2]
-    ref = sys.argv[3] if len(sys.argv) > 3 else "/models/qwen3.8-27b-dflash2-w4a16"
+    args = [x for x in sys.argv[1:] if not x.startswith("--escalas=")]
+    esc_dir = next((x.split("=", 1)[1] for x in sys.argv[1:] if x.startswith("--escalas=")), None)
+    src, dst = args[0], args[1]
+    ref = args[2] if len(args) > 2 else "/models/qwen3.8-27b-dflash2-w4a16"
     os.makedirs(dst, exist_ok=True)
     sd = load_file(os.path.join(src, "model.safetensors"))
+    escalas = load_file(os.path.join(esc_dir, "model.safetensors")) if esc_dir else {}
     nuevo, errs = {}, []
     for k, v in sd.items():
         if OBJETIVO.match(k):
             base = k[: -len(".weight")]
-            p, s, shp, e = empaquetar(v)
+            p, s, shp, e = empaquetar(v, escalas.get(base + ".weight_scale"))
             nuevo[base + ".weight_packed"], nuevo[base + ".weight_scale"], nuevo[base + ".weight_shape"] = p, s, shp
             errs.append(e)
         else:

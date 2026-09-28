@@ -142,15 +142,54 @@ def poner_lora(m, r, alpha, conv=False):
     return ps
 
 
+class FalsoQ8(nn.Module):
+    """kernel_projection de la conv con la cuantizacion que le hace PN157 al servir (GENESIS_PN157_BITS_CONV=8):
+    int8 simetrico por canal de salida, s = max|w| / 127, redondeo al mas cercano. Paso directo (STE):
+    adelante ve el peso cuantizado, atras el gradiente pasa como si no lo estuviera."""
+
+    def __init__(self, lin: nn.Linear):
+        super().__init__()
+        self.lin = lin
+
+    @property
+    def weight(self):
+        return self.lin.weight
+
+    def forward(self, x):
+        w = self.lin.weight.float()
+        s = w.detach().abs().amax(1, keepdim=True).clamp_min(1e-8) / 127
+        wq = (w.detach() / s).round().clamp(-128, 127) * s
+        return F.linear(x, (w + (wq - w.detach())).to(x.dtype))
+
+
+def poner_conv_int8(m):
+    for capa in m.layers:
+        for nom in ("attention_conv_proj", "mlp_conv_proj"):
+            setattr(capa, nom, FalsoQ8(getattr(capa, nom)))
+
+
+def recortar_vocab(m, orden_npy, n, dev):
+    """Los candidatos del borrador servido con PN159 salen de los n tokens mas frecuentes: logits del resto a
+    -inf (en la perdida, en el argmax del AUF y en las metricas)."""
+    orden = torch.from_numpy(np.load(orden_npy).astype(np.int64))
+    dentro = torch.zeros(m.lm_head.shape[0], dtype=torch.bool)
+    dentro[orden[:n]] = True
+    fuera = (~dentro).to(dev)
+    original = m.logits
+    m.logits = lambda h: original(h).masked_fill(fuera, float("-inf"))
+
+
 # ───────────────────────────── perdida y metricas ─────────────────────────────
 
 def perdida(logits, lab, top_i, top_p, auf):
     """logits [B, K, V] fp32. TV + CE contra el top-16 de noon; con AUF se corta en el primer fallo."""
     valido = lab >= 0
     lq = logits.log_softmax(-1)
-    q_top = lq.gather(-1, top_i).exp()                                  # [B, K, 16]
+    lq_top = lq.gather(-1, top_i)
+    q_top = lq_top.exp()                                                # [B, K, 16]
     tv = 0.5 * ((top_p - q_top).abs().sum(-1) + (1 - q_top.sum(-1)).clamp(min=0))
-    ce = -(top_p * lq.gather(-1, top_i)).sum(-1)
+    # con el vocabulario recortado los tokens de afuera tienen log q = -inf: fuera de la CE (la TV ya los cuenta)
+    ce = -(top_p * torch.where(torch.isfinite(lq_top), lq_top, torch.zeros_like(lq_top))).sum(-1)
     peso = valido.float()
     if auf:
         with torch.no_grad():
@@ -224,6 +263,10 @@ def main():
     ap.add_argument("--max_anclas_eval", type=int, default=0)
     ap.add_argument("--dispositivo", default="cuda")
     ap.add_argument("--max_pasos", type=int, default=0, help="corta el entrenamiento (pruebas)")
+    ap.add_argument("--conv_int8", action="store_true", help="kernel_projection con la cuantizacion int8 de PN157 (STE)")
+    ap.add_argument("--vocab", type=int, default=0, help="candidatos sobre los N tokens mas frecuentes (PN159)")
+    ap.add_argument("--vocab_orden", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                                                          "vllm", "_genesis", "datos", "pn159_orden.npy"))
     a = ap.parse_args()
     dev = a.dispositivo
     torch.manual_seed(0)
@@ -245,6 +288,12 @@ def main():
     m.embed, m.lm_head = cargar_target(noon, device=dev)
     for q in m.parameters():
         q.requires_grad_(False)
+    if a.conv_int8:
+        poner_conv_int8(m)
+        print("conv: kernel_projection en int8 por canal (como PN157)", flush=True)
+    if a.vocab:
+        recortar_vocab(m, a.vocab_orden, a.vocab, dev)
+        print(f"vocabulario recortado a {a.vocab} (como PN159)", flush=True)
     if dev.startswith("cuda"):
         print(f"cargado; GPU {torch.cuda.memory_allocated() / 1e9:.1f} GB", flush=True)
 
@@ -309,6 +358,8 @@ def guardar(m, dir_orig, salida):
     for i, capa in enumerate(m.layers):
         for nom, clave in inv.items():
             mod = getattr(capa, nom)
+            if isinstance(mod, FalsoQ8):
+                mod = mod.lin                  # se guarda el peso sin cuantizar: PN157 lo cuantiza igual al cargar
             if isinstance(mod, LoRA):
                 mod = mod.fusionar()
             sd[f"layers.{i}.{clave}"] = mod.weight.detach().to(torch.bfloat16).cpu().contiguous()

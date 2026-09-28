@@ -26,7 +26,9 @@ import torch
 log = logging.getLogger("genesis.pn159")
 ACTIVO = os.environ.get("GENESIS_ENABLE_PN159_VOCAB_BORRADOR", "0").strip().lower() in ("1", "true", "yes", "on")
 TAM = int(os.environ.get("GENESIS_PN159_VOCAB", "65536"))     # 32k: -3,5% de aceptacion; 64k: igual
+DIN = int(os.environ.get("GENESIS_PN159_DINAMICO", "0"))           # filas del anillo dinamico por rango (0 = fase 1)
 _HECHO = False
+_din: dict = {}
 _ORDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "datos", "pn159_orden.npy")
 
 
@@ -122,6 +124,8 @@ def preparar(layer, qp: torch.Tensor, esc: torch.Tensor) -> None:
         layer.pn159_ids = ids                                            # int64, globales
         layer.pn159_n, layer.pn159_k = n, k
         del qs, es
+        if DIN:
+            _preparar_dinamico(layer, qp, esc, ini, int(layer.shard_indices.org_vocab_end_index))
         torch.cuda.empty_cache()   # lo que carga despues (el borrador) asigna en el pool de pesos de vLLM
         log.warning("PN159: candidatos del borrador: %d columnas del lm_head int4 en este rango (%.0f MB), "
                     "vocabulario %d", n, n * k / 2 / 1e6, TAM)
@@ -130,6 +134,156 @@ def preparar(layer, qp: torch.Tensor, esc: torch.Tensor) -> None:
         for a in ("pn159_w", "pn159_ids"):
             if hasattr(layer, a):
                 delattr(layer, a)
+
+
+def _preparar_dinamico(layer, qp, esc, ini, fin) -> None:
+    """Fase 2: copia token-major del lm_head int4 de este tramo en memoria pinned del host (la lee SK-27 por
+    UVA, sin CPU en el lazo), bitmaps de pertenencia y el anillo de DIN filas fp16 en la GPU."""
+    import numpy as np
+    dev = qp.device
+    n_tr, kw, kg = fin - ini, qp.shape[0], esc.shape[0]
+    hq = torch.empty(n_tr, kw, dtype=torch.int32, pin_memory=True)
+    hs = torch.empty(n_tr, kg, dtype=torch.float16, pin_memory=True)
+    for a in range(0, n_tr, 8192):                                    # por trozos: la carga llega justa
+        b = min(a + 8192, n_tr)
+        hq[a:b].copy_(qp[:, a:b].t())
+        hs[a:b].copy_(esc[:, a:b].t())
+    orden = torch.from_numpy(np.load(_ORDEN).astype("int64"))       # todo el vocabulario, ordenado
+    palabras = (max(int(orden.max()) + 1, fin) + 31) // 32 + 1
+    s_tot = -(-TAM // (256 * layer.tp_size)) * 256 * layer.tp_size
+    est = torch.zeros(palabras * 32, dtype=torch.bool)
+    est[orden[:s_tot]] = True
+    bits = (est.view(-1, 32).to(torch.int64) << torch.arange(32)).sum(1)
+    estatico = torch.where(bits >= 2 ** 31, bits - 2 ** 32, bits).to(torch.int32).to(dev)
+    k = kw * 8
+    _din.update(hq=hq, hs=hs, estatico=estatico, dinbit=torch.zeros(palabras, dtype=torch.int32, device=dev),
+                ids=torch.full((DIN,), -1, dtype=torch.int32, device=dev),
+                filas=torch.zeros(DIN, k, dtype=torch.float16, device=dev),
+                cabeza=torch.zeros(1, dtype=torch.int32, device=dev), ini=ini, fin=fin, k=k, g=k // kg)
+    layer.pn159_din = _din
+    log.warning("PN159 fase 2: anillo de %d filas (%.0f MB en la GPU), lm_head del tramo en el host (%.0f MB pinned)",
+                DIN, DIN * k * 2 / 1e6, (hq.numel() * 4 + hs.numel() * 2) / 1e6)
+
+
+def _kernel():
+    if "kern" not in _din:
+        from vllm._genesis.kernels.ptx_lab import Kernel
+        kr = Kernel("sk27_vocab_dinamico.cu", "sk27_observar",
+                    defs=[f"-DK={_din['k']}", f"-DG={_din['g']}", f"-DDMAX={max(DIN, 32)}"], warps=32)
+        kr.cargar()
+        _din["kern"] = kr
+    return _din["kern"]
+
+
+def observar_cuda(ids: torch.Tensor, cabeza: torch.Tensor) -> None:
+    d = _din
+    n = ids.numel()
+    if n == 0:
+        return
+    x = ids.reshape(-1)
+    if x.dtype not in (torch.int32, torch.int64):
+        x = x.to(torch.int64)
+    _kernel().lanzar((1, 1), [x, n, 1 if x.dtype == torch.int64 else 0, d["estatico"], d["dinbit"], d["ini"], d["fin"],
+                              d["hq"], d["hs"], d["ids"], d["filas"], cabeza, DIN])
+
+
+@torch.library.custom_op("genesis::pn159_observar", mutates_args=("cabeza",))
+def _observar_op(ids: torch.Tensor, cabeza: torch.Tensor) -> None:
+    observar_cuda(ids, cabeza)
+
+
+@_observar_op.register_fake
+def _observar_fake(ids, cabeza):
+    return None
+
+
+def observar(input_ids: torch.Tensor) -> None:
+    """Desde el embedding (PN159 fase 2): los tokens del paso alimentan el anillo dinamico."""
+    if "cabeza" in _din and input_ids.is_cuda:
+        torch.ops.genesis.pn159_observar(input_ids, _din["cabeza"])
+
+
+def _kern(nombre: str, extra=()):
+    if nombre not in _din:
+        from vllm._genesis.kernels.ptx_lab import Kernel
+        kr = Kernel("sk27_vocab_dinamico.cu", nombre, defs=[f"-DK={_din['k']}", f"-DG={_din['g']}",
+                                                             f"-DDMAX={max(DIN, 32)}", *extra], warps=8)
+        kr.cargar()
+        _din[nombre] = kr
+    return _din[nombre]
+
+
+def anillo_cuda(h: torch.Tensor, vs: torch.Tensor, is_: torch.Tensor):
+    d = _din
+    M, kt = vs.shape
+    x = h.reshape(M, -1).to(torch.float16).contiguous()
+    ld = torch.empty(M, DIN, dtype=torch.float32, device=h.device)
+    _kern("sk27_logits").lanzar((-(-DIN // 8), -(-M // 16)), [x, M, d["filas"], d["ids"], ld, DIN])
+    vo = torch.empty(M, kt, dtype=torch.float16, device=h.device)
+    io = torch.empty(M, kt, dtype=torch.int64, device=h.device)
+    _kern("sk27_fusion", (f"-DKT={kt}",)).lanzar((M, 1), [vs.to(torch.float16).contiguous(), is_.contiguous(), ld,
+                                                          d["ids"], DIN, vo, io], shared=(kt + DIN) * 4)
+    return vo.to(vs.dtype), io
+
+
+@torch.library.custom_op("genesis::pn159_anillo", mutates_args=())
+def _anillo_op(h: torch.Tensor, vs: torch.Tensor, is_: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    return anillo_cuda(h, vs, is_)
+
+
+@_anillo_op.register_fake
+def _anillo_fake(h, vs, is_):
+    return torch.empty_like(vs), torch.empty_like(is_)
+
+
+_SK28 = os.environ.get("GENESIS_PN159_SK28", "0") == "1"      # apagado hasta validarlo en el servidor
+_k28: dict = {}
+
+
+def _kern28(nombre: str, k: int, mt: int = 1):
+    clave = (nombre, mt)
+    if clave not in _k28:
+        from vllm._genesis.kernels.ptx_lab import Kernel
+        w = {"sk28_anillo": 8, "sk28_parcial": 8, "sk28_final": 1}[nombre]
+        kr = Kernel("sk28_topk_borrador.cu", nombre, defs=[f"-DK={k}", "-DKT=16", f"-DMT={mt}"], warps=w)
+        kr.cargar()
+        _k28[clave] = kr
+    return _k28[clave]
+
+
+def topk_cuda(logits: torch.Tensor, h: torch.Tensor, ids_fijo: torch.Tensor):
+    M, S = logits.shape
+    dev = logits.device
+    lg = (logits if logits.dtype == torch.float16 else logits.to(torch.float16)).contiguous()
+    d = _din if "filas" in _din else None
+    Dn = DIN if d is not None else 0
+    vo = torch.empty(M, 16, dtype=torch.float32, device=dev)
+    io = torch.empty(M, 16, dtype=torch.int64, device=dev)
+    if d is not None:
+        x = h.reshape(M, -1).to(torch.float16).contiguous()
+        ld = torch.empty(M, Dn, dtype=torch.float32, device=dev)
+        assert M <= 64, "sk28_anillo: MT=4 tiles de 16"
+        _kern28("sk28_anillo", x.shape[-1], -(-M // 16)).lanzar((-(-Dn // 8), 1), [x, M, d["filas"], d["ids"], ld, Dn])
+        din_ids = d["ids"]
+    else:
+        ld, din_ids = vo, ids_fijo                                   # no se leen con D = 0
+    if "sk29" not in _k28:
+        from vllm._genesis.kernels.ptx_lab import Kernel
+        _k28["sk29"] = Kernel("sk29_topk_filtro.cu", "sk29_topk", warps=16)
+        _k28["sk29"].cargar()
+    _k28["sk29"].lanzar((M, 1), [lg, S, ids_fijo, ld, din_ids, Dn, vo, io], shared=((S + 31) // 32) * 4)
+    return vo, io
+
+
+@torch.library.custom_op("genesis::pn159_topk", mutates_args=())
+def _topk_op(logits: torch.Tensor, h: torch.Tensor, ids_fijo: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    return topk_cuda(logits, h, ids_fijo)
+
+
+@_topk_op.register_fake
+def _topk_fake(logits, h, ids_fijo):
+    M = logits.shape[0]
+    return (logits.new_empty((M, 16), dtype=torch.float32), logits.new_empty((M, 16), dtype=torch.int64))
 
 
 def _logits(layer, x: torch.Tensor) -> torch.Tensor:
@@ -151,8 +305,14 @@ def top_k(proc, lm_head, hidden_states: torch.Tensor, k: int):
     from vllm.model_executor.layers.logits_processor import _topk
 
     logits = _logits(lm_head, hidden_states)
-    values, idx = _topk(logits, k)
-    ids = lm_head.pn159_ids[idx.to(torch.int64)]
+    if k == 16 and _SK28:
+        # SK-28: top-k del fijo (+ anillo de la fase 2) con los ids ya mapeados, sin flashinfer ni casts
+        values, ids = torch.ops.genesis.pn159_topk(logits, hidden_states, lm_head.pn159_ids)
+    else:
+        values, idx = _topk(logits, k)
+        ids = lm_head.pn159_ids[idx.to(torch.int64)]
+        if getattr(lm_head, "pn159_din", None) is not None:
+            values, ids = torch.ops.genesis.pn159_anillo(hidden_states, values, ids)
     if lm_head.tp_size > 1:
         values = tensor_model_parallel_all_gather(values, dim=-1)
         ids = tensor_model_parallel_all_gather(ids, dim=-1)
