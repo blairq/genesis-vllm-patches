@@ -1,0 +1,1026 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+dictConfig escrito en: /root/.cache/vllm/genesis_logs/logging.json
+usarlo:  VLLM_LOGGING_CONFIG_PATH=/root/.cache/vllm/genesis_logs/logging.json
+volcados en: /root/.cache/vllm/genesis_volcados
+00:56:58 INFO    [pid 99] genesis.apply_all: Genesis platform: {"vendor": {"is_nvidia_cuda": true, "is_amd_rocm": false, "is_intel_xpu": false, "is_cpu_only": false}, "nvidia": {"compute_capability": [8, 6], "is_ampere_datacenter": false, "is_ampere_consumer": true, "is_ada_lovelace": false, "is_hopper": false, "is_blackwell": false, "has_native_fp8": false}, "amd": {}, "versions": {"torch": [2, 13], "transformers": [5, 16, 1], "vllm": [0, 29, 0], "flash_attn_major": 2}, "paths": {"vllm_install_root": "/usr/local/lib/python3.12/dist-packages/vllm"}}
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis pin-gate] running vllm pin = 0.29.0
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis pin-gate] allowlist (4 entries): ['0.20.1rc1.dev16+g7a1eb8ac2', '0.20.2rc1.dev9+g01d4d1ad3', '0.27.1', '0.29.0']
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis pin-gate] OK — vllm pin 0.29.0 is on the Genesis allowlist
+00:56:58 INFO    [pid 99] genesis.apply_all: Genesis Unified Patch v7.0 — Ampere FP8 + TQ + MoE + Hybrid + bugfixes. Philosophy: МЫ ЧИНИМ, НЕ ЛОМАЕМ.
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis registry] 197 dispatcher entries — schema-clean, dependency graph consistent.
+00:56:58 INFO    [pid 99] genesis.apply_all: ==============================================================================
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis GPU profile] detected: NVIDIA GeForce RTX 3090
+00:56:58 INFO    [pid 99] genesis.apply_all:   canonical: RTX 3090  cc: (8, 6)  SM: 82  L2: 6 MB  BW: 936 GB/s  regime: bandwidth
+00:56:58 INFO    [pid 99] genesis.apply_all: 
+00:56:58 INFO    [pid 99] genesis.apply_all: Per-patch recommendations:
+00:56:58 INFO    [pid 99] genesis.apply_all: ------------------------------------------------------------------------------
+00:56:58 INFO    [pid 99] genesis.apply_all:   [OFF] P40                TQ k8v4 GQA grouping kernel (vllm#40792)
+00:56:58 INFO    [pid 99] genesis.apply_all:           gain: +5-15% (mixed regime), +15-30% (compute regime)
+00:56:58 INFO    [pid 99] genesis.apply_all:           (correctly skipped on this regime)
+00:56:58 INFO    [pid 99] genesis.apply_all:           why: Author measured +27% on H100. Empirically NS on A5000 (p=0.28). Cache-locality benefit needs L2 >= 24 MB.
+00:56:58 INFO    [pid 99] genesis.apply_all:   [REC] P67                Multi-query verify kernel for spec-decode K+1
+00:56:58 INFO    [pid 99] genesis.apply_all:           gain: +25-35%
+00:56:58 INFO    [pid 99] genesis.apply_all:           → recommend: export GENESIS_ENABLE_P67_TQ_MULTI_QUERY_KERNEL=1
+00:56:58 INFO    [pid 99] genesis.apply_all:           why: +32% TPS on 35B-A3B-FP8 spec-decode K=3 verify (Genesis internal benchmark, all GPU classes tested).
+00:56:58 INFO    [pid 99] genesis.apply_all:   [ON ] P82                SGLang-style acceptance threshold OR-clause
+00:56:58 INFO    [pid 99] genesis.apply_all:           gain: +8-12%
+00:56:58 INFO    [pid 99] genesis.apply_all:           why: Cross-rig confirmed: +12% on A5000 FP8, +10.5% on 3090 INT4.
+00:56:58 INFO    [pid 99] genesis.apply_all:   [REC] PN8                MTP/draft online-quant propagation (vllm#40849)
+00:56:58 INFO    [pid 99] genesis.apply_all:           gain: 0% TPS, but ~1-2 GiB total VRAM headroom
+00:56:58 INFO    [pid 99] genesis.apply_all:           → recommend: export GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT=1
+00:56:58 INFO    [pid 99] genesis.apply_all:           why: Verified ~1 GiB VRAM saved per GPU on 35B-A3B-FP8 + MTP K=3. Use freed VRAM for higher gpu-mem-util or longer ctx.
+00:56:58 INFO    [pid 99] genesis.apply_all:   [OFF] P83+P84+P85        Prefix-cache cake-and-eat patches (vllm#38182)
+00:56:58 INFO    [pid 99] genesis.apply_all:           gain: (currently negative)
+00:56:58 INFO    [pid 99] genesis.apply_all:           (correctly skipped on this regime)
+00:56:58 INFO    [pid 99] genesis.apply_all:           why: Tested 4-arm A/B 2026-04-29: -29% TPS regression even with full stack including root-cause P84. Possible vllm cache machinery fixed-overhead per-step. WAIT for v0.20.2 pin bump.
+00:56:58 INFO    [pid 99] genesis.apply_all:   [OFF] PN63_kv_e5m2_blackwell_consumer fp8_e5m2 KV-dtype advisory for consumer Blackwell (PN63)
+00:56:58 INFO    [pid 99] genesis.apply_all:           gain: +2-6% TPS staying with e5m2 until pin update
+00:56:58 INFO    [pid 99] genesis.apply_all:           (correctly skipped on this regime)
+00:56:58 INFO    [pid 99] genesis.apply_all:           why: club-3090#51 (apnar 2026-05-04): fp8_e4m3 + 96K ctx regressed 2-6% TPS vs fp8_e5m2 + 48K on RTX 5090. vLLM Blackwell e4m3 codepath is newly added and undertuned. Advisory only — operator passes via --kv-cache-dtype.
+00:56:58 INFO    [pid 99] genesis.apply_all:   [OFF] P100_blackwell_consumer_recommend P100 FlashInfer FULL CG for spec-decode (recommend on Blackwell consumer)
+00:56:58 INFO    [pid 99] genesis.apply_all:           gain: +5-10% TPS (when FlashInfer is the chosen backend)
+00:56:58 INFO    [pid 99] genesis.apply_all:           (correctly skipped on this regime)
+00:56:58 INFO    [pid 99] genesis.apply_all:           why: club-3090#51 boot log: `CUDAGraphMode.FULL_AND_PIECEWISE is not supported with spec-decode for FlashInferBackend; setting cudagraph_mode=PIECEWISE`. P100 backports vllm#41127 to route uniform query_len>1 batches through prefill wrapper in cudagraph mode. Bit-identical, +5-10% TPS expected.
+00:56:58 INFO    [pid 99] genesis.apply_all: ==============================================================================
+00:56:58 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P110 — Qwen3 MTP compressed-tensors unquantized bypass (vllm#47828 backport) | Forced by custom patch
+00:56:58 INFO    [pid 99] genesis.wiring.text_patch: [P110 Qwen3 MTP GPTQ/AWQ loader fix (vllm#47828 backport)/p110_mtp_gptq_guard] anchor not found — soft skip (sibling patches continue)
+00:56:58 INFO    [pid 99] genesis.wiring.text_patch: [P110 Qwen3 MTP GPTQ/AWQ loader fix (vllm#47828 backport)] applied 2 sub-patches: p110_mtp_gptq_bypass, p110_mtp_gptq_predictor_bypass
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P110 — P110 applied: Qwen3.5 MTP now correctly handles GPTQ/AWQ models by bypassing quantization for the MTP layers (vllm#47828 backport). Fixes KeyError 'layers.0.mlp.experts.w2_weight' crash. Extended 2026-07-31: bypass now also reaches the predictor's fc + decoder layers (was lm_head-only before), fixing silent MTP expert weight skip -> 0% spec-decode acceptance on GPTQ MTP-Preserved checkpoints.
+00:56:58 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P113 — MLP gate_up+SiLU fusionado en un solo GEMM (SK-05) | GENESIS_P113_MLP_FUSED_SILU=0
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P113 — GENESIS_P113_MLP_FUSED_SILU=0
+00:56:58 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P112 — Qwen3 MTP Quant Disk Cache (fingerprinted INT8 atomic storage) | MTP disk quant cache
+00:56:58 INFO    [pid 99] genesis.wiring.text_patch: [P112 Qwen3 MTP Quant Disk Cache] applied 1 sub-patches: p112_mtp_load_weights_cache
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P112 — P112 applied: MTP quantization disk cache active with SHA256 verification.
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P8 KV hybrid reporting (per-token capacity) — retired 2026-05-04 (upstream refactor superseded)
+00:56:58 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: P3 TurboQuant BF16->FP8 cast (Ampere fix) — required_anchor_missing
+00:56:58 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: P6 TurboQuant-aware attention page size — required_anchor_missing
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P15 Qwen3 None/null tool arg parser — qwen3coder_tool_parser.py not found
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P12 Qwen3 <tool_call> implicit reasoning end — qwen3_reasoning_parser.py not found
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P27 Qwen3 BEFORE-THINK fallback — qwen3_reasoning_parser.py not found
+00:56:58 INFO    [pid 99] genesis.wiring.text_patch: [P34 Mamba zero-collapse deadlock guard] upstream marker 'aligned_end = end // block_size * block_size' detected — patch obsolete, skip
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P34 Mamba zero-collapse deadlock guard — upstream_merged
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P29 tool parser IndexError guard — qwen3coder_tool_parser.py not found
+00:56:58 INFO    [pid 99] genesis.marlin_fp32_reduce: [Genesis P23] Marlin FP32_REDUCE: disabled=True on SM=(8, 6) (auto-from-platform)
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P23 Marlin FP32_REDUCE env override — decision: fp32_reduce disabled=True (requires upstream wire into Marlin launcher to take effect)
+00:56:58 INFO    [pid 99] genesis.wiring.text_patch: [P4 TurboQuant hybrid model support] upstream marker 'TurboQuantConfig.get_boundary_skip_layers(model_config' detected — patch obsolete, skip
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P4 TurboQuant hybrid model support — upstream_merged
+00:56:58 INFO    [pid 99] genesis.wiring.text_patch: [P5 KV cache page size unification (v2_pad_smaller)] upstream marker 'Mamba layers, whose page size comes from state shapes' detected — patch obsolete, skip
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P5 KV cache page size unification — upstream_merged
+00:56:58 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P5b KV page-size pad-smaller-to-max (env-opt-in) — P5b gate ON — patch_5_page_size is configured to apply v2 body (pad-smaller-to-max). Verified dev134 primitives available: AttentionSpec.page_size_padded + TQFullAttentionSpec.real_page_size_bytes. Expected VRAM savings: ~34% per-block on Qwen3.6-35B-A3B hybrid vs v1 LCM.
+00:57:02 INFO    [pid 99] genesis.wiring.p31_router_softmax: [Genesis P31] wrapped grouped_topk_router.grouped_topk (fp32 upcast active for grouped-MoE models)
+00:57:02 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P31 MoE router fp32 softmax — grouped_topk wrapped (effective in this process)
+00:57:03 INFO    [pid 99] genesis.wiring.p22_tq_prealloc: [P22] PR #40655 merged (bhoomit moved init out) — auto-skip — patch retired in favor of upstream
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P22 TurboQuant shared dequant prealloc — PR #40655 merged (bhoomit moved init out) — auto-skip
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [P26 TQ prefill output prealloc] upstream marker 'if not hasattr(self, "_cu_2")' detected — patch obsolete, skip
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P26 TurboQuant prefill output prealloc — upstream_merged
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P61b — Qwen3 streaming partial-tag overlap guard | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P61b Qwen3 streaming partial-tag overlap guard — qwen3_reasoning_parser.py not found
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN84 — Hit de prefijo inconsistente entre grupos en hibrido + MTP (mata el engine) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN84 hybrid eagle hit consistency] upstream marker 'curr_hit_length = min(' detected — patch obsolete, skip
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN84 hybrid eagle hit consistency — PN84 hybrid eagle hit consistency: upstream_merged — marker 'curr_hit_length = min(' present
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN85 — Mensaje inyectado al agotarse el presupuesto de thinking | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN85 thinking budget message (sampling_params.py)] applied 3 sub-patches: pn85_sampling_params_fields, pn85_from_optional_signature, pn85_from_optional_passthrough
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN85 thinking budget message (entrypoints/openai/chat_completion/protocol.py)] applied 2 sub-patches: pn85_request_field, pn85_request_passthrough
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: PN85 thinking budget message — PN85 thinking budget message (v1/engine/input_processor.py): required_anchor_missing — sub-patch 'pn85_tokenize_message': anchor not found in file
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN87 — OffloadingConnector boundary fix para grupos hibridos/Mamba (evita AssertionError en :612) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN87 offload hybrid alloc boundary] applied 1 sub-patches: pn87_safe_hybrid_boundary_derivation
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN87 offload hybrid alloc boundary — PN87 applied: alineacion determinista de la frontera local/remota de bloques en OffloadingConnectorScheduler.update_state_after_alloc para grupos hibridos/Mamba. Previene el AssertionError no capturado en :612 que mataba el EngineCore bajo hits mixtos. Kill switch: GENESIS_DISABLE_PN87=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN83 — Informe de arranque en lenguaje humano (VRAM, capacidad, riesgos, flags) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN83 analisis arranque (worker)] applied 1 sub-patches: pn83_stash_memory_snapshot
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN83 analisis arranque] applied 1 sub-patches: pn83_emit_report
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN83 analisis arranque — PN83 applied: al final del arranque se emite un informe en castellano con el desglose de VRAM, cuanto contexto entra traducido al patron de uso real (1 hilo largo + N agentes), el estado de la cache en dos capas, MTP, los riesgos conocidos (PN82, workspace lazy de FlashInfer, cuota del tier de disco) y que flags darian mas KV con su costo. Re-ejecutable con python3 -m vllm._genesis.analisis_arranque. Tunables: GENESIS_ANALISIS_HILO_PRINCIPAL / _AGENTE. Kill switch: GENESIS_DISABLE_PN83=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN82 — Limpia el error pegajoso de CUDA que deja un cudaHostRegister fallido | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN82 host register sticky error] applied 1 sub-patches: pn82_clear_sticky_cuda_error
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN82 host register sticky error — PN82 applied: tras un cudaHostRegister fallido se consume el error con cudaGetLastError (por ctypes sobre libcudart: torch.cuda.cudart() no lo expone). Sin esto el error queda latcheado en el contexto y la primera op del rank afectado muere con 'CUDA error: invalid argument' en la captura de CUDA graphs (_dummy_run -> sm.fill_(-1)). Con TP>1 el registro fallido es el caso normal: ambos ranks pinean el mismo mmap de /dev/shm. Kill switch: GENESIS_DISABLE_PN82=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN81 — KV disk tier quota + poda por antiguedad (el tier fs de vLLM no tiene ninguna) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN81 KV disk tier namespace] applied 1 sub-patches: pn81_kv_format_namespace
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN81 KV disk tier quota] applied 1 sub-patches: pn81_on_schedule_end_quota
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN81 shm orphan purge] applied 1 sub-patches: pn81_shm_orphan_purge
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN81 KV disk tier quota — PN81 applied: on_schedule_end() implementado en FileSystemTierManager con cuota de disco. Poda por mtime al superar GENESIS_KV_DISK_MAX_GB, bajando hasta GENESIS_KV_DISK_TARGET_RATIO del limite. Ademas purga mmaps huerfanos de /dev/shm dejados por cierres abruptos, y el directorio del tier ahora depende del FORMATO de la KV (dtype, rotacion, PN131, PN122).
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN88 — KV tier metrics (el tier de disco de vLLM no publica una sola metrica) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN88 kv tier metrics (fs)] upstream marker '_lookup_manager.mark_miss' detected — patch obsolete, skip
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN88 kv tier metrics (fs io: bytes reales al syscall)] upstream marker 'must not mask the short-read error' detected — patch obsolete, skip
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN88 kv tier metrics (tiering)] upstream marker 'TieringMetricsTracker' detected — patch obsolete, skip
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN88 kv tier metrics (connector)] applied 1 sub-patches: pn88_scheduler_stats
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN88 kv tier metrics (prom)] applied 4 sub-patches: pn88_bucket_const, pn88_aggregate, pn88_reduce, pn88_observe
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN88 KV tier metrics — PN88 applied: telemetria de tiers del cache de KV. Publica vllm:kv_tier_{bytes,ops,op_seconds,errors,lookups,promotion_refused,evictions,bytes_used,capacity_bytes} con labels tier/direction/agent. El tier de disco pasa de cero metricas a medido. [PN88 kv tier metrics (fs)=skipped, PN88 kv tier metrics (fs io: bytes reales al syscall)=skipped, PN88 kv tier metrics (tiering)=skipped, PN88 kv tier metrics (connector)=applied, PN88 kv tier metrics (prom)=applied]
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN89 KV offload requests endpoint] applied 2 sub-patches: pn89_create_chat_completion_hook, pn89_attach_router
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN89 KV offload requests endpoint — PN89 applied: endpoint nativo /v1/kv-offload/requests registrado
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN90 — KV disk write gating & democion por desalojo (L2 RAM -> L3 SSD) | opt-in env (config: neutral)
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: PN90 KV disk write gating — PN90 dry-run failed: file 1 (/usr/local/lib/python3.12/dist-packages/vllm/v1/kv_offload/tiering/manager.py): required anchor for sub-patch 'pn90_tiering_no_cascade_store' not found (post sequential preview)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN91 — Deferral acotado de promociones SSD -> RAM (admision temprana con hit parcial) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN91 bounded promotion deferral (offloading scheduler)] applied 4 sub-patches: pn91_prefix_lookup_strict, pn91_sliding_lookup_strict, pn91_note_deferral, pn91_clear_request_state
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN91 deferral acotado de promociones — PN91 aplicado: deferral acotado de promociones (pasado GENESIS_PN91_MAX_DEFER_STEPS el request arranca con el prefijo que ya está listo en vez de seguir esperando).
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN92 — Cuantizacion agrupada a 4 bits del tier de disco (INT4 + escala fp16 por grupo) | GENESIS_ENABLE_PN92_KV_FP4_COMPRESSION='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN92 cuantizacion 4-bit del tier de disco — GENESIS_ENABLE_PN92_KV_FP4_COMPRESSION='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN93 — Checkpointing disperso del estado recurrente GDN/Mamba (1 de cada N fronteras) | GENESIS_ENABLE_PN93_SPARSE_GDN='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN93 checkpointing disperso GDN — GENESIS_ENABLE_PN93_SPARSE_GDN='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN94 — Registro de host pinneado por rank (arregla el DMA no-pinneado del segundo rank con TP>1) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN94 per-rank host register] applied 1 sub-patches: pn94_per_rank_slot_registration
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN94 registro de host por rank — PN94 aplicado: cada rank registra como pinneados SOLO sus slots de la region mmap compartida (num_blocks llamadas de cpu_page_size en vez de una de total_size_bytes). Upstream registraba la region entera desde todos los ranks; con TP>1 el segundo chocaba con las mismas paginas fisicas, fallaba con cudaErrorInvalidValue y se quedaba con DMA no-pinneado. Cae al registro entero si cpu_page_size no esta alineado a pagina o si region.rank es None. Kill switch: GENESIS_DISABLE_PN94=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN95 — Ocupacion y desalojos del tier L2 (RAM) en Prometheus | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN95 L2 occupancy metrics] applied 2 sub-patches: pn95_l2_evictions, pn95_l2_occupancy
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN95 ocupacion de L2 — PN95 aplicado: L2 (RAM) publica kv_tier_bytes_used / kv_tier_capacity_bytes / kv_tier_evictions_total con tier="ram". El desalojo de L2 es lo que PN90 convierte en escritura al SSD, asi que era el unico eslabon sin medir de la cadena. Kill switch: GENESIS_DISABLE_PN95=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN96 — Admision a L2 resistente a escaneo (habilita store_threshold en el tiering) | config_detect: neutral:
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: PN96 admision resistente a escaneo — PN96 dry-run failed: file 1 (/usr/local/lib/python3.12/dist-packages/vllm/v1/kv_offload/tiering/spec.py): required anchor for sub-patch 'pn96_pass_store_threshold' not found (post sequential preview)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN97 — Una promocion L3->L2 nunca desaloja (leer del SSD dejaba de costar escribir al SSD) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN97 promocion sin desalojo — GENESIS_DISABLE_PN97 set
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN98 — Avisa al arrancar el tamano minimo recomendado de L2 (en tokens, contra L1) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN98 L2 sizing advisory] applied 1 sub-patches: pn98_sizing_report
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN98 aviso de dimensionamiento de L2 — PN98 aplicado: al crear el TieringOffloadingManager se loguea el tamano de L2 traducido a TOKENS, comparado con L1 (KV en GPU) y con el costo de una request de max_model_len, mas el minimo recomendado. Informativo puro. Kill switch: GENESIS_DISABLE_PN98=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN99 — L2/L3 comprimidos a 4 bits cuantizando en la GPU (1,78x mas bloques) | config_detect: neutral:
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: PN99 L2/L3 comprimidos en GPU — PN99 dry-run failed: file 2 (/usr/local/lib/python3.12/dist-packages/vllm/v1/kv_offload/cpu/gpu_worker.py): required anchor for sub-patch 'pn99_compress_on_transfer' not found (post sequential preview)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN100 — Anillo de staging: los agentes efimeros no desalojan al hilo principal | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN100 staging ring (cpu manager)] applied 1 sub-patches: pn100_cap_ephemeral_footprint
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN100 anillo de staging — PN100 aplicado: lo que offloadea un agente efimero queda acotado a GENESIS_PN100_RING_BLOCKS bloques de L2. Es un TOPE, no una reserva: no inmoviliza memoria, y con trafico efimero en cero el cache se queda con todo L2. Al pasarse, el anillo recicla lo suyo mas viejo en vez de desalojar el prefijo del hilo principal. Kill switch: GENESIS_DISABLE_PN100=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN101 — Mide y publica el prefijo REALMENTE compartido de cada agente | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN101 shared prefix probe] applied 1 sub-patches: pn101_observe_shared_prefix
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN101 sonda de prefijo compartido — PN101 aplicado: se mide el prefijo REALMENTE compartido entre requests de un mismo agente contando las claves iniciales en comun (que son hashes de contenido alineados a bloque) y se publica en kv_prefix_shared_{blocks,tokens}, ..._blocks_max y kv_prefix_observations, con label agent. Es el valor que hay que usar para max_offload_tokens. Kill switch: GENESIS_DISABLE_PN101=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN102 — Desalojo por score de bloque con envejecimiento (encima de ARC) | config_detect: neutral:
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: PN102 desalojo por score — PN102 dry-run failed: file 0 (/usr/local/lib/python3.12/dist-packages/vllm/v1/kv_offload/cpu/manager.py): required anchor for sub-patch 'pn102_score_on_lookup' not found (post sequential preview)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN103 — max_offload_tokens automatico, derivado de lo que PN101 mide | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN103 auto prefix limit] applied 1 sub-patches: pn103_auto_max_offload_tokens
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN103 limite de prefijo automatico — PN103 aplicado: max_offload_tokens se deriva de lo que PN101 midio para cada agente (maximo observado + margen), en vez de configurarse a mano. Un valor explicito del cliente siempre gana, y sin observaciones suficientes no se pone limite para poder aprender. Kill switch: GENESIS_DISABLE_PN103=1.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN104 — Atribucion EXACTA de que tier sirvio cada acierto (en vez de adivinarla) | config_detect: neutral:
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: PN104 atribucion exacta de tier — PN104 dry-run failed: file 0 (/usr/local/lib/python3.12/dist-packages/vllm/v1/kv_offload/tiering/manager.py): required anchor for sub-patch 'pn104_secondary_hit' not found (post sequential preview)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN105 — reset_cache() del tiering manager, que heredaba un no-op silencioso | config_detect: neutral:
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: PN105 reset_cache del tiering — PN105 dry-run failed: file 1 (/usr/local/lib/python3.12/dist-packages/vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py): required anchor for sub-patch 'pn105_clear_transfer_jobs' not found (post sequential preview)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN106 marlin repack disk cache — opt-in only — set GENESIS_ENABLE_PN106_MARLIN_REPACK_CACHE=1
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN108 draft fp8 lm_head — opt-in only — set GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD=1
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN109 spec-decode persistent metadata — opt-in only — set GENESIS_ENABLE_PN109_SPEC_DECODE_PERSISTENT_METADATA=1
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN110 INT8 phase dispatch — opt-in only — set GENESIS_ENABLE_PN110_INT8_PHASE_DISPATCH=1
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  B2 — B2 FULL cudagraph for long prefill (force FULL CG even on long prefill) | GENESIS_ENABLE_B2_FULL_CG='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: B2 FULL CG for long prefill — GENESIS_ENABLE_B2_FULL_CG='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN80 — GDN h budget probe + headroom projection (observabilidad de VRAM) | GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN80 GDN h budget probe — GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN59 — Streaming-GDN orchestrator (Variant D Phase 2) — true Cliff 2b OOM fix | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN59 streaming GDN orchestrator (Variant D Phase 2)] applied 1 sub-patches: pn59_chunk_orchestrator_dispatch
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN59 streaming GDN orchestrator — PN59 applied: streaming-GDN dispatcher inserted; runtime engages when single-seq long-T (eliminates Cliff 2b OOM)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN58 — Spec-decode reasoning boundary validation — narrower alt to P62 (vllm#40962) | opt-in only — set GENESIS_ENABLE_PN58_SPEC_REASONING_BOUNDARY=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN58 spec-decode reasoning boundary — opt-in only — set GENESIS_ENABLE_PN58_SPEC_REASONING_BOUNDARY=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P107 — MTP truncation detector at reasoning→tool_call boundary (vllm#41467) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [P107 MTP truncation detector (vllm#41467)] applied 1 sub-patches: p107_mtp_truncation_v2
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P107 MTP truncation detector — P107 aplicado: deteccion de truncamiento MTP — solo warning (GENESIS_P107_RAISE_ERROR=1 para el error)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN56 — Qwen3Coder XML parse fallback (vllm#41466 backport) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN56 qwen3coder XML fallback — qwen3coder_tool_parser.py not found
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN57 — TurboQuant centroids disk-persistent cache (vllm#41418-inspired) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN57 TQ centroids disk cache (vllm#41418 inspiration)] applied 1 sub-patches: pn57_disk_cache
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN57 TQ centroids disk cache — PN57 applied: TQ centroids disk-cached
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN55 — wake_up crash fix on hybrid (Mamba/DeltaNet) models — vllm#41602 backport | opt-in only — set GENESIS_ENABLE_PN55_WAKE_UP_HYBRID_KV=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN55 wake_up hybrid KV (vllm#41602) — opt-in only — set GENESIS_ENABLE_PN55_WAKE_UP_HYBRID_KV=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN54 — GDN contiguous-call deduplication (P0.7 Cliff 2b OOM mitigation) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN54 GDN contiguous dedup (P0.8 Cliff 2b + rearrange_mixed_qkv)] applied 1 sub-patches: pn54_rearrange_mixed_qkv
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN54 GDN contiguous dedup (P0.7 Cliff 2b) — PN54 applied: direct contiguous views in rearrange_mixed_qkv (avoids torch.cat + VRAM allocator fragmentation) and redundant contiguous dedup in GDN
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN52 — prompt_logprobs eviction fix during chunked prefill (vllm#41411 backport) | opt-in only — set GENESIS_ENABLE_PN52_PROMPT_LOGPROBS_EVICTION=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN52 prompt_logprobs eviction fix (vllm#41411) — opt-in only — set GENESIS_ENABLE_PN52_PROMPT_LOGPROBS_EVICTION=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN50 — GDN proj fusion (SGLang#21019 backport — Qwen3.5/3.6 contiguous-projection Triton kernel) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN50 mamba/gdn/qwen_gdn_linear_attn.py GDN fused proj (SGLang#21019)] applied 1 sub-patches: pn50_gdn_fused_proj
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN50 GDN fused proj (SGLang#21019) — PN50 applied: GDN proj fusion active in Qwen3.5/3.6 contiguous branch; wrapper falls through to PyTorch on constraint violation
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN51 — Qwen3 streaming `enable_thinking=false` content routing (vllm#40816 backport) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN51 Qwen3 streaming thinking-disabled content routing — qwen3_reasoning_parser.py not found
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P62 — Structured-output spec-decode reasoning-end timing fix | opt-in env (config: neutral)
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: P62 structured-output spec-decode timing fix — required anchor for 'p62_grammar_bitmask' not found in /usr/local/lib/python3.12/dist-packages/vllm/v1/structured_output/__init__.py — anchor drifted, P62 cannot apply.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P61 — Qwen3 multi-tool first-occurrence (DEPRECATED — superseded by P12 v2) | opt-in only AND empirically deprecated — keeping skip; set GENESIS_ENABLE_P61_QWEN3_MULTI_TOOL=1 only for diagnostics
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P61 Qwen3 multi-tool first-occurrence — opt-in only AND empirically deprecated — keeping skip; set GENESIS_ENABLE_P61_QWEN3_MULTI_TOOL=1 only for diagnostics
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P60b — GDN+ngram Triton kernel offset (Phase 2) | opt-in only — set GENESIS_ENABLE_P60B_TRITON_KERNEL=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P60b GDN+ngram Triton kernel offset — opt-in only — set GENESIS_ENABLE_P60B_TRITON_KERNEL=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P60 — GDN+ngram state recovery (Phase 1: SSM pre-copy) | opt-in only — set GENESIS_ENABLE_P60_GDN_NGRAM_FIX=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P60 GDN+ngram state recovery — opt-in only — set GENESIS_ENABLE_P60_GDN_NGRAM_FIX=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P63 — MTP/Eagle drafter GDN state recovery (deprecated — wrong layer) | opt-in only AND empirically deprecated — keeping skip; set GENESIS_ENABLE_P63_MTP_GDN_STATE_RECOVERY=1 only for diagnost
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P63 MTP/Eagle drafter GDN state recovery — opt-in only AND empirically deprecated — keeping skip; set GENESIS_ENABLE_P63_MTP_GDN_STATE_RECOVERY=1 only for diagnostics
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P64 — qwen3coder MTP streaming early-return fix | opt-in only — set GENESIS_ENABLE_P64_QWEN3CODER_MTP_STREAMING=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P64 qwen3coder MTP streaming early-return fix — opt-in only — set GENESIS_ENABLE_P64_QWEN3CODER_MTP_STREAMING=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P65 — TurboQuant spec-decode cudagraph downgrade | opt-in only — set GENESIS_ENABLE_P65_TURBOQUANT_SPEC_CG_DOWNGRADE=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P65 TurboQuant spec-decode cudagraph downgrade — opt-in only — set GENESIS_ENABLE_P65_TURBOQUANT_SPEC_CG_DOWNGRADE=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P66 — cudagraph_capture_sizes spec-decode divisibility filter | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [P66 config/vllm.py — cudagraph_capture_sizes spec-decode filter] applied 1 sub-patches: p66_size_filter
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P66 cudagraph_capture_sizes spec-decode divisibility filter — P66 applied: cudagraph_capture_sizes will be filtered to sizes divisible by uniform_decode_query_len when spec-decode is active. Boot 2-4x faster, less peak GPU memory, no mixed-q_len capture risks.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P68 — Auto force tool_choice=required for long-context tool calls | opt-in only — set GENESIS_ENABLE_P68_AUTO_FORCE_TOOL=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P69 — Long-context tool-format reminder injection | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [P68/P69 serving.py — long-ctx tool-call hook injection] applied 1 sub-patches: p6869_hook_insert
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P68/P69 long-context tool-call adherence — Hook injected into create_chat_completion. Active mitigations: P69 (append tool-format reminder to last user msg). Threshold: GENESIS_P68_P69_LONG_CTX_THRESHOLD_CHARS env (default 50000, raised from 8000 in v7.65 per Issue #9).
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P70 — Auto-strict-ngram (force prompt_lookup_min>=8) | opt-in only — set GENESIS_ENABLE_P70_AUTO_STRICT_NGRAM=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P70 Auto-strict-ngram (force prompt_lookup_min>=8) — opt-in only — set GENESIS_ENABLE_P70_AUTO_STRICT_NGRAM=1 to engage
+00:57:03 INFO    [pid 99] genesis.wiring.p67_tq_multi_query_kernel: [Genesis P67 H2] baked env at module load: MAX_PRIOR_LEN=4096 DEBUG_COMPARE=False (no per-dispatch env reads)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P67 — TurboQuant multi-query kernel for spec-decode K+1 | opt-in only — set GENESIS_ENABLE_P67_TQ_MULTI_QUERY_KERNEL=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P67 TurboQuant multi-query kernel for spec-decode K+1 — opt-in only — set GENESIS_ENABLE_P67_TQ_MULTI_QUERY_KERNEL=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P71 — Block-verify rejection sampler (Sun 2024 ICLR) | opt-in only — set GENESIS_ENABLE_P71_BLOCK_VERIFY=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P71 Block-verify rejection sampler (vllm#40819 + gemini bug-fixes) — opt-in only — set GENESIS_ENABLE_P71_BLOCK_VERIFY=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY B5 — Rejection sampler vectorized early-exit async (CK-4.3 B5 v1.1) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [B5 v1/sample/rejection_sampler.py — rejection sampler vectorized early-exit (CK-4.3 v1.1 async)] applied 2 sub-patches: b5_early_exit_rejection_sample, b5_vectorized_expand_async
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: B5 Rejection sampler vectorized early-exit + cache (CK-4.3) — B5 applied: rejection sampler early-exit + vectorized expand_batch_to_tokens (100% async GPU, no D2H sync). Activates con GENESIS_ENABLE_B5_REJECTION_SAMPLER=1. Ahorra ~5-15us por batch trivial y reduce overhead Triton en N<=16.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN114 — Mamba align bounds guard for spec-decode with concurrency >= 4 (vllm#35288 fix) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN114 mamba align: guardas aritmeticas (vllm#35288)] applied 2 sub-patches: pn114_col_and_dst_guard, pn114_kernel_indices_guard
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN114 Mamba align bounds guard (vllm#35288 fix) — PN114 aplicado: guardas aritmeticas de limites (guardas de block-table OFF; GENESIS_PN114_GUARD_BLOCK_TABLE=1 las activa)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN124 — TRITON_ATTN rapido en Ampere head 256 (prefill afinado + decode spec al kernel 3D) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN124 triton ampere (triton_unified_attention.py)] applied 3 sub-patches: pn124_ua_import, pn124_ua_params, pn124_ua_tile
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN124 triton ampere (int4_per_token_head.py)] applied 4 sub-patches: pn124_i4_import, pn124_i4_params, pn124_i4_tile, pn124_i4_launch
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN124 triton ampere (triton_attn.py)] applied 2 sub-patches: pn124_bk_import, pn124_bk_call
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN124 triton ampere — TRITON_ATTN afinado para Ampere + decode spec al kernel 3D
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN123 — DIAGNOSTICO: volcado de q/k/v de la atencion para evaluar compresion de KV | opt-in only — set GENESIS_ENABLE_PN123_VOLCADO_QKV=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN123 volcado qkv — opt-in only — set GENESIS_ENABLE_PN123_VOLCADO_QKV=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN122 — Rollback del MTP en GDN con cinta (sin bloques especulativos) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN122 cinta GDN (abstract.py)] applied 3 sub-patches: pn122_abs_import, pn122_abs_spec_blocks, pn122_abs_bind
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN122 cinta GDN (qwen_gdn_linear_attn.py)] applied 2 sub-patches: pn122_gdn_import, pn122_gdn_spec
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN122 cinta GDN (gdn_attn.py)] applied 5 sub-patches: pn122_att_import, pn122_att_buf, pn122_att_calc, pn122_att_cg, pn122_att_ret
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN122 cinta GDN (single_type_kv_cache_manager.py)] applied 2 sub-patches: pn122_mgr_import, pn122_mgr_early_return
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN122 cinta GDN (mamba_utils.py)] applied 5 sub-patches: pn122_mu_import, pn122_mu_skip, pn122_mu_slots, pn122_mu_pre, pn122_mu_post
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN122 cinta GDN (mamba_hybrid.py)] applied 3 sub-patches: pn122_mh_import, pn122_mh_pre, pn122_mh_post
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN122 rollback GDN con cinta — rollback del MTP en GDN con cinta (4 archivos)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN130 — Marlin W4A8 propio con escalas int16 con signo (vllm#48905) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.pn130: [PN130] .so cargada desde /root/.cache/vllm/genesis_marlin_s16/genesis_marlin_s16.so
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN130 Marlin W4A8 escalas con signo] applied 3 sub-patches: pn130_import, pn130_escalas, pn130_gemm
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN130 workspace para 2 bloques/SM] applied 1 sub-patches: pn130_workspace
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN130 Marlin W4A8 escalas con signo — Marlin s16 enganchado (/root/.cache/vllm/genesis_marlin_s16/genesis_marlin_s16.so)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN127 — MambaManager respeta drop_eagle_block (vllm#48375) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN127 MambaManager drop_eagle_block] applied 3 sub-patches: pn127_guarda_hashes, pn127_gruesa, pn127_fina
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN127 MambaManager drop_eagle_block — MambaManager respeta drop_eagle_block
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN151 — Metadata del GDN para el decode en arbol en un kernel | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN151 metadata GDN en un kernel] applied 1 sub-patches: pn151_instalar
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN151 metadata GDN en un kernel — build del GDN con camino rapido
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN150 — Borrador DFlash: fc y proyeccion de contexto en grafos CUDA | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN150 borrador en grafo] applied 3 sub-patches: pn150_import, pn150_combinar, pn150_contexto
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN150 borrador en grafo — fc y contexto del borrador en grafos CUDA
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN149 — Borrador DFlash en su base original sobre un target con el residuo rotado | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN149 borrador rotado (dflash)] applied 4 sub-patches: pn149_import, pn149_init, pn149_embed, pn149_logits
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN149 borrador rotado (dflash2)] applied 2 sub-patches: pn149_import2, pn149_candidatos
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN149 borrador sobre target rotado — embed, logits y candidatos del borrador
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN148 — Hadamard en linea antes de down_proj (checkpoint con residuo rotado) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN148 Hadamard antes de down_proj] applied 3 sub-patches: pn148_import, pn148_init, pn148_forward
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN148 Hadamard antes de down_proj — Hadamard por bloques antes de down_proj
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN147 — Saneo de pedidos para spec decode: min_p/logit_bias y thinking_budget_message | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN147 saneo min_p/logit_bias] applied 1 sub-patches: pn147_min_p
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN147 saneo thinking_budget_message] applied 1 sub-patches: pn147_tbm
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN147 saneo para spec decode — min_p/logit_bias anulados con spec decode; thinking_budget_message descartado
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN146 — Tamano de grupo de KV elegible (la heuristica de upstream no lo acierta) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN146 tamano de grupo de KV] applied 2 sub-patches: pn146_lee_env, pn146_aplica
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN146 tamano de grupo de KV — group_size elegible por GENESIS_PN146_GROUP_SIZE (inerte sin ella)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN145 — Bloque de la ventana deslizante alineado con la atencion primaria | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN145 bloque de la ventana deslizante] applied 1 sub-patches: pn145_largest_kernel_block
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN145 bloque de la ventana deslizante — el grupo de ventana deslizante deja de pagar una pagina cada 16 tokens
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN143 — Enganche de Genesis en cada proceso de vLLM (load_general_plugins) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN143 enganche de proceso (plugins/__init__.py)] applied 1 sub-patches: pn143_plug_hook
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN143 enganche de proceso — cargar() corre en todos los procesos de vLLM
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN142 — DFlash2 usable en v0.29.0 (vllm#51581 + port de fa5017a5) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN142 DFlash2 v0.29.0 (qwen3_dflash.py)] applied 2 sub-patches: pn142_dflash_helper, pn142_dflash_slice
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN142 DFlash2 v0.29.0 (speculative.py)] applied 1 sub-patches: pn142_spec_metodo
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN142 DFlash2 v0.29.0 (scheduler.py)] applied 3 sub-patches: pn142_sched_campo, pn142_sched_asigna, pn142_sched_retro
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN142 DFlash2 usable en v0.29.0 — PN142 DFlash2 v0.29.0 3/3 files committed atomically
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN128 — Input-prep async espera el postproceso del spec decode (GDN+MTP) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN128 orden async spec decode GDN/MTP] applied 1 sub-patches: pn128_sync
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN128 orden async spec decode GDN/MTP — input-prep espera al postproceso del spec decode
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN129 — FlashInfer decode workspace sin pin (vllm#40756) | GENESIS_ENABLE_PN129_FLASHINFER_DECODE_UNPIN='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN129 FlashInfer decode sin pin — GENESIS_ENABLE_PN129_FLASHINFER_DECODE_UNPIN='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: Genesis act_stats — opt-in: GENESIS_ACT_STATS=1 o GENESIS_ESCALA_ESTATICA=1
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN137 — Suavizado por grupo plegado en los pesos (SmoothQuant exacto) | opt-in only — set GENESIS_ENABLE_PN137_SUAVE=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN137 suavizado por grupo — opt-in only — set GENESIS_ENABLE_PN137_SUAVE=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN136 — All-reduce del MLP solapado con el computo (P2P directo) | opt-in only — set GENESIS_ENABLE_PN136_MLP_SOLAPADO=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN136 MLP solapado — opt-in only — set GENESIS_ENABLE_PN136_MLP_SOLAPADO=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN134 — Cuantizacion int8 de activacion con el factor global fusionado | opt-in only — set GENESIS_ENABLE_PN134_QUANT=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN134 quant int8 con factor global — opt-in only — set GENESIS_ENABLE_PN134_QUANT=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN133 — Lineales del modulo MTP en W8A8 | opt-in only — set GENESIS_ENABLE_PN133_MTP_INT8=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN133 MTP en int8 — opt-in only — set GENESIS_ENABLE_PN133_MTP_INT8=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN132 — Vocabulario recortado para el borrador MTP (FR-Spec) | opt-in only — set GENESIS_ENABLE_PN132_VOCAB=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN132 vocabulario del borrador MTP — opt-in only — set GENESIS_ENABLE_PN132_VOCAB=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN131 — Decode de atencion entero SK-18h (PTX) sobre KV int8_per_token_head | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN131 SK-18 decode entero — PN131 entra por register_backend; la puerta ya la puso PN143
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN126 — Rotacion de q/k (Hadamard o WUSH) despues de RoPE | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN126 rotacion qk] applied 2 sub-patches: pn126_import, pn126_fwd
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN126 rotacion qk dflash] applied 3 sub-patches: pn126_df_import, pn126_df_fwd, pn126_df_pre
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN126 rotacion qk — rotacion de q/k armada (target + dflash)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN125 — Escalas positivas para Marlin W4A8-INT8 (checkpoints AutoRound) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN125 escalas positivas Marlin W4A8] applied 1 sub-patches: pn125_positivizar
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN125 escalas positivas Marlin W4A8 — escalas negativas corregidas antes del repack de Marlin
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN121 — Guard de cascada de preempcion con frees diferidos | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN121 guard de cascada de preempcion] applied 1 sub-patches: pn121_preempt_loop
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN121 guard de cascada de preempcion — cascada de preempcion cortada con frees diferidos
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN120 — All-reduce de TP comprimido a INT8 en el prefill | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN120 all-reduce de TP en INT8] applied 2 sub-patches: pn120_import, pn120_row_parallel
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN120 all-reduce de TP en INT8 — all-reduce de TP comprimido a INT8 en prefill
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN119 — MLP de prefill despachado por SK-12 (gate_up+SiLU fusionado) | GENESIS_ENABLE_PN119_SK12_MLP='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN119 MLP de prefill por SK-12 — GENESIS_ENABLE_PN119_SK12_MLP='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN118 — Cuantiza el MLP de AWQ int4 a INT8 per-canal en el arranque | GENESIS_ENABLE_PN118_INT8_MLP='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN118 MLP AWQ int4 -> INT8 per-canal en la carga — GENESIS_ENABLE_PN118_INT8_MLP='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN116 — Super kernel de MLP aislado al prefill (SK-05) con A/B incorporado | GENESIS_ENABLE_PN116_PREFILL_MLP_SK='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN116 Super kernel de MLP aislado al prefill (SK-05) — GENESIS_ENABLE_PN116_PREFILL_MLP_SK='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN115 — Admision por headroom de bloques KV + bypass por prioridad | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN115 KV headroom gating & priority bypass] applied 4 sub-patches: pn115_step_record, pn115_gate_import, pn115_gate_bypass, pn115_gate_headroom
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN115 KV headroom gating & priority bypass — PN115 aplicado: admision por headroom de bloques KV + bypass por prioridad con rollback completo del estado del paso
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P78 — TurboQuant .tolist() capture-guard (adapted from noonghunna) | opt-in only — set GENESIS_ENABLE_P78_TOLIST_CAPTURE_GUARD=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P78 TurboQuant .tolist() capture-guard (adapted from noonghunna) — opt-in only — set GENESIS_ENABLE_P78_TOLIST_CAPTURE_GUARD=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P77 — Adaptive ngram K controller (EMA + hysteresis + auto-disable) | opt-in only — set GENESIS_ENABLE_P77_ADAPTIVE_NGRAM_K=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P77 Adaptive ngram K controller (EMA + hysteresis + auto-disable) — opt-in only — set GENESIS_ENABLE_P77_ADAPTIVE_NGRAM_K=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P79b — Async × spec-decode proposer-sync backport (vllm#40610) | opt-in only — set GENESIS_ENABLE_P79B_ASYNC_PROPOSER_SYNC=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P79b Async × spec-decode proposer-sync backport (vllm#40610) — opt-in only — set GENESIS_ENABLE_P79B_ASYNC_PROPOSER_SYNC=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P79c — Stale spec_token_ids cleanup for unscheduled requests (vllm#37629) | opt-in only — set GENESIS_ENABLE_P79C_STALE_SPEC_TOKEN_CLEANUP=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P79c Stale spec_token_ids cleanup for unscheduled requests (vllm#37629) — opt-in only — set GENESIS_ENABLE_P79C_STALE_SPEC_TOKEN_CLEANUP=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN61 — qwen3_vl loader KeyError → text-only auto-fallback (vllm-loader guard) | opt-in only — set GENESIS_ENABLE_PN61=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN61 qwen3_vl loader KeyError → text-only auto-fallback — opt-in only — set GENESIS_ENABLE_PN61=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN66 — Multiturn </think> leak fix in DelegatingParser (vllm#41696 backport) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN66 abstract_parser.py — multiturn </think> leak fix (vllm#41696)] applied 2 sub-patches: pn66_remove_field, pn66_remove_block
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN66 Multiturn </think> leak fix in DelegatingParser (vllm#41696) — PN66 applied: removed prompt_reasoning_checked short-circuit in DelegatingParser.parse_delta. Multi-turn chat with prior assistant </think> markers no longer leaks current-turn reasoning into delta.content. Backport of vllm#41696 (panpan0000, OPEN at backport time).
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN348 qwen3_5_mtp.py — MTP backbone dedup (vllm#44644)] applied 3 sub-patches: pn348_embed_predicate, pn348_lm_head_fallthrough, pn348_loader_skip
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN348 Qwen3 MTP backbone dedup — PN348 applied: 3/3 sub-patches on qwen3_5_mtp.py — MTP backbone now skips duplicate embed_tokens + lm_head + weight-load when target shares them (Qwen3.5/3.6 with mtp_use_dedicated_embeddings=False at PP=1). Est. VRAM freed: ~1 GiB/worker × TP=2 = ~2 GiB cluster-wide on 35B-A3B-FP8. Vendor of OPEN PR vllm#44644. Composes with PN108+PN133+PN290+PN340+PN341+PN77.
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN77 model_loader/utils.py — PWAL hook for FP8 lm_head swap] applied 1 sub-patches: pn77_pwal_swap_hook
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN77 FP8 lm_head compression — PN77 wiring installed AND GENESIS_ENABLE_PN77_FP8_LM_HEAD=1 → lm_head will be compressed via Genesis_FP8_LMHead_EmbeddingMethod swap during process_weights_after_loading. Hardware-tier dispatch active.
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [B7 lm_head — model_executor/layers/vocab_parallel_embedding.py (CK-4.4)/b7_tie_marker] anchor not found — soft skip (sibling patches continue)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [B7 lm_head — model_executor/layers/vocab_parallel_embedding.py (CK-4.4)/b7_fused_forward] anchor not found — soft skip (sibling patches continue)
+00:57:03 INFO    [pid 99] genesis.wiring.b7_lm_head: [B7] runtime hook instalado en ParallelLMHead.forward (fused sampled)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: B7 lm_head restante (CK-4.4) — B7 wiring instalado vía runtime hook (text-patch skip: no_applicable_sub_patches; runtime hook OK); env GENESIS_ENABLE_B7_LM_HEAD=0 → dormante. Set env=1 para activar tied FP8 + fused sampled.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN67 — thinking_token_budget inverted-bool fix (vllm#41674 backport, 1-line) | opt-in only — set GENESIS_ENABLE_PN67=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN67 thinking_token_budget inverted bool fix (vllm#41674) — opt-in only — set GENESIS_ENABLE_PN67=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN70 — Tool schema subset filter (combined `anyOf` xgrammar-clean) — companion to P68 v7.72.1 | opt-in only — set GENESIS_ENABLE_PN70_TOOL_SCHEMA_FILTER=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN70 tool schema subset filter (club-3090#57 option-3) — opt-in only — set GENESIS_ENABLE_PN70_TOOL_SCHEMA_FILTER=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN65 — Genesis structured API access log middleware (operator UX) | opt-in only — set GENESIS_ENABLE_PN65=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN65 Genesis structured API access log middleware — opt-in only — set GENESIS_ENABLE_PN65=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN62 — Text-only ViT scratch MARKER-ONLY (predicted 3-5 GiB; real hook pending) | opt-in only — set GENESIS_ENABLE_PN62=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN62 text-only ViT scratch skip MARKER-ONLY (real hook pending) — opt-in only — set GENESIS_ENABLE_PN62=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P79d — Preempt async-discard backport (vllm#38624) | opt-in only — set GENESIS_ENABLE_P79D_PREEMPT_ASYNC_DISCARD=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P79d Preempt async-discard backport (vllm#38624) — opt-in only — set GENESIS_ENABLE_P79D_PREEMPT_ASYNC_DISCARD=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P81 — fp8 block-scaled MM low-M decode tuning (vllm#40925) | opt-in only — set GENESIS_ENABLE_P81_FP8_BLOCK_SCALED_M_LE_8=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P81 fp8 block-scaled MM low-M decode tuning (vllm#40925) — opt-in only — set GENESIS_ENABLE_P81_FP8_BLOCK_SCALED_M_LE_8=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P82 — SGLang threshold_single OR-clause acceptance (BIASED — opt-in research) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P82 SGLang threshold_single OR-clause acceptance (BIASED — opt-in research) — upstream drift marker 'sample_recovered_tokens_kernel' in /usr/local/lib/python3.12/dist-packages/vllm/v1/sample/rejection_sampler.py — upstream may have absorbed this fix or independent threshold patch
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P83 — MTP keep-last-cached-block (vllm#38182 downstream symptom — P84 is real fix) | opt-in only — set GENESIS_ENABLE_P83=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P83 MTP keep-last-cached-block (vllm#38182 mitigation) — opt-in only — set GENESIS_ENABLE_P83=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P84 — hash_block_size override (vllm#38182 actual root cause) | opt-in only — set GENESIS_ENABLE_P84=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P84 hash_block_size override (vllm#38182 ACTUAL root cause) — opt-in only — set GENESIS_ENABLE_P84=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P100 — FlashInfer FULL CUDA graph for spec-decode (vllm#41127) | GENESIS_ENABLE_P100='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P100 FlashInfer FULL CUDA graph for spec-decode (vllm#41127) — GENESIS_ENABLE_P100='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P103 FLA Cliff 2 chunked fwd_h+fwd_o orchestrator — GENESIS_ENABLE_P103 not set or platform not NVIDIA SM 8.0+
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P101 — TQ continuation 64-token slicing (vllm#41123 SELECTIVE) | opt-in only — set GENESIS_ENABLE_P101=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P101 TQ continuation 64-token slicing (vllm#41123 selective) — opt-in only — set GENESIS_ENABLE_P101=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P99 — WorkspaceManager.get_simultaneous memoization (perf hotfix) | opt-in only — set GENESIS_ENABLE_P99=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P99 WorkspaceManager memoize get_simultaneous (perf hotfix) — opt-in only — set GENESIS_ENABLE_P99=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P98 — TQ WorkspaceManager revert (vllm#40941 perf hotfix) | opt-in only — set GENESIS_ENABLE_P98=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P98 TQ WorkspaceManager revert (vllm#40941 perf hotfix) — opt-in only — set GENESIS_ENABLE_P98=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P94 — Spec-decode prepare_next_token_ids_padded zero-alloc (vllm#41043) | opt-in only — set GENESIS_ENABLE_P94=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P94 Spec-decode prepare_next_token_ids_padded zero-alloc (vllm#41043 backport) — opt-in only — set GENESIS_ENABLE_P94=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P95 — Marlin TP cudagraph cap on Ampere (vllm#40385) | opt-in only — set GENESIS_ENABLE_P95=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P95 Marlin TP cudagraph cap on Ampere (vllm#40385 backport) — opt-in only — set GENESIS_ENABLE_P95=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P91 — AutoRound row-parallel group cdiv + start-idx fix (vllm#39460) | opt-in only — set GENESIS_ENABLE_P91=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P91 AutoRound row-parallel group cdiv + start-idx fix (vllm#39460 backport) — opt-in only — set GENESIS_ENABLE_P91=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P87 — Marlin W4A16/W8A16 sub-tile output dim pad-on-load (vllm#40361) | opt-in only — set GENESIS_ENABLE_P87=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P87 Marlin sub-tile output dim pad-on-load (vllm#40361 backport) — opt-in only — set GENESIS_ENABLE_P87=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN8 — MTP/draft online-quant propagation (vllm#40849) | GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN8 MTP/draft online-quant propagation (vllm#40849 backport) — GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN9 — Independent drafter attention backend (vllm#39930) | opt-in only — set GENESIS_ENABLE_PN9_INDEPENDENT_DRAFTER_ATTN=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN9 independent drafter attention backend (vllm#39930 backport) — opt-in only — set GENESIS_ENABLE_PN9_INDEPENDENT_DRAFTER_ATTN=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN11 — GDN a/b contiguity in fix_query_key_value_ordering (vllm#41142) | opt-in only — set GENESIS_ENABLE_PN11_GDN_AB_CONTIGUOUS=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN11 GDN a/b contiguity (vllm#41142 backport) — opt-in only — set GENESIS_ENABLE_PN11_GDN_AB_CONTIGUOUS=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P67c sparse-V integration into P67 split-M kernel — opt-in: set GENESIS_ENABLE_P67_SPARSE_V=1 to engage per-q_t sparse-V skip in P67 split-M kernel
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN35 — Skip inputs_embeds buffer for text-only models (vllm#35975 backport) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN35 v1/worker/gpu_model_runner.py — skip inputs_embeds buffer for text-only (vllm#35975)] applied 1 sub-patches: pN35_gpu_model_runner_inputs_embeds_optional
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN35 v1/spec_decode/llm_base_proposer.py — skip inputs_embeds tensor for text-only proposers (vllm#35975)] applied 1 sub-patches: pN35_llm_base_proposer_inputs_embeds_optional
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN35 inputs_embeds optional for text-only — PN35 v7.69 applied: inputs_embeds buffer now skipped on text-only models (gpu_model_runner + llm_base_proposer spec-decode proposer). Saves ~64 MiB GPU + ~64 MiB pinned CPU per site on Qwen3.6-27B at max_num_tokens=4096. Auto-retires when upstream vllm#35975 lands. Particularly useful on borderline-OOM configs (single-24GB-GPU + long context + spec-decode, WSL2 setups with extra display overhead). NO-OP on multimodal models — guard preserves original allocation when supports_mm_inputs=True.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN40 — Spec-decode omnibus (A DFlash K-norm + B pool + C adaptive K + D sentinel) | opt-in only — set GENESIS_ENABLE_PN40_DFLASH_OMNIBUS=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN40 DFlash drafter omnibus (sub-A: fused per-layer K-norm) — opt-in only — set GENESIS_ENABLE_PN40_DFLASH_OMNIBUS=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN38 — DFlash drafter quantization support (PR #40425 backport) | opt-in only — set GENESIS_ENABLE_PN38_DFLASH_QUANT_DRAFTER=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN38 DFlash drafter quantization support (PR #40425 backport) — opt-in only — set GENESIS_ENABLE_PN38_DFLASH_QUANT_DRAFTER=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN34 — WorkspaceManager runtime lock relaxation (PN33 companion for runtime decode) | opt-in only — set GENESIS_ENABLE_PN34_WORKSPACE_LOCK_RELAX=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN34 workspace lock runtime relaxation — opt-in only — set GENESIS_ENABLE_PN34_WORKSPACE_LOCK_RELAX=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN33 — Spec-decode warmup K-aware sizing (vllm#37521 extended to MTP/ngram) | config_detect: neutral:
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN33 v1/worker/gpu_model_runner.py — spec-decode warmup K-aware sizing (vllm#37521 extended to MTP/ngram)] applied 1 sub-patches: pN33_warmup_k_draft_tokens
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN33 spec-decode warmup K-aware (vllm#37521 extended) — PN33 applied: spec-decode warmup uses real num_speculative_tokens instead of dummy K=1. Closes (a) ampersandru mid-stream OOM via propose_draft_token_ids and (b) noonghunna workspace-lock AssertionError on TQ + MTP K=3 single-card. Disable via GENESIS_DISABLE_PN33_SPEC_DECODE_WARMUP_K=1 if warmup OOMs.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN32 — GDN _forward_core chunked-prefill v2 (Cliff 2 fix for single-24GB-GPU OOM) | opt-in only — set GENESIS_ENABLE_PN32_GDN_CHUNKED_PREFILL=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN32 GDN chunked-prefill (Cliff 2 fix) — opt-in only — set GENESIS_ENABLE_PN32_GDN_CHUNKED_PREFILL=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN31 — FA varlen persistent out buffer (issue #15, sister to P38) | opt-in only — set GENESIS_ENABLE_PN31_FA_VARLEN_PERSISTENT_OUT=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN31 FA varlen persistent out (issue #15) — opt-in only — set GENESIS_ENABLE_PN31_FA_VARLEN_PERSISTENT_OUT=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN30 — DS conv state layout + spec-decode AL>1 fix (issue #17) | opt-in only — set GENESIS_ENABLE_PN30_DS_LAYOUT_SPEC_DECODE=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN30 DS conv state + spec-decode AL>1 (issue #17) — opt-in only — set GENESIS_ENABLE_PN30_DS_LAYOUT_SPEC_DECODE=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN29 — GDN chunk_o scale-fold (vllm#41446 pattern (c)) | opt-in only — set GENESIS_ENABLE_PN29_GDN_SCALE_FOLD=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN29 GDN chunk_o scale-fold (vllm#41446 pattern c) — opt-in only — set GENESIS_ENABLE_PN29_GDN_SCALE_FOLD=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN12 — FFN intermediate scratch pool — Cliff 1 fix on TQ3 path | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN12 model_executor/layers/activation.py — SiluAndMul forward_cuda FFN intermediate pool (Cliff 1 fix on TQ3)] applied 1 sub-patches: pN12_silu_and_mul_pool
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN12 FFN intermediate scratch pool (Cliff 1 fix) — PN12 applied: SiluAndMul.forward_cuda now acquires output via FFNIntermediateCache pool when GENESIS_ENABLE_PN12_FFN_INTERMEDIATE_POOL=1. Closes Cliff 1 OOM on TQ3 path that PN8 couldn't address (different memory class).
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN28 — merge_attn_states NaN guard (vllm#39148 backport) | opt-in only — set GENESIS_ENABLE_PN28_MERGE_ATTN_NAN_GUARD=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN28 merge_attn_states NaN guard (vllm#39148 backport) — opt-in only — set GENESIS_ENABLE_PN28_MERGE_ATTN_NAN_GUARD=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P15B — FA varlen max_seqlen_k clamp on TQ path (Issue #15 fix) | opt-in only — set GENESIS_ENABLE_P15B_FA_VARLEN_CLAMP=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P15B FA varlen max_seqlen_k clamp on TQ path (Issue #15 fix) — opt-in only — set GENESIS_ENABLE_P15B_FA_VARLEN_CLAMP=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P38B — P38 compile-safe in-source hook (Issue #14 fix) | opt-in only — set GENESIS_ENABLE_P38B_COMPILE_SAFE=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P38B P38 compile-safe in-source hook (Issue #14 fix) — opt-in only — set GENESIS_ENABLE_P38B_COMPILE_SAFE=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN26b sparse-V tile-skip Genesis kernel (BLASST lambda=a/L for SM86) — opt-in: set GENESIS_ENABLE_PN26_SPARSE_V=1 to enable sparse-V tile-skip kernel (BLASST λ=a/L formula by default)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN27 — Revert MoERunnerInterface PluggableLayer (vllm#41440) | opt-in only — set GENESIS_ENABLE_PN27_REVERT_PLUGGABLE_MOE=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN27 revert MoERunnerInterface PluggableLayer (vllm#41440 backport) — opt-in only — set GENESIS_ENABLE_PN27_REVERT_PLUGGABLE_MOE=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN26 — TQ unified perf pack (centroids prebake + sparse V scaffold) | opt-in only — set GENESIS_ENABLE_PN26_TQ_UNIFIED=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN26 TQ unified perf pack (centroids prebake + sparse V scaffold) — opt-in only — set GENESIS_ENABLE_PN26_TQ_UNIFIED=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY PN25 — SiluAndMul.forward_native opaque-op pool (Cliff 1 mech B compile path) | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.silu_and_mul_customop: [PN25] registered torch op genesis::silu_and_mul_pooled via direct_register_custom_op (vLLM canonical, v7.66 — fork-safe + Inductor-opaque)
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN25 model_executor/layers/activation.py — SiluAndMul forward_native opaque-op pool (Inductor-safe Cliff 1 mech B)] applied 2 sub-patches: pN25_silu_and_mul_import_time_register, pN25_silu_and_mul_forward_native_opaque
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: PN25 SiluAndMul.forward_native opaque-op pool (Cliff 1 mech B compile-path) — PN25 applied: SiluAndMul.forward_native now dispatches through genesis::silu_and_mul_pooled opaque custom op so torch.compile/Inductor cannot inline the FFN intermediate alloc. Closes Cliff 1 mech B on inductor-compiled FFN forward (club-3090#16 reproducer class). Sister to PN12 — PN12 covers eager forward_cuda, PN25 covers compile forward_native; both share the same FFNIntermediateCache pool and can be enabled simultaneously without conflict.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN13 — CUDAGraphWrapper lambda arity (vllm#41235 backport) — RETIRED 2026-05-04 | opt-in only — set GENESIS_ENABLE_PN13_CUDA_GRAPH_LAMBDA_ARITY=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN13 CUDAGraphWrapper lambda arity (vllm#41235 backport) — opt-in only — set GENESIS_ENABLE_PN13_CUDA_GRAPH_LAMBDA_ARITY=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN14 — TQ decode IOOB safe_page_idx clamp (vllm#40074) | opt-in only — set GENESIS_ENABLE_PN14_TQ_DECODE_OOB_CLAMP=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN14 TQ decode IOOB safe_page_idx clamp (vllm#40074 backport) — opt-in only — set GENESIS_ENABLE_PN14_TQ_DECODE_OOB_CLAMP=1 to engage
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [PN19 scoped max_split_size_mb] upstream marker '_scoped_allocator_max_split' detected — patch obsolete, skip
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN19 Scoped max_split_size_mb during model load (vllm#41268) — PN19 scoped max_split_size_mb: upstream_merged — marker '_scoped_allocator_max_split' present
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN23 — DFlash combine_hidden_states dtype cast (vllm#40334) | opt-in only — set GENESIS_ENABLE_PN23_DFLASH_DTYPE_FIX=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN23 DFlash combine_hidden_states dtype cast (vllm#40334 backport) — opt-in only — set GENESIS_ENABLE_PN23_DFLASH_DTYPE_FIX=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN21 — DFlash SWA support partial backport (vllm#40898) | opt-in only — set GENESIS_ENABLE_PN21_DFLASH_SWA=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN21 DFlash SWA support partial backport (vllm#40898 backport) — opt-in only — set GENESIS_ENABLE_PN21_DFLASH_SWA=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN22 — Local argmax for TP draft (vllm#39419 backport) | opt-in only — set GENESIS_ENABLE_PN22_LOCAL_ARGMAX_TP=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN22 Local argmax for TP draft (vllm#39419 backport) — opt-in only — set GENESIS_ENABLE_PN22_LOCAL_ARGMAX_TP=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN24 — DFlash aux layer +1 indexing fix (vllm#40727) | opt-in only — set GENESIS_ENABLE_PN24_DFLASH_AUX_LAYER_FIX=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN24 DFlash aux layer +1 indexing fix (vllm#40727 backport) — opt-in only — set GENESIS_ENABLE_PN24_DFLASH_AUX_LAYER_FIX=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN17 FA2 softmax_lse runtime clamp (Issue #11 Cliff 1 mechanism A) — GENESIS_ENABLE_PN17_FA2_LSE_CLAMP not set; default OFF. Enable on long-text-no-vision configs to close Cliff 1 mechanism A (FA2 softmax_lse over-allocation at long ctx). Diagnosis credit: noonghunna, Genesis Issue #11.
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  PN16 — Lazy-reasoner request hook (per-request enable_thinking) | opt-in only — set GENESIS_ENABLE_PN16_LAZY_REASONER=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN16 Lazy-reasoner request hook (per-request enable_thinking) — opt-in only — set GENESIS_ENABLE_PN16_LAZY_REASONER=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P86 — ngram batch_propose O(N*K) → O(N+K) direct-fill (vllm#40876) | opt-in only — set GENESIS_ENABLE_P86=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P86 ngram batch_propose O(N+K) direct-fill (vllm#40876 backport) — opt-in only — set GENESIS_ENABLE_P86=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P85 — Hybrid fine-shadow prefix cache (vllm#38182 followup, MambaManager fix) | opt-in only — set GENESIS_ENABLE_P85=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P85 Hybrid fine-shadow prefix cache (MambaManager fix for vllm#38182 followup) — opt-in only — set GENESIS_ENABLE_P85=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P75 — Auto-enable Suffix Decoding (Arctic Inference, vllm#25784) | opt-in only — set GENESIS_ENABLE_P75_SUFFIX_DECODING=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P75 Auto-enable Suffix Decoding (vllm#25784 Arctic Inference) — opt-in only — set GENESIS_ENABLE_P75_SUFFIX_DECODING=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P74 — Auto chunk-clamp via long_prefill_token_threshold (P72 companion) | opt-in only — set GENESIS_ENABLE_P74_CHUNK_CLAMP=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P74 Auto chunk-clamp via long_prefill_token_threshold (P72 companion) — opt-in only — set GENESIS_ENABLE_P74_CHUNK_CLAMP=1 to engage
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P72 — profile_run M cap (unblocks --max-num-batched-tokens>4096 on MoE) | opt-in only — set GENESIS_ENABLE_P72_PROFILE_RUN_CAP=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P72 profile_run M cap (unblocks --max-num-batched-tokens>4096 on MoE) — opt-in only — set GENESIS_ENABLE_P72_PROFILE_RUN_CAP=1 to engage
+00:57:03 INFO    [pid 99] genesis.wiring.p67b_spec_verify_routing: [Genesis P67b B2] baked env at module load: USE_UPSTREAM=True NUM_KV_SPLITS=(default = self.max_num_kv_splits) (no per-dispatch env reads)
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P67b — TurboQuant spec-verify forward() routing (FULL CG enable) | opt-in only — set GENESIS_ENABLE_P67_TQ_MULTI_QUERY_KERNEL=1 to engage
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P67b TurboQuant spec-verify forward() routing — P67 kernel disabled — P67b dispatch unused
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] APPLY P59 — Qwen3 reasoning embedded tool_call recovery | opt-in env (config: neutral)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P59 Qwen3 reasoning embedded tool_call recovery — qwen3_reasoning_parser.py not found
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P58 — Async-scheduler -1 placeholder fix | GENESIS_ENABLE_P58_ASYNC_PLACEHOLDER_FIX='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P58 async-scheduler -1 placeholder fix — GENESIS_ENABLE_P58_ASYNC_PLACEHOLDER_FIX='0' explicitly set — operator disable
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P57 — TQ spec-decode capture-safe buffers (deprecated — research artifact) | opt-in only AND empirically deprecated — keeping skip; set GENESIS_ENABLE_P57_SPEC_DECODE_CAPTURE_SAFE=1 only for diagno
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P57 TQ spec-decode capture-safe buffers — opt-in only AND empirically deprecated — keeping skip; set GENESIS_ENABLE_P57_SPEC_DECODE_CAPTURE_SAFE=1 only for diagnostics
+00:57:03 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher] SKIP  P56 — TQ spec-decode safe-path guard (deprecated — superseded by P65) | opt-in only AND empirically deprecated — keeping skip; set GENESIS_ENABLE_P56_SPEC_DECODE_GUARD=1 only for diagnostics
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P56 TQ spec-decode safe-path guard — opt-in only AND empirically deprecated — keeping skip; set GENESIS_ENABLE_P56_SPEC_DECODE_GUARD=1 only for diagnostics
+00:57:03 WARNING [pid 99] genesis.apply_all: [Genesis] DRIFT skipped: P44 TQ mixed-batch attn_out pool — required_anchor_missing
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [P46 GDN gating buffer pool] applied 2 sub-patches: p46_g_buffer, p46_beta_buffer
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P46 GDN gating buffer pool — text-patch applied — fused_gdn_gating now uses GdnGatingBufferManager pool (eliminates ~24k allocs/sec on Qwen3.6-35B-A3B decode)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P7b GDN dual-stream via torch.library.custom_op (opt-in) — opt-in: set GENESIS_ENABLE_P7B=1 to enable GDN dual-stream via torch.library.custom_op (graph-safe alternative to P7; validates numeric equiv + compile-cache freshness before prod)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P40 TurboQuant GQA-grouped decode stage1 (opt-in) — opt-in: set GENESIS_ENABLE_P40=1 to enable GQA-grouped decode stage1 (port of upstream PR #40792)
+00:57:03 INFO    [pid 99] genesis.wiring.p39a_fla_kkt: [Genesis P39b] vllm_config fetch failed (Current vLLM config is not set. This typically means get_current_vllm_config() was called outside of a set_current_vllm_config() context, or a CustomOp was instantiated at module import time or model forward time when config is not set. For tests that directly test custom ops/modules, use the 'default_vllm_config' pytest fixture from tests/conftest.py.); defaults used
+00:57:03 INFO    [pid 99] genesis.wiring.p39a_fla_kkt: [Genesis P39a] rebound vllm.third_party.flash_linear_attention.ops.chunk_scaled_dot_kkt.chunk_scaled_dot_kkt_fwd (+1 caller mods: ['vllm.third_party.flash_linear_attention.ops.chunk'])
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P39a FLA chunk_scaled_dot_kkt persistent A pool — module-level fn replaced (1 caller module(s) also rebound — pool shared across GDN layers)
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P38 TQ _continuation_prefill persistent workspace — superseded: native WorkspaceManager dequant path (current_workspace_manager) already implements P38's fixes
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P37 MoE intermediate cache pool (opt-in) — opt-in only — set GENESIS_ENABLE_P37=1 to engage. Manager API is registered and usable independently of this text-patch.
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P36 TurboQuant shared decode buffers — redundant: upstream PR #40798 (workspace manager) active — skip
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P32/P33 TurboQuant cu_2 + synth_seq_lens preallocs — cu_2 + synth_seq_lens preallocs registered (invoked from ensure_turboquant_buffers, fires during profile_run)
+00:57:03 INFO    [pid 99] genesis.prealloc_budget: [Genesis P73] token budget resolved → 4096 (default fallback). Set GENESIS_PREALLOC_TOKEN_BUDGET to override.
+00:57:03 INFO    [pid 99] genesis.wiring.text_patch: [P28 GDN core_attn_out prealloc] applied 1 sub-patches: p28_core_attn_out_alloc
+00:57:03 INFO    [pid 99] genesis.wiring.p28_gdn_core_attn: [Genesis P28] wrapped QwenGatedDeltaNetAttention.__init__ to attach _genesis_gdn_core_attn_buf on each instance
+00:57:03 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P28 GDN core_attn_out prealloc — forward_cuda patched + __init__ wrapped
+00:57:04 INFO    [pid 99] genesis.gdn_dual_stream: [GDN dual-stream] CUDA aux stream initialized
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis P7] dispatcher ready (parallel path)
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: P7 GDN dual-stream in_proj parallelism — deferred — incompatible with torch.compile fullgraph (CUDA streams not SymPy-graphable); custom op implementation required. Re-enable with GENESIS_ENABLE_P7=1 + --enforce-eager.
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis P17/P18] Marlin tuning ready: SM=(8, 6) bsm=8 num_warps=4 num_stages=3
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P17/P18 Marlin MoE per-SM tuning — SM=(8, 6) bsm=8
+00:57:04 INFO    [pid 99] genesis.wiring.text_patch: [P24 fused_moe num_warps/num_stages overlay] applied 2 sub-patches: p24_fp8_cfg_overlay, p24_general_cfg_overlay
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P24 fused_moe num_warps/num_stages overlay — num_warps / num_stages overlay wired into get_default_config (active only on Triton fused_moe path; Marlin unaffected)
+00:57:04 INFO    [pid 99] genesis.wiring.p14_block_table: [Genesis P14] rebound BlockTable.append_row + move_row (tail-zero-fill active for concurrent-request safety)
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P14 block_table tail zero-fill — BlockTable.append_row + move_row wrapped (effective in this process)
+00:57:04 INFO    [pid 99] genesis.tq_decode_tune: [Genesis P18b] TQ decode stage1 using upstream defaults (BLOCK_KV=4 num_warps=1 num_stages=1)
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P18b TurboQuant decode stage1 tune — no env override — using upstream defaults (4/1/1)
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis P20] TQ _continuation_prefill FP16 helpers ready for TurboQuantAttentionImpl hook
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P20 TurboQuant continuation-prefill FP16 rotate — fp16-rotation helper ready for _continuation_prefill hook
+00:57:04 INFO    [pid 99] genesis.fp8_dispatcher: [Genesis FP8 dispatcher] SM (8, 6) → Marlin fallback required (Triton block FP8 unsupported on Ampere)
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] applied: P1/P2 FP8 kernel dispatcher — SM=(8, 6) → Marlin fallback path selected
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] skipped: PN71 OpenWebUI reasoning_content compatibility — engine/protocol.py not found
+00:57:04 INFO    [pid 99] genesis.wiring.text_patch: [B3 distributed/device_communicators/custom_all_reduce.py — 32 MiB buffer + CuMem graph bypass] applied 3 sub-patches: b3_init_32mib, b3_should_ar_cumem_bypass, b3_register_graph_buffers_guard
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis] applied: B3 custom AR TP=2 fast path (CK-4.2) — B3 custom AR 32 MiB buffer + CuMem graph bypass applied
+00:57:04 INFO    [pid 99] genesis.apply_all: Genesis Results: 66 applied, 124 skipped, 0 failed, 29 ⚠️ partial-apply warning(s)
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] 29 partial-apply warning(s) — patch(es) failed to match expected source pattern. Review below to confirm anchor drift vs upstream change vs config issue:
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P113 — GENESIS_P113_MLP_FUSED_SILU=0
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P3 TurboQuant BF16->FP8 cast (Ampere fix) — required_anchor_missing
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P6 TurboQuant-aware attention page size — required_anchor_missing
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P15 Qwen3 None/null tool arg parser — qwen3coder_tool_parser.py not found
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P12 Qwen3 <tool_call> implicit reasoning end — qwen3_reasoning_parser.py not found
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P27 Qwen3 BEFORE-THINK fallback — qwen3_reasoning_parser.py not found
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P29 tool parser IndexError guard — qwen3coder_tool_parser.py not found
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P61b Qwen3 streaming partial-tag overlap guard — qwen3_reasoning_parser.py not found
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN85 thinking budget message — PN85 thinking budget message (v1/engine/input_processor.py): required_anchor_missing — sub-patch 'pn85_tokenize_message': anchor not found in file
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN92 cuantizacion 4-bit del tier de disco — GENESIS_ENABLE_PN92_KV_FP4_COMPRESSION='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN93 checkpointing disperso GDN — GENESIS_ENABLE_PN93_SPARSE_GDN='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN97 promocion sin desalojo — GENESIS_DISABLE_PN97 set
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  B2 FULL CG for long prefill — GENESIS_ENABLE_B2_FULL_CG='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN80 GDN h budget probe — GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN56 qwen3coder XML fallback — qwen3coder_tool_parser.py not found
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN51 Qwen3 streaming thinking-disabled content routing — qwen3_reasoning_parser.py not found
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P62 structured-output spec-decode timing fix — required anchor for 'p62_grammar_bitmask' not found in /usr/local/lib/python3.12/dist-packages/vllm/v1/structured_output/__init__.py — anchor drifted, P62 cannot apply.
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN129 FlashInfer decode sin pin — GENESIS_ENABLE_PN129_FLASHINFER_DECODE_UNPIN='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN119 MLP de prefill por SK-12 — GENESIS_ENABLE_PN119_SK12_MLP='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN118 MLP AWQ int4 -> INT8 per-canal en la carga — GENESIS_ENABLE_PN118_INT8_MLP='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN116 Super kernel de MLP aislado al prefill (SK-05) — GENESIS_ENABLE_PN116_PREFILL_MLP_SK='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P100 FlashInfer FULL CUDA graph for spec-decode (vllm#41127) — GENESIS_ENABLE_P100='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P103 FLA Cliff 2 chunked fwd_h+fwd_o orchestrator — GENESIS_ENABLE_P103 not set or platform not NVIDIA SM 8.0+
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN8 MTP/draft online-quant propagation (vllm#40849 backport) — GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P59 Qwen3 reasoning embedded tool_call recovery — qwen3_reasoning_parser.py not found
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P58 async-scheduler -1 placeholder fix — GENESIS_ENABLE_P58_ASYNC_PLACEHOLDER_FIX='0' explicitly set — operator disable
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P44 TQ mixed-batch attn_out pool — required_anchor_missing
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  P38 TQ _continuation_prefill persistent workspace — superseded: native WorkspaceManager dequant path (current_workspace_manager) already implements P38's fixes
+00:57:04 WARNING [pid 99] genesis.apply_all: [Genesis] ⚠️  PN71 OpenWebUI reasoning_content compatibility — engine/protocol.py not found
+00:57:04 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher v2] apply matrix:
+P113  | SKIP   | MLP gate_up+SiLU fusionado en un solo GEMM (S | GENESIS_P113_MLP_FUSED_SILU=0                                | Genesis-original. Reemplaza `g
+PN84  | APPLY  | Hit de prefijo inconsistente entre grupos en  | config_detect: neutral:                                      | Genesis-original 2026-08-16. B
+PN85  | APPLY  | Mensaje inyectado al agotarse el presupuesto  | config_detect: neutral:                                      | Genesis-original 2026-08-17. v
+PN87  | APPLY  | OffloadingConnector boundary fix para grupos  | config_detect: neutral:                                      | Genesis-original 2026-08-17. B
+PN83  | APPLY  | Informe de arranque en lenguaje humano (VRAM, | config_detect: neutral:                                      | Genesis-original 2026-08-15. E
+PN82  | APPLY  | Limpia el error pegajoso de CUDA que deja un  | config_detect: neutral:                                      | Genesis-original 2026-08-15. B
+PN81  | APPLY  | KV disk tier quota + poda por antiguedad (el  | opt-in env (config: neutral)                                 | Genesis-original 2026-08-15. T
+PN88  | APPLY  | KV tier metrics (el tier de disco de vLLM no  | opt-in env (config: neutral)                                 | Genesis-original 2026-08-21. v
+PN90  | APPLY  | KV disk write gating & democion por desalojo  | opt-in env (config: neutral)                                 | Genesis-original 2026-08-22, c
+PN91  | APPLY  | Deferral acotado de promociones SSD -> RAM (a | opt-in env (config: neutral)                                 | Genesis-original 2026-08-22, r
+PN92  | SKIP   | Cuantizacion agrupada a 4 bits del tier de di | GENESIS_ENABLE_PN92_KV_FP4_COMPRESSION='0' explicitly set —  | Genesis-original 2026-08-22, r
+PN93  | SKIP   | Checkpointing disperso del estado recurrente  | GENESIS_ENABLE_PN93_SPARSE_GDN='0' explicitly set — operator | Genesis-original 2026-08-22, c
+PN94  | APPLY  | Registro de host pinneado por rank (arregla e | config_detect: neutral:                                      | Genesis-original 2026-08-23. B
+PN95  | APPLY  | Ocupacion y desalojos del tier L2 (RAM) en Pr | config_detect: neutral:                                      | Genesis-original 2026-08-23. D
+PN96  | APPLY  | Admision a L2 resistente a escaneo (habilita  | config_detect: neutral:                                      | Genesis-original 2026-08-23. T
+PN97  | APPLY  | Una promocion L3->L2 nunca desaloja (leer del | config_detect: neutral:                                      | Genesis-original 2026-08-23. T
+PN98  | APPLY  | Avisa al arrancar el tamano minimo recomendad | config_detect: neutral:                                      | Genesis-original 2026-08-23. E
+PN99  | APPLY  | L2/L3 comprimidos a 4 bits cuantizando en la  | config_detect: neutral:                                      | Genesis-original 2026-08-23. P
+PN100 | APPLY  | Anillo de staging: los agentes efimeros no de | config_detect: neutral:                                      | Genesis-original 2026-08-23. E
+PN101 | APPLY  | Mide y publica el prefijo REALMENTE compartid | config_detect: neutral:                                      | Genesis-original 2026-08-23. m
+PN102 | APPLY  | Desalojo por score de bloque con envejecimien | config_detect: neutral:                                      | Genesis-original 2026-08-23. A
+PN103 | APPLY  | max_offload_tokens automatico, derivado de lo | config_detect: neutral:                                      | Genesis-original 2026-08-23. T
+PN104 | APPLY  | Atribucion EXACTA de que tier sirvio cada aci | config_detect: neutral:                                      | Genesis-original 2026-08-23. E
+PN105 | APPLY  | reset_cache() del tiering manager, que hereda | config_detect: neutral:                                      | Genesis-original 2026-08-23. B
+B2    | SKIP   | B2 FULL cudagraph for long prefill (force FUL | GENESIS_ENABLE_B2_FULL_CG='0' explicitly set — operator disa | Genesis-original CK-4.1 B2 — t
+PN80  | SKIP   | GDN h budget probe + headroom projection (obs | GENESIS_ENABLE_PN80_GDN_H_BUDGET_PROBE='0' explicitly set —  | Genesis-original 2026-08-15. O
+PN59  | APPLY  | Streaming-GDN orchestrator (Variant D Phase 2 | opt-in env (config: neutral)                                 | Genesis-original 2026-05-05, V
+PN58  | SKIP   | Spec-decode reasoning boundary validation — n | opt-in only — set GENESIS_ENABLE_PN58_SPEC_REASONING_BOUNDAR | Backport of vllm#40962 (OPEN, 
+PN55  | SKIP   | wake_up crash fix on hybrid (Mamba/DeltaNet)  | opt-in only — set GENESIS_ENABLE_PN55_WAKE_UP_HYBRID_KV=1 to | Backport of vllm-project/vllm#
+PN54  | APPLY  | GDN contiguous-call deduplication (P0.7 Cliff | opt-in env (config: neutral)                                 | Genesis-original 2026-05-04, i
+PN52  | SKIP   | prompt_logprobs eviction fix during chunked p | opt-in only — set GENESIS_ENABLE_PN52_PROMPT_LOGPROBS_EVICTI | Backport of vllm-project/vllm#
+P60b  | SKIP   | GDN+ngram Triton kernel offset (Phase 2)      | opt-in only — set GENESIS_ENABLE_P60B_TRITON_KERNEL=1 to eng | tdoublep (vllm#40738)         
+P60   | SKIP   | GDN+ngram state recovery (Phase 1: SSM pre-co | opt-in only — set GENESIS_ENABLE_P60_GDN_NGRAM_FIX=1 to enga | tdoublep (vllm#40738), bhaktat
+P63   | SKIP   | MTP/Eagle drafter GDN state recovery (depreca | opt-in only AND empirically deprecated — keeping skip; set G | Genesis-original (hypothesis d
+P64   | SKIP   | qwen3coder MTP streaming early-return fix     | opt-in only — set GENESIS_ENABLE_P64_QWEN3CODER_MTP_STREAMIN | kotori-yan (vllm#39598)       
+P65   | SKIP   | TurboQuant spec-decode cudagraph downgrade    | opt-in only — set GENESIS_ENABLE_P65_TURBOQUANT_SPEC_CG_DOWN | Genesis-original (root cause f
+P66   | APPLY  | cudagraph_capture_sizes spec-decode divisibil | opt-in env (config: neutral)                                 | Genesis-original (mirrors fhl2
+P68   | SKIP   | Auto force tool_choice=required for long-cont | opt-in only — set GENESIS_ENABLE_P68_AUTO_FORCE_TOOL=1 to en | Genesis-original (long-ctx too
+P69   | APPLY  | Long-context tool-format reminder injection   | opt-in env (config: neutral)                                 | Genesis-original (long-ctx too
+P70   | SKIP   | Auto-strict-ngram (force prompt_lookup_min>=8 | opt-in only — set GENESIS_ENABLE_P70_AUTO_STRICT_NGRAM=1 to  | Genesis-original (vllm#40875 e
+P67   | SKIP   | TurboQuant multi-query kernel for spec-decode | opt-in only — set GENESIS_ENABLE_P67_TQ_MULTI_QUERY_KERNEL=1 | Genesis-original (proper fix f
+P71   | SKIP   | Block-verify rejection sampler (Sun 2024 ICLR | opt-in only — set GENESIS_ENABLE_P71_BLOCK_VERIFY=1 to engag | Backport of vllm#40819 (Z. Gol
+B5    | APPLY  | Rejection sampler vectorized early-exit async | opt-in env (config: neutral)                                 | Genesis-original CK-4.3 B5 v1.
+PN114 | APPLY  | Mamba align bounds guard for spec-decode with | opt-in env (config: neutral)                                 | Genesis-original 2026-08-30 (v
+PN124 | APPLY  | TRITON_ATTN rapido en Ampere head 256 (prefil | opt-in env (config: neutral)                                 | Genesis-original 2026-09-14. P
+PN123 | SKIP   | DIAGNOSTICO: volcado de q/k/v de la atencion  | opt-in only — set GENESIS_ENABLE_PN123_VOLCADO_QKV=1 to enga | Genesis-original 2026-09-14. S
+PN122 | APPLY  | Rollback del MTP en GDN con cinta (sin bloque | opt-in env (config: neutral)                                 | Genesis-original 2026-09-14. M
+PN130 | APPLY  | Marlin W4A8 propio con escalas int16 con sign | opt-in env (config: neutral)                                 | Genesis-original 2026-09-15. E
+PN151 | APPLY  | Metadata del GDN para el decode en arbol en u | opt-in env (config: neutral)                                 | Genesis-original 2026-09-27. G
+PN150 | APPLY  | Borrador DFlash: fc y proyeccion de contexto  | opt-in env (config: neutral)                                 | Genesis-original 2026-09-27. D
+PN149 | APPLY  | Borrador DFlash en su base original sobre un  | opt-in env (config: neutral)                                 | Genesis-original 2026-09-25. E
+PN148 | APPLY  | Hadamard en linea antes de down_proj (checkpo | opt-in env (config: neutral)                                 | Genesis-original 2026-09-24. E
+PN147 | APPLY  | Saneo de pedidos para spec decode: min_p/logi | opt-in env (config: neutral)                                 | Genesis-original 2026-09-24. L
+PN146 | APPLY  | Tamano de grupo de KV elegible (la heuristica | opt-in env (config: neutral)                                 | Genesis-original 2026-09-19. g
+PN145 | APPLY  | Bloque de la ventana deslizante alineado con  | opt-in env (config: neutral)                                 | Genesis-original 2026-09-19. C
+PN143 | APPLY  | Enganche de Genesis en cada proceso de vLLM ( | config_detect: neutral:                                      | Genesis-original 2026-09-18. I
+PN129 | SKIP   | FlashInfer decode workspace sin pin (vllm#407 | GENESIS_ENABLE_PN129_FLASHINFER_DECODE_UNPIN='0' explicitly  | Fix de club-3090: el drafter M
+PN137 | SKIP   | Suavizado por grupo plegado en los pesos (Smo | opt-in only — set GENESIS_ENABLE_PN137_SUAVE=1 to engage     | Genesis-original 2026-09-17. C
+PN136 | SKIP   | All-reduce del MLP solapado con el computo (P | opt-in only — set GENESIS_ENABLE_PN136_MLP_SOLAPADO=1 to eng | Genesis-original 2026-09-16. E
+PN134 | SKIP   | Cuantizacion int8 de activacion con el factor | opt-in only — set GENESIS_ENABLE_PN134_QUANT=1 to engage     | Genesis-original 2026-09-16. E
+PN133 | SKIP   | Lineales del modulo MTP en W8A8               | opt-in only — set GENESIS_ENABLE_PN133_MTP_INT8=1 to engage  | Genesis-original 2026-09-16. E
+PN132 | SKIP   | Vocabulario recortado para el borrador MTP (F | opt-in only — set GENESIS_ENABLE_PN132_VOCAB=1 to engage     | Genesis-original 2026-09-16. E
+PN131 | APPLY  | Decode de atencion entero SK-18h (PTX) sobre  | opt-in env (config: neutral)                                 | Genesis-original 2026-09-15. Q
+PN126 | APPLY  | Rotacion de q/k (Hadamard o WUSH) despues de  | opt-in env (config: neutral)                                 | Genesis-original 2026-09-14. q
+PN125 | APPLY  | Escalas positivas para Marlin W4A8-INT8 (chec | opt-in env (config: neutral)                                 | Genesis-original 2026-09-14. V
+PN121 | APPLY  | Guard de cascada de preempcion con frees dife | opt-in env (config: neutral)                                 | Genesis-original 2026-09-13. C
+PN120 | APPLY  | All-reduce de TP comprimido a INT8 en el pref | opt-in env (config: neutral)                                 | Genesis-original 2026-09-13. E
+PN119 | SKIP   | MLP de prefill despachado por SK-12 (gate_up+ | GENESIS_ENABLE_PN119_SK12_MLP='0' explicitly set — operator  | Genesis-original 2026-09-12. S
+PN118 | SKIP   | Cuantiza el MLP de AWQ int4 a INT8 per-canal  | GENESIS_ENABLE_PN118_INT8_MLP='0' explicitly set — operator  | Genesis-original 2026-09-12. E
+PN116 | SKIP   | Super kernel de MLP aislado al prefill (SK-05 | GENESIS_ENABLE_PN116_PREFILL_MLP_SK='0' explicitly set — ope | Genesis-original 2026-09-12. E
+PN115 | APPLY  | Admision por headroom de bloques KV + bypass  | opt-in env (config: neutral)                                 | Genesis-original 2026-08-30. I
+P78   | SKIP   | TurboQuant .tolist() capture-guard (adapted f | opt-in only — set GENESIS_ENABLE_P78_TOLIST_CAPTURE_GUARD=1  | Adapted from noonghunna's patc
+P77   | SKIP   | Adaptive ngram K controller (EMA + hysteresis | opt-in only — set GENESIS_ENABLE_P77_ADAPTIVE_NGRAM_K=1 to e | Genesis-original (port of SGLa
+P79b  | SKIP   | Async × spec-decode proposer-sync backport (v | opt-in only — set GENESIS_ENABLE_P79B_ASYNC_PROPOSER_SYNC=1  | Backport of vllm#40610 (OPEN d
+P79c  | SKIP   | Stale spec_token_ids cleanup for unscheduled  | opt-in only — set GENESIS_ENABLE_P79C_STALE_SPEC_TOKEN_CLEAN | Backport of vllm#37629 (OPEN, 
+PN61  | SKIP   | qwen3_vl loader KeyError → text-only auto-fal | opt-in only — set GENESIS_ENABLE_PN61=1 to engage            | Genesis-original 2026-05-05 (a
+PN67  | SKIP   | thinking_token_budget inverted-bool fix (vllm | opt-in only — set GENESIS_ENABLE_PN67=1 to engage            | Backport of vllm#41674 (JasonK
+PN70  | SKIP   | Tool schema subset filter (combined `anyOf` x | opt-in only — set GENESIS_ENABLE_PN70_TOOL_SCHEMA_FILTER=1 t | Genesis-original — implements 
+PN65  | SKIP   | Genesis structured API access log middleware  | opt-in only — set GENESIS_ENABLE_PN65=1 to engage            | Genesis-original 2026-05-05 (S
+PN62  | SKIP   | Text-only ViT scratch MARKER-ONLY (predicted  | opt-in only — set GENESIS_ENABLE_PN62=1 to engage            | Genesis-original 2026-05-05 (a
+P79d  | SKIP   | Preempt async-discard backport (vllm#38624)   | opt-in only — set GENESIS_ENABLE_P79D_PREEMPT_ASYNC_DISCARD= | Backport of vllm#38624 (Coders
+P81   | SKIP   | fp8 block-scaled MM low-M decode tuning (vllm | opt-in only — set GENESIS_ENABLE_P81_FP8_BLOCK_SCALED_M_LE_8 | Backport of vllm#40925 (tonyli
+P83   | SKIP   | MTP keep-last-cached-block (vllm#38182 downst | opt-in only — set GENESIS_ENABLE_P83=1 to engage             | Root-cause analysis: vllm#3818
+P84   | SKIP   | hash_block_size override (vllm#38182 actual r | opt-in only — set GENESIS_ENABLE_P84=1 to engage             | Genesis-original discovery 202
+P100  | SKIP   | FlashInfer FULL CUDA graph for spec-decode (v | GENESIS_ENABLE_P100='0' explicitly set — operator disable    | Backport of vllm#41127 (open 2
+P101  | SKIP   | TQ continuation 64-token slicing (vllm#41123  | opt-in only — set GENESIS_ENABLE_P101=1 to engage            | Selective backport of vllm#411
+P99   | SKIP   | WorkspaceManager.get_simultaneous memoization | opt-in only — set GENESIS_ENABLE_P99=1 to engage             | Per Sander 2026-04-28: 'if rev
+P98   | SKIP   | TQ WorkspaceManager revert (vllm#40941 perf h | opt-in only — set GENESIS_ENABLE_P98=1 to engage             | Reverts upstream PR #40941 (ME
+P94   | SKIP   | Spec-decode prepare_next_token_ids_padded zer | opt-in only — set GENESIS_ENABLE_P94=1 to engage             | Backport of vllm#41043 (wanglu
+P95   | SKIP   | Marlin TP cudagraph cap on Ampere (vllm#40385 | opt-in only — set GENESIS_ENABLE_P95=1 to engage             | Backport of vllm#40385 (OPEN a
+P91   | SKIP   | AutoRound row-parallel group cdiv + start-idx | opt-in only — set GENESIS_ENABLE_P91=1 to engage             | Backport of non-MoE-specific p
+P87   | SKIP   | Marlin W4A16/W8A16 sub-tile output dim pad-on | opt-in only — set GENESIS_ENABLE_P87=1 to engage             | Backport of vllm#40361 (OPEN).
+PN8   | SKIP   | MTP/draft online-quant propagation (vllm#4084 | GENESIS_ENABLE_PN8_MTP_DRAFT_ONLINE_QUANT='0' explicitly set | Backport of vllm#40849 (bhoomi
+PN9   | SKIP   | Independent drafter attention backend (vllm#3 | opt-in only — set GENESIS_ENABLE_PN9_INDEPENDENT_DRAFTER_ATT | Backport of vllm#39930 (Matthe
+PN11  | SKIP   | GDN a/b contiguity in fix_query_key_value_ord | opt-in only — set GENESIS_ENABLE_PN11_GDN_AB_CONTIGUOUS=1 to | Backport of vllm#41142 (Yeuvoi
+PN40  | SKIP   | Spec-decode omnibus (A DFlash K-norm + B pool | opt-in only — set GENESIS_ENABLE_PN40_DFLASH_OMNIBUS=1 to en | Genesis-original 2026-05-04 — 
+PN38  | SKIP   | DFlash drafter quantization support (PR #4042 | opt-in only — set GENESIS_ENABLE_PN38_DFLASH_QUANT_DRAFTER=1 | Backport of vllm-project/vllm#
+PN34  | SKIP   | WorkspaceManager runtime lock relaxation (PN3 | opt-in only — set GENESIS_ENABLE_PN34_WORKSPACE_LOCK_RELAX=1 | Companion to PN33 — same root 
+PN32  | SKIP   | GDN _forward_core chunked-prefill v2 (Cliff 2 | opt-in only — set GENESIS_ENABLE_PN32_GDN_CHUNKED_PREFILL=1  | Genesis-original v7.69 v2 (202
+PN31  | SKIP   | FA varlen persistent out buffer (issue #15, s | opt-in only — set GENESIS_ENABLE_PN31_FA_VARLEN_PERSISTENT_O | Genesis-original sister patch 
+PN30  | SKIP   | DS conv state layout + spec-decode AL>1 fix ( | opt-in only — set GENESIS_ENABLE_PN30_DS_LAYOUT_SPEC_DECODE= | Genesis-original fix for issue
+PN29  | SKIP   | GDN chunk_o scale-fold (vllm#41446 pattern (c | opt-in only — set GENESIS_ENABLE_PN29_GDN_SCALE_FOLD=1 to en | Backport of vllm#41446 (zobinH
+PN12  | APPLY  | FFN intermediate scratch pool — Cliff 1 fix o | opt-in env (config: neutral)                                 | Genesis-original 2026-04-29 — 
+PN28  | SKIP   | merge_attn_states NaN guard (vllm#39148 backp | opt-in only — set GENESIS_ENABLE_PN28_MERGE_ATTN_NAN_GUARD=1 | Backport of vllm#39148 (jasonk
+P15B  | SKIP   | FA varlen max_seqlen_k clamp on TQ path (Issu | opt-in only — set GENESIS_ENABLE_P15B_FA_VARLEN_CLAMP=1 to e | Genesis-original 2026-05-01 fi
+P38B  | SKIP   | P38 compile-safe in-source hook (Issue #14 fi | opt-in only — set GENESIS_ENABLE_P38B_COMPILE_SAFE=1 to enga | Genesis-original 2026-05-01 fi
+PN27  | SKIP   | Revert MoERunnerInterface PluggableLayer (vll | opt-in only — set GENESIS_ENABLE_PN27_REVERT_PLUGGABLE_MOE=1 | Backport of vllm#41440 (auto-g
+PN26  | SKIP   | TQ unified perf pack (centroids prebake + spa | opt-in only — set GENESIS_ENABLE_PN26_TQ_UNIFIED=1 to engage | Genesis-original 2026-05-01 un
+PN25  | APPLY  | SiluAndMul.forward_native opaque-op pool (Cli | opt-in env (config: neutral)                                 | Genesis-original 2026-05-01 in
+PN13  | SKIP   | CUDAGraphWrapper lambda arity (vllm#41235 bac | opt-in only — set GENESIS_ENABLE_PN13_CUDA_GRAPH_LAMBDA_ARIT | Backport of vllm#41235 by Roi 
+PN14  | SKIP   | TQ decode IOOB safe_page_idx clamp (vllm#4007 | opt-in only — set GENESIS_ENABLE_PN14_TQ_DECODE_OOB_CLAMP=1  | Backport of vllm#40074 (devara
+PN23  | SKIP   | DFlash combine_hidden_states dtype cast (vllm | opt-in only — set GENESIS_ENABLE_PN23_DFLASH_DTYPE_FIX=1 to  | Backport of vllm#40334 (cipher
+PN21  | SKIP   | DFlash SWA support partial backport (vllm#408 | opt-in only — set GENESIS_ENABLE_PN21_DFLASH_SWA=1 to engage | Partial backport of vllm#40898
+PN22  | SKIP   | Local argmax for TP draft (vllm#39419 backpor | opt-in only — set GENESIS_ENABLE_PN22_LOCAL_ARGMAX_TP=1 to e | Backport of vllm#39419 (EanWan
+PN24  | SKIP   | DFlash aux layer +1 indexing fix (vllm#40727) | opt-in only — set GENESIS_ENABLE_PN24_DFLASH_AUX_LAYER_FIX=1 | Backport of vllm#40727 (benchi
+PN16  | SKIP   | Lazy-reasoner request hook (per-request enabl | opt-in only — set GENESIS_ENABLE_PN16_LAZY_REASONER=1 to eng | Genesis-original 2026-04-29. H
+P86   | SKIP   | ngram batch_propose O(N*K) → O(N+K) direct-fi | opt-in only — set GENESIS_ENABLE_P86=1 to engage             | Backport of vllm#40876 (aarona
+P85   | SKIP   | Hybrid fine-shadow prefix cache (vllm#38182 f | opt-in only — set GENESIS_ENABLE_P85=1 to engage             | Genesis-original 2026-04-27 — 
+P75   | SKIP   | Auto-enable Suffix Decoding (Arctic Inference | opt-in only — set GENESIS_ENABLE_P75_SUFFIX_DECODING=1 to en | Backport-enabler of vllm#25784
+P74   | SKIP   | Auto chunk-clamp via long_prefill_token_thres | opt-in only — set GENESIS_ENABLE_P74_CHUNK_CLAMP=1 to engage | Genesis-original (zero-VRAM-co
+P72   | SKIP   | profile_run M cap (unblocks --max-num-batched | opt-in only — set GENESIS_ENABLE_P72_PROFILE_RUN_CAP=1 to en | Genesis-original (Dynamo fake-
+P67b  | SKIP   | TurboQuant spec-verify forward() routing (FUL | opt-in only — set GENESIS_ENABLE_P67_TQ_MULTI_QUERY_KERNEL=1 | Genesis-original (FULL CG enab
+P58   | SKIP   | Async-scheduler -1 placeholder fix            | GENESIS_ENABLE_P58_ASYNC_PLACEHOLDER_FIX='0' explicitly set  | z1ying (vllm#40768)           
+00:57:04 INFO    [pid 99] genesis.dispatcher: [Genesis Dispatcher v2] validator: clean (no issues)
+00:57:04 INFO    [pid 99] genesis.apply_all: [Genesis compile-watchdog] apply_all elapsed: 10.0s
+00:57:04 INFO    [pid 99] genesis.dispatcher: [Genesis] structured boot summary:
+Genesis vLLM Patcher — boot summary
+  Genesis:  v7.63.x
+  ║   • PN87        OffloadingConnector boundary fix para grupos hibridos/Mamba (evita AssertionError en :612)
+  ║   • PN82        Limpia el error pegajoso de CUDA que deja un cudaHostRegister fallido
+  ║   • PN143       Enganche de Genesis en cada proceso de vLLM (load_general_plugins)
+00:57:12 INFO    [pid 1] genesis.volcado: [Genesis] volcado de diagnostico activo -> /root/.cache/vllm/genesis_volcados (apagar: GENESIS_VOLCADO=0)
+00:57:14 INFO    [pid 1] genesis.pn151: [PN151] metadata del GDN en un kernel para el decode en arbol (verificar=3000)
+00:57:14 INFO    [pid 1] genesis.pn130: [PN130] .so cargada desde /root/.cache/vllm/genesis_marlin_s16/genesis_marlin_s16.so
+00:57:14 WARNING [pid 1] genesis.arbol: [ARBOL] enganches instalados (borrador, runner v2, conv de GDN)
+00:57:14 INFO    [pid 1] genesis.silu_and_mul_customop: [PN25] registered torch op genesis::silu_and_mul_pooled via direct_register_custom_op (vLLM canonical, v7.66 — fork-safe + Inductor-opaque)
+00:57:14 WARNING [pid 1] genesis.dflash2_escala: [PN144] enganchado: escalas al cargar y semilla del embedding en cada paso (divisor 32)
+00:57:14 INFO    [pid 1] genesis.pn131: [PN131] TRITON_ATTN registrado como vllm._genesis.sk18_backend.BackendSK18
+(APIServer pid=1) 00:57:14 WARNING [pid 1] vllm.config.model: Casting torch.bfloat16 to torch.float16.
+(APIServer pid=1) 00:57:15 WARNING [pid 1] vllm.config.model: Casting torch.bfloat16 to torch.float16.
+(APIServer pid=1) 00:57:15 WARNING [pid 1] vllm.model_executor.models.config: Qwen3.5 model specifies mamba_ssm_dtype='float32' in its config, but --mamba-ssm-cache-dtype='float16' was passed. Using the user-specified value.
+(APIServer pid=1) 00:57:15 INFO    [pid 1] vllm.config.vllm: [Genesis P66] cudagraph_capture_sizes GENERADAS para uniform_query_len=9, hasta 4 pedidos: [9, 18, 27, 36] (se ignora la lista del usuario [4, 8, 12, 16, 20, 24, 28, 32, 36, 40])
+(APIServer pid=1) 00:57:15 INFO    [pid 1] vllm.config.vllm: [Genesis P66] Filtered cudagraph_capture_sizes for spec-decode uniform_query_len=9: removed 9 non-divisible sizes [4, 8, 12, 16, 20, 24, 28, 32, 40]; kept [9, 18, 27, 36]. Prevents mixed-q_len capture (vllm#28015 mechanism).
+(APIServer pid=1) 00:57:15 WARNING [pid 1] vllm.config.vllm: cudagraph_capture_sizes specified in compilation_config [4, 8, 12, 16, 20, 24, 28, 32, 36, 40] is overridden by config [9, 18, 27, 36]
+00:57:27 INFO    [pid 202] genesis.pn130: [PN130] .so cargada desde /root/.cache/vllm/genesis_marlin_s16/genesis_marlin_s16.so
+(EngineCore pid=202) 00:57:27 INFO    [pid 202] genesis.volcado: [Genesis] volcado de diagnostico activo -> /root/.cache/vllm/genesis_volcados (apagar: GENESIS_VOLCADO=0)
+(EngineCore pid=202) 00:57:27 INFO    [pid 202] genesis.pn151: [PN151] metadata del GDN en un kernel para el decode en arbol (verificar=3000)
+(EngineCore pid=202) 00:57:27 WARNING [pid 202] genesis.arbol: [ARBOL] enganches instalados (borrador, runner v2, conv de GDN)
+(EngineCore pid=202) 00:57:27 INFO    [pid 202] genesis.silu_and_mul_customop: [PN25] registered torch op genesis::silu_and_mul_pooled via direct_register_custom_op (vLLM canonical, v7.66 — fork-safe + Inductor-opaque)
+(EngineCore pid=202) 00:57:27 WARNING [pid 202] genesis.dflash2_escala: [PN144] enganchado: escalas al cargar y semilla del embedding en cada paso (divisor 32)
+(EngineCore pid=202) 00:57:27 INFO    [pid 202] genesis.pn131: [PN131] TRITON_ATTN registrado como vllm._genesis.sk18_backend.BackendSK18
+00:57:34 INFO    [pid 233] genesis.pn130: [PN130] .so cargada desde /root/.cache/vllm/genesis_marlin_s16/genesis_marlin_s16.so
+00:57:34 INFO    [pid 233] genesis.volcado: [Genesis] volcado de diagnostico activo -> /root/.cache/vllm/genesis_volcados (apagar: GENESIS_VOLCADO=0)
+00:57:34 INFO    [pid 233] genesis.pn151: [PN151] metadata del GDN en un kernel para el decode en arbol (verificar=3000)
+00:57:34 WARNING [pid 233] genesis.arbol: [ARBOL] enganches instalados (borrador, runner v2, conv de GDN)
+00:57:34 INFO    [pid 233] genesis.silu_and_mul_customop: [PN25] registered torch op genesis::silu_and_mul_pooled via direct_register_custom_op (vLLM canonical, v7.66 — fork-safe + Inductor-opaque)
+00:57:34 WARNING [pid 233] genesis.dflash2_escala: [PN144] enganchado: escalas al cargar y semilla del embedding en cada paso (divisor 32)
+00:57:34 INFO    [pid 233] genesis.pn131: [PN131] TRITON_ATTN registrado como vllm._genesis.sk18_backend.BackendSK18
+00:57:39 INFO    [pid 251] genesis.pn130: [PN130] .so cargada desde /root/.cache/vllm/genesis_marlin_s16/genesis_marlin_s16.so
+00:57:39 INFO    [pid 251] genesis.volcado: [Genesis] volcado de diagnostico activo -> /root/.cache/vllm/genesis_volcados (apagar: GENESIS_VOLCADO=0)
+00:57:39 INFO    [pid 251] genesis.pn151: [PN151] metadata del GDN en un kernel para el decode en arbol (verificar=3000)
+00:57:39 WARNING [pid 251] genesis.arbol: [ARBOL] enganches instalados (borrador, runner v2, conv de GDN)
+00:57:39 INFO    [pid 251] genesis.silu_and_mul_customop: [PN25] registered torch op genesis::silu_and_mul_pooled via direct_register_custom_op (vLLM canonical, v7.66 — fork-safe + Inductor-opaque)
+00:57:39 WARNING [pid 251] genesis.dflash2_escala: [PN144] enganchado: escalas al cargar y semilla del embedding en cada paso (divisor 32)
+00:57:39 INFO    [pid 251] genesis.pn131: [PN131] TRITON_ATTN registrado como vllm._genesis.sk18_backend.BackendSK18
+(Worker pid=251) 00:57:40 WARNING [pid 251] vllm.distributed.device_communicators.symm_mem: SymmMemCommunicator: Device capability 8.6 not supported, communicator is not available.
+(Worker pid=233) 00:57:40 WARNING [pid 233] vllm.distributed.device_communicators.symm_mem: SymmMemCommunicator: Device capability 8.6 not supported, communicator is not available.
+(Worker pid=233) 00:57:40 WARNING [pid 233] vllm.distributed.device_communicators.flashinfer_all_reduce: FlashInfer All Reduce is disabled because it is not supported for world_size=2.
+(Worker pid=251) 00:57:40 WARNING [pid 251] vllm.distributed.device_communicators.flashinfer_all_reduce: FlashInfer All Reduce is disabled because it is not supported for world_size=2.
+(Worker pid=251) 00:57:40 WARNING [pid 251] genesis.arbol: [ARBOL] activo: 8 nodos por paso, 11 pedidos, 44 slots
+(Worker pid=233) 00:57:40 WARNING [pid 233] genesis.arbol: [ARBOL] activo: 8 nodos por paso, 11 pedidos, 44 slots
+(Worker_TP1 pid=251) /usr/local/lib/python3.12/dist-packages/vllm/device_allocator/cumem.py:382: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+(Worker_TP0 pid=233) /usr/local/lib/python3.12/dist-packages/vllm/device_allocator/cumem.py:382: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+(Worker_TP1 pid=251) 00:57:51 WARNING [pid 251] genesis.pn139: PN139: lm_head ? a int4 g128 — 1271 MB -> 318 MB por GPU
+(Worker_TP0 pid=233) 00:57:51 WARNING [pid 233] genesis.pn139: PN139: lm_head ? a int4 g128 — 1271 MB -> 318 MB por GPU
+(Worker_TP1 pid=251) 00:57:51 INFO    [pid 251] vllm.config.vllm: [Genesis P66] cudagraph_capture_sizes GENERADAS para uniform_query_len=9, hasta 4 pedidos: [9, 18, 27, 36] (se ignora la lista del usuario [9, 18, 27, 36])
+(Worker_TP0 pid=233) 00:57:51 INFO    [pid 233] vllm.config.vllm: [Genesis P66] cudagraph_capture_sizes GENERADAS para uniform_query_len=9, hasta 4 pedidos: [9, 18, 27, 36] (se ignora la lista del usuario [9, 18, 27, 36])
+(Worker_TP0 pid=233) 00:57:52 WARNING [pid 233] genesis.dflash2_escala: [PN144] residual /32 en 10 pesos y epsilon /1024 en 11 normas. La salida no cambia: la norma es invariante a escala, y el epsilon se corrige para que lo siga siendo.
+(Worker_TP1 pid=251) 00:57:52 WARNING [pid 251] genesis.dflash2_escala: [PN144] residual /32 en 10 pesos y epsilon /1024 en 11 normas. La salida no cambia: la norma es invariante a escala, y el epsilon se corrige para que lo siga siendo.
+(Worker_TP0 pid=233) 00:57:52 WARNING [pid 233] genesis.pn139: PN139: lm_head ? a int4 g128 — 1271 MB -> 318 MB por GPU
+(Worker_TP1 pid=251) 00:57:52 WARNING [pid 251] genesis.pn139: PN139: lm_head ? a int4 g128 — 1271 MB -> 318 MB por GPU
+(Worker_TP0 pid=233) 00:57:52 WARNING [pid 233] vllm.v1.worker.gpu.spec_decode.speculator: Draft model DFlash2Qwen3ForCausalLM does not support external multimodal embeddings. Embeddings from the target model will not be passed to the drafter; using text-only draft inputs instead.
+(Worker_TP1 pid=251) /usr/local/lib/python3.12/dist-packages/vllm/device_allocator/cumem.py:416: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+(Worker_TP0 pid=233) /usr/local/lib/python3.12/dist-packages/vllm/device_allocator/cumem.py:416: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+(Worker_TP1 pid=251) 00:58:01 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=64 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 00:58:01 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=64 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP1 pid=251) 00:58:06 WARNING [pid 251] vllm.compilation.backends: Failed to read file <frozen os>
+(Worker_TP0 pid=233) 00:58:06 WARNING [pid 233] vllm.compilation.backends: Failed to read file <frozen os>
+(Worker_TP1 pid=251) 00:58:08 WARNING [pid 251] vllm.compilation.decorators: unable to save AOT compiled function to /root/.cache/vllm/torch_compile_cache/torch_aot_compile/571304c9bc8aca254aa008eea495d41cf8650d2989fd131c4f5c925c3994cf73/rank_1_0/model: Can't pickle <function DFlashQwen3Model.forward at 0x7137641836a0>: it's not the same object as vllm.model_executor.models.qwen3_dflash.DFlashQwen3Model.forward
+(Worker_TP0 pid=233) 00:58:08 WARNING [pid 233] vllm.compilation.decorators: unable to save AOT compiled function to /root/.cache/vllm/torch_compile_cache/torch_aot_compile/571304c9bc8aca254aa008eea495d41cf8650d2989fd131c4f5c925c3994cf73/rank_0_0/model: Can't pickle <function DFlashQwen3Model.forward at 0x736ac35db9c0>: it's not the same object as vllm.model_executor.models.qwen3_dflash.DFlashQwen3Model.forward
+(Worker_TP1 pid=251) 00:58:08 INFO    [pid 251] genesis.kernels.ffn_intermediate_cache: [PN12] first acquire silu_out: alloc [99, 8704] torch.float16 on cuda:1 (1.6 MiB)
+(Worker_TP0 pid=233) 00:58:08 INFO    [pid 233] genesis.kernels.ffn_intermediate_cache: [PN12] first acquire silu_out: alloc [99, 8704] torch.float16 on cuda:0 (1.6 MiB)
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] vllm.v1.core.kv_cache_utils: [Genesis PN146] group_size 5 -> 8 (buckets [48, 16, 5])
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] vllm.v1.core.kv_cache_utils: Add 3 padding layers, may waste at most 60.00% KV cache memory
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.0.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.8.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] vllm.v1.core.kv_cache_utils: [Genesis PN146] group_size 5 -> 8 (buckets [48, 16, 5])
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.16.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] vllm.v1.core.kv_cache_utils: Add 3 padding layers, may waste at most 60.00% KV cache memory
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.24.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.32.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.40.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.48.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.56.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.1.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.9.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.17.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.25.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.33.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.41.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.49.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.57.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.2.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.10.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.18.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.26.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.34.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.42.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.50.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.58.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.4.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.12.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.20.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.28.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.36.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.44.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.52.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.60.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.5.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.13.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.21.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.29.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.37.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.45.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.53.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.61.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.6.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.14.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.22.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.30.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.38.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.46.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.54.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP0 pid=233) 00:58:10 WARNING [pid 233] genesis.pn122: [PN122] cinta de language_model.model.layers.62.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.0.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.8.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.16.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.24.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.32.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.40.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.48.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.56.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.1.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.9.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.17.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.25.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.33.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.41.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.49.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.57.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.2.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.10.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.18.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.26.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.34.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.42.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.50.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.58.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.4.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.12.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.20.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.28.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.36.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.44.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.52.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.60.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.5.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.13.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.21.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.29.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.37.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.45.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.53.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.61.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.6.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.14.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.22.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.30.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.38.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.46.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.54.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:10 WARNING [pid 251] genesis.pn122: [PN122] cinta de language_model.model.layers.62.linear_attn: 24 slots x 8 tokens x 4144
+(Worker_TP1 pid=251) 00:58:11 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: multi-seq. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 00:58:11 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: multi-seq. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 00:58:11 INFO    [pid 233] genesis.pn131: [PN131] forma del KV: (11, 2, 880, 520)  strides=(929280, 457600, 520, 1)  dtype=torch.int8
+(Worker_TP1 pid=251) 00:58:11 INFO    [pid 251] genesis.pn131: [PN131] forma del KV: (11, 2, 880, 520)  strides=(929280, 457600, 520, 1)  dtype=torch.int8
+(Worker_TP0 pid=233) 00:58:12 WARNING [pid 233] genesis.pn131: [PN131] decode entero ACTIVO (qsl_cpu presente)
+(Worker_TP0 pid=233) 00:58:12 INFO    [pid 233] genesis.pn131: PN131: tope del decode entero = 9 tokens por pedido (MTP K=8, de argv)
+(Worker_TP1 pid=251) 00:58:12 WARNING [pid 251] genesis.pn131: [PN131] decode entero ACTIVO (qsl_cpu presente)
+(Worker_TP1 pid=251) 00:58:12 INFO    [pid 251] genesis.pn131: PN131: tope del decode entero = 9 tokens por pedido (MTP K=8, de argv)
+(Worker_TP1 pid=251) 00:58:13 WARNING [pid 251] genesis.pn131: PN131: no se pudo leer la config de vLLM (AssertionError); usando bmax=10. Si --max-num-seqs es mayor, fijar GENESIS_PN131_BMAX o el lote lo va a tirar.
+(Worker_TP0 pid=233) 00:58:13 WARNING [pid 233] genesis.pn131: PN131: no se pudo leer la config de vLLM (AssertionError); usando bmax=10. Si --max-num-seqs es mayor, fijar GENESIS_PN131_BMAX o el lote lo va a tirar.
+(Worker_TP0 pid=233) 00:58:13 INFO    [pid 233] genesis.pn131: PN131 buffers: bmax=11 nchmax=298 MB=64 (864 MiB de acumuladores)
+(Worker_TP1 pid=251) 00:58:13 INFO    [pid 251] genesis.pn131: PN131 buffers: bmax=11 nchmax=298 MB=64 (864 MiB de acumuladores)
+(EngineCore pid=202) 00:58:15 WARNING [pid 202] vllm.v1.core.kv_cache_utils: [Genesis PN146] group_size 5 -> 8 (buckets [48, 16, 5])
+(EngineCore pid=202) 00:58:15 WARNING [pid 202] vllm.v1.core.kv_cache_utils: Add 3 padding layers, may waste at most 60.00% KV cache memory
+(EngineCore pid=202) ║  GENESIS · ANALISIS DE ARRANQUE                                              ║
+(EngineCore pid=202)   Ajustable: GENESIS_ANALISIS_HILO_PRINCIPAL / _AGENTE.
+(EngineCore pid=202)     (sm.fill_(-1) -> 'CUDA error: invalid argument'). No es la
+(EngineCore pid=202)     VRAM: es un cudaHostRegister fallido que deja el error
+(EngineCore pid=202)     el grupo de atencion NO tiene. Sintoma: AssertionError sin
+(EngineCore pid=202)     mensaje en offloading/scheduler.py:612 -> EngineDeadError,
+(EngineCore pid=202)   Re-ejecutar:  python3 -m vllm._genesis.analisis_arranque   ·   apagar: GENESIS_DISABLE_PN83=1
+(Worker_TP0 pid=233) 00:58:15 WARNING [pid 233] vllm.distributed.kv_transfer.kv_connector.v1.base: Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(Worker_TP1 pid=251) 00:58:15 WARNING [pid 251] vllm.distributed.kv_transfer.kv_connector.v1.base: Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(Worker_TP1 pid=251) /usr/local/lib/python3.12/dist-packages/vllm/device_allocator/cumem.py:382: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+(Worker_TP0 pid=233) /usr/local/lib/python3.12/dist-packages/vllm/device_allocator/cumem.py:382: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+(Worker_TP0 pid=233) /usr/local/lib/python3.12/dist-packages/vllm/device_allocator/cumem.py:416: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+(Worker_TP1 pid=251) /usr/local/lib/python3.12/dist-packages/vllm/device_allocator/cumem.py:416: FutureWarning: torch.cuda._set_allocator_settings is deprecated. Use torch._C._accelerator_setAllocatorSettings instead.
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.3.self_attn.attn: ek=0 ev=2
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.3.self_attn.attn: ek=0 ev=2
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.7.self_attn.attn: ek=0 ev=2
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.7.self_attn.attn: ek=0 ev=3
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.11.self_attn.attn: ek=0 ev=2
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.11.self_attn.attn: ek=0 ev=3
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.15.self_attn.attn: ek=0 ev=2
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.15.self_attn.attn: ek=0 ev=2
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.19.self_attn.attn: ek=0 ev=2
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.19.self_attn.attn: ek=0 ev=2
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.23.self_attn.attn: ek=0 ev=3
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.23.self_attn.attn: ek=0 ev=3
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.27.self_attn.attn: ek=0 ev=4
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.27.self_attn.attn: ek=0 ev=4
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.31.self_attn.attn: ek=0 ev=4
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.31.self_attn.attn: ek=0 ev=5
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.35.self_attn.attn: ek=0 ev=4
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.35.self_attn.attn: ek=0 ev=5
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.39.self_attn.attn: ek=0 ev=4
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.39.self_attn.attn: ek=0 ev=4
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.43.self_attn.attn: ek=0 ev=5
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.43.self_attn.attn: ek=0 ev=5
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.47.self_attn.attn: ek=0 ev=5
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.47.self_attn.attn: ek=0 ev=5
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.51.self_attn.attn: ek=0 ev=5
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.51.self_attn.attn: ek=0 ev=5
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.55.self_attn.attn: ek=0 ev=4
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.55.self_attn.attn: ek=0 ev=4
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.59.self_attn.attn: ek=0 ev=5
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.59.self_attn.attn: ek=0 ev=6
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.pn131: PN131 language_model.model.layers.63.self_attn.attn: ek=0 ev=4
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.pn131: PN131 language_model.model.layers.63.self_attn.attn: ek=0 ev=5
+(Worker_TP1 pid=251) 00:58:18 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=1 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 00:58:18 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=1 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(EngineCore pid=202) 00:58:20 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.base: Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=202) 00:58:21 WARNING [pid 202] vllm.v1.kv_offload.tiering.spec: PN98: no pude calcular el informe: 'TieringOffloadingSpec' object has no attribute 'kv_cache_config'
+(EngineCore pid=202) 00:58:24 INFO    [pid 202] vllm.config.vllm: [Genesis P66] cudagraph_capture_sizes GENERADAS para uniform_query_len=9, hasta 4 pedidos: [9, 18, 27, 36] (se ignora la lista del usuario [9, 18, 27, 36])
+(APIServer pid=1) 00:58:24 WARNING [pid 1] vllm.entrypoints.serve.profile.api_router: Profiler with mode 'torch' is enabled in the API server. This should ONLY be used for local development!
+(APIServer pid=1) 00:58:35 INFO    [pid 1] vllm.entrypoints.launchers.launcher: Route: /v1/genesis/pid, Methods: GET
+(APIServer pid=1) 00:58:35 INFO    [pid 1] vllm.entrypoints.launchers.launcher: Route: /v1/genesis/pid, Methods: POST
+(EngineCore pid=202) 00:58:37 INFO    [pid 202] genesis.dynamic_pid_gating: [PN115] topología vLLM: gpu_blocks=1395 block_size=880 max_conc=11 watermark=0 max_batched_tokens=8192 | kv_gating=True latency_pid=False headroom=0.10
+(Worker_TP1 pid=251) 00:58:37 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=34 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=34 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] vllm.utils.jit_monitor: Triton kernel JIT compilation during inference: _prepare_dflash_inputs_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] vllm.utils.jit_monitor: Triton kernel JIT compilation during inference: preparar_paso_kernel.<locals>._k. This causes a latency spike; consider extending warmup to cover this shape/config.
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] vllm.utils.jit_monitor: Triton kernel JIT compilation during inference: aceptar_kernel.<locals>._k. This causes a latency spike; consider extending warmup to cover this shape/config.
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] genesis.arbol: [ARBOL] compactacion de KV sobre 16 capas de atencion del target
+(Worker_TP1 pid=251) 00:58:37 WARNING [pid 251] genesis.arbol: [ARBOL] compactacion de KV sobre 16 capas de atencion del target
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] vllm.utils.jit_monitor: Triton kernel JIT compilation during inference: compactar_kernel.<locals>._k. This causes a latency spike; consider extending warmup to cover this shape/config.
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] vllm.utils.jit_monitor: Triton kernel JIT compilation during inference: reponer_cadena_kernel.<locals>._k. This causes a latency spike; consider extending warmup to cover this shape/config.
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] vllm.utils.jit_monitor: Triton kernel JIT compilation during inference: _k_compactar_v2. This causes a latency spike; consider extending warmup to cover this shape/config.
+(Worker_TP1 pid=251) 00:58:37 WARNING [pid 251] genesis.pn150: [PN150] tramo del borrador grabado en grafo (primera clave: ('combinar', 9))
+(Worker_TP0 pid=233) 00:58:37 WARNING [pid 233] genesis.pn150: [PN150] tramo del borrador grabado en grafo (primera clave: ('combinar', 9))
+(EngineCore pid=202) 00:58:38 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-b16d7bbbe2ff57f6-927fabc0: cannot store chunks
+(EngineCore pid=202) 00:58:38 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-b16d7bbbe2ff57f6-927fabc0: cannot store chunks
+(Worker_TP0 pid=233) 00:58:38 INFO    [pid 233] genesis.kernels.gdn_scratch_pool: [PN59] first acquire o_output: alloc (1, 2048_binned_from_1760, 24, 128) torch.float16 on cuda:0 (12.00 MiB) — closes club-3090#22 chunk_o.py:161 OOM
+(Worker_TP1 pid=251) 00:58:38 INFO    [pid 251] genesis.kernels.gdn_scratch_pool: [PN59] first acquire o_output: alloc (1, 2048_binned_from_1760, 24, 128) torch.float16 on cuda:1 (12.00 MiB) — closes club-3090#22 chunk_o.py:161 OOM
+(Worker_TP0 pid=233) 00:58:38 WARNING [pid 233] vllm.utils.jit_monitor: Triton kernel JIT compilation during inference: chunk_gated_delta_rule_fwd_kernel_h_blockdim64. This causes a latency spike; consider extending warmup to cover this shape/config.
+(Worker_TP0 pid=233) 00:59:05 INFO    [pid 233] genesis.kernels.gdn_scratch_pool: [PN59] first acquire o_output: alloc (1, 1024_binned_from_721, 24, 128) torch.float16 on cuda:0 (6.00 MiB) — closes club-3090#22 chunk_o.py:161 OOM
+(Worker_TP1 pid=251) 00:59:05 INFO    [pid 251] genesis.kernels.gdn_scratch_pool: [PN59] first acquire o_output: alloc (1, 1024_binned_from_721, 24, 128) torch.float16 on cuda:1 (6.00 MiB) — closes club-3090#22 chunk_o.py:161 OOM
+(EngineCore pid=202) 00:59:06 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:06 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:07 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:07 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:08 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:09 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:10 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:26 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(EngineCore pid=202) 00:59:27 WARNING [pid 202] vllm.distributed.kv_transfer.kv_connector.v1.offloading.scheduler: Request chatcmpl-8cc75b2925439368-a8068254: cannot store chunks
+(Worker_TP0 pid=233) 00:59:32 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=139 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP1 pid=251) 00:59:32 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=139 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 00:59:38 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=48 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP1 pid=251) 00:59:38 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=48 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 00:59:39 INFO    [pid 233] genesis.kernels.gdn_scratch_pool: [PN59] first acquire o_output: alloc (1, 512_binned_from_512, 24, 128) torch.float16 on cuda:0 (3.00 MiB) — closes club-3090#22 chunk_o.py:161 OOM
+(Worker_TP1 pid=251) 00:59:39 INFO    [pid 251] genesis.kernels.gdn_scratch_pool: [PN59] first acquire o_output: alloc (1, 512_binned_from_512, 24, 128) torch.float16 on cuda:1 (3.00 MiB) — closes club-3090#22 chunk_o.py:161 OOM
+(Worker_TP1 pid=251) /usr/local/lib/python3.12/dist-packages/torch/profiler/profiler.py:300: UserWarning: Warning: Profiler clears events at the end of each cycle. Only events from the current cycle will be reported. To keep events across cycles, set acc_events=True.
+(Worker_TP0 pid=233) /usr/local/lib/python3.12/dist-packages/torch/profiler/profiler.py:300: UserWarning: Warning: Profiler clears events at the end of each cycle. Only events from the current cycle will be reported. To keep events across cycles, set acc_events=True.
+(Worker_TP0 pid=233)                         genesis_marlin::marlin_gemm_s16         0.68%      47.064ms         1.49%     103.152ms      33.415us        1.929s        31.59%        1.929s     624.875us          3087  
+(Worker_TP0 pid=233)                              genesis::pn148_silu_had_q8         0.50%      34.612ms         0.62%      42.899ms      55.858us      39.192ms         0.64%      39.192ms      51.031us           768  
+(Worker_TP0 pid=233) 01:00:41 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=36 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP1 pid=251) 01:00:41 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=36 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP1 pid=251) 01:00:44 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=30 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 01:00:44 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=30 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP1 pid=251) 01:00:46 WARNING [pid 251] genesis.pn151: [PN151] verificacion: 3000 llamadas, 0 distintas
+(Worker_TP0 pid=233) 01:00:46 WARNING [pid 233] genesis.pn151: [PN151] verificacion: 3000 llamadas, 0 distintas
+(Worker_TP1 pid=251) 01:00:55 WARNING [pid 251] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=38 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)
+(Worker_TP0 pid=233) 01:00:55 WARNING [pid 233] genesis.kernels.streaming_gdn_driver: [PN59] streaming-GDN bypassed for this call class — vanilla path will run. Reason: T=38 ≤ threshold=256. (This message will appear ONCE per reason class per process; subsequent bypasses are silent. Set GENESIS_PN59_DEBUG=1 to log every bypass.)

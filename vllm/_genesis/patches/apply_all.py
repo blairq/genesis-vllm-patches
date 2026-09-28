@@ -2406,6 +2406,24 @@ def apply_patch_N127() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN151 metadata GDN en un kernel")
+def apply_patch_PN151() -> PatchResult:
+    """PN151: el build de la metadata del GDN (decode en arbol) en un kernel en vez de ~35 ops de torch."""
+    name = "PN151 metadata GDN en un kernel"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN151_gdn_meta
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN151_gdn_meta.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN150 borrador en grafo")
 def apply_patch_PN150() -> PatchResult:
     """PN150: fc y proyeccion de contexto del borrador DFlash en grafos CUDA (antes eager, ~600 us por paso)."""

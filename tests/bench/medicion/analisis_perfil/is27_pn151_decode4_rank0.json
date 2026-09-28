@@ -1,0 +1,961 @@
+{
+ "pasos": 43,
+ "paso_pared_us": 38138.1552734375,
+ "paso_gpu_us": 37219.9013671875,
+ "regiones": {
+  "embedding": {
+   "pared_us": 45.9853515625,
+   "gpu_us": 42.4970703125,
+   "kernels": 2
+  },
+  "48 capas GDN": {
+   "pared_us": 18577.8720703125,
+   "gpu_us": 18266.84765625,
+   "kernels": 1296
+  },
+  "16 capas atención": {
+   "pared_us": 12597.560546875,
+   "gpu_us": 12523.716796875,
+   "kernels": 352
+  },
+  "lm_head + gather": {
+   "pared_us": 1901.53125,
+   "gpu_us": 1887.8037109375,
+   "kernels": 10
+  },
+  "verificación": {
+   "pared_us": 536.6796875,
+   "gpu_us": 159.84375,
+   "kernels": 24
+  },
+  "borrador: capas": {
+   "pared_us": 3435.2490234375,
+   "gpu_us": 3364.990234375,
+   "kernels": 167
+  },
+  "borrador: lm_head + top-k": {
+   "pared_us": 832.8115234375,
+   "gpu_us": 828.5869140625,
+   "kernels": 12
+  },
+  "árbol + preparar paso": {
+   "pared_us": 189.6669921875,
+   "gpu_us": 145.8916015625,
+   "kernels": 44
+  }
+ },
+ "capas": {
+  "capa 00": {
+   "tipo": "GDN",
+   "pared_us": 416.486328125,
+   "gpu_us": 403.78125
+  },
+  "capa 01": {
+   "tipo": "GDN",
+   "pared_us": 395.044921875,
+   "gpu_us": 388.2578125
+  },
+  "capa 02": {
+   "tipo": "GDN",
+   "pared_us": 398.0537109375,
+   "gpu_us": 391.6240234375
+  },
+  "capa 03": {
+   "tipo": "atención",
+   "pared_us": 795.05078125,
+   "gpu_us": 790.634765625
+  },
+  "capa 04": {
+   "tipo": "GDN",
+   "pared_us": 395.685546875,
+   "gpu_us": 387.78125
+  },
+  "capa 05": {
+   "tipo": "GDN",
+   "pared_us": 397.6376953125,
+   "gpu_us": 391.587890625
+  },
+  "capa 06": {
+   "tipo": "GDN",
+   "pared_us": 392.134765625,
+   "gpu_us": 386.4072265625
+  },
+  "capa 07": {
+   "tipo": "atención",
+   "pared_us": 798.1865234375,
+   "gpu_us": 793.640625
+  },
+  "capa 08": {
+   "tipo": "GDN",
+   "pared_us": 393.2529296875,
+   "gpu_us": 385.1904296875
+  },
+  "capa 09": {
+   "tipo": "GDN",
+   "pared_us": 391.333984375,
+   "gpu_us": 385.5732421875
+  },
+  "capa 10": {
+   "tipo": "GDN",
+   "pared_us": 398.56640625,
+   "gpu_us": 392.8720703125
+  },
+  "capa 11": {
+   "tipo": "atención",
+   "pared_us": 796.427734375,
+   "gpu_us": 791.1474609375
+  },
+  "capa 12": {
+   "tipo": "GDN",
+   "pared_us": 395.94140625,
+   "gpu_us": 390.0517578125
+  },
+  "capa 13": {
+   "tipo": "GDN",
+   "pared_us": 387.6220703125,
+   "gpu_us": 381.3486328125
+  },
+  "capa 14": {
+   "tipo": "GDN",
+   "pared_us": 393.2529296875,
+   "gpu_us": 385.09375
+  },
+  "capa 15": {
+   "tipo": "atención",
+   "pared_us": 795.3076171875,
+   "gpu_us": 789.8681640625
+  },
+  "capa 16": {
+   "tipo": "GDN",
+   "pared_us": 392.068359375,
+   "gpu_us": 386.435546875
+  },
+  "capa 17": {
+   "tipo": "GDN",
+   "pared_us": 388.7724609375,
+   "gpu_us": 382.693359375
+  },
+  "capa 18": {
+   "tipo": "GDN",
+   "pared_us": 386.7578125,
+   "gpu_us": 381.1259765625
+  },
+  "capa 19": {
+   "tipo": "atención",
+   "pared_us": 787.115234375,
+   "gpu_us": 782.4443359375
+  },
+  "capa 20": {
+   "tipo": "GDN",
+   "pared_us": 382.56640625,
+   "gpu_us": 376.5830078125
+  },
+  "capa 21": {
+   "tipo": "GDN",
+   "pared_us": 382.0546875,
+   "gpu_us": 375.7841796875
+  },
+  "capa 22": {
+   "tipo": "GDN",
+   "pared_us": 383.8125,
+   "gpu_us": 377.22265625
+  },
+  "capa 23": {
+   "tipo": "atención",
+   "pared_us": 800.2041015625,
+   "gpu_us": 793.6435546875
+  },
+  "capa 24": {
+   "tipo": "GDN",
+   "pared_us": 385.380859375,
+   "gpu_us": 380.2275390625
+  },
+  "capa 25": {
+   "tipo": "GDN",
+   "pared_us": 387.7490234375,
+   "gpu_us": 378.533203125
+  },
+  "capa 26": {
+   "tipo": "GDN",
+   "pared_us": 390.9814453125,
+   "gpu_us": 385.2861328125
+  },
+  "capa 27": {
+   "tipo": "atención",
+   "pared_us": 781.7080078125,
+   "gpu_us": 777.2939453125
+  },
+  "capa 28": {
+   "tipo": "GDN",
+   "pared_us": 379.2060546875,
+   "gpu_us": 373.0634765625
+  },
+  "capa 29": {
+   "tipo": "GDN",
+   "pared_us": 382.5009765625,
+   "gpu_us": 376.869140625
+  },
+  "capa 30": {
+   "tipo": "GDN",
+   "pared_us": 384.197265625,
+   "gpu_us": 378.8564453125
+  },
+  "capa 31": {
+   "tipo": "atención",
+   "pared_us": 782.7646484375,
+   "gpu_us": 776.9697265625
+  },
+  "capa 32": {
+   "tipo": "GDN",
+   "pared_us": 378.662109375,
+   "gpu_us": 371.365234375
+  },
+  "capa 33": {
+   "tipo": "GDN",
+   "pared_us": 382.083984375,
+   "gpu_us": 375.6201171875
+  },
+  "capa 34": {
+   "tipo": "GDN",
+   "pared_us": 375.4287109375,
+   "gpu_us": 369.828125
+  },
+  "capa 35": {
+   "tipo": "atención",
+   "pared_us": 779.3076171875,
+   "gpu_us": 773.35546875
+  },
+  "capa 36": {
+   "tipo": "GDN",
+   "pared_us": 379.4931640625,
+   "gpu_us": 373.703125
+  },
+  "capa 37": {
+   "tipo": "GDN",
+   "pared_us": 385.7021484375,
+   "gpu_us": 379.556640625
+  },
+  "capa 38": {
+   "tipo": "GDN",
+   "pared_us": 385.349609375,
+   "gpu_us": 379.3671875
+  },
+  "capa 39": {
+   "tipo": "atención",
+   "pared_us": 790.0908203125,
+   "gpu_us": 784.8740234375
+  },
+  "capa 40": {
+   "tipo": "GDN",
+   "pared_us": 389.2861328125,
+   "gpu_us": 382.2158203125
+  },
+  "capa 41": {
+   "tipo": "GDN",
+   "pared_us": 384.9658203125,
+   "gpu_us": 379.2060546875
+  },
+  "capa 42": {
+   "tipo": "GDN",
+   "pared_us": 388.6142578125,
+   "gpu_us": 382.697265625
+  },
+  "capa 43": {
+   "tipo": "atención",
+   "pared_us": 783.5,
+   "gpu_us": 779.0849609375
+  },
+  "capa 44": {
+   "tipo": "GDN",
+   "pared_us": 382.59765625,
+   "gpu_us": 376.5810546875
+  },
+  "capa 45": {
+   "tipo": "GDN",
+   "pared_us": 387.9404296875,
+   "gpu_us": 382.0537109375
+  },
+  "capa 46": {
+   "tipo": "GDN",
+   "pared_us": 384.708984375,
+   "gpu_us": 378.5322265625
+  },
+  "capa 47": {
+   "tipo": "atención",
+   "pared_us": 784.171875,
+   "gpu_us": 779.6923828125
+  },
+  "capa 48": {
+   "tipo": "GDN",
+   "pared_us": 389.349609375,
+   "gpu_us": 383.6865234375
+  },
+  "capa 49": {
+   "tipo": "GDN",
+   "pared_us": 387.2373046875,
+   "gpu_us": 381.5390625
+  },
+  "capa 50": {
+   "tipo": "GDN",
+   "pared_us": 387.8466796875,
+   "gpu_us": 382.0859375
+  },
+  "capa 51": {
+   "tipo": "atención",
+   "pared_us": 785.5478515625,
+   "gpu_us": 781.1015625
+  },
+  "capa 52": {
+   "tipo": "GDN",
+   "pared_us": 393.2861328125,
+   "gpu_us": 386.3408203125
+  },
+  "capa 53": {
+   "tipo": "GDN",
+   "pared_us": 394.7578125,
+   "gpu_us": 388.966796875
+  },
+  "capa 54": {
+   "tipo": "GDN",
+   "pared_us": 394.021484375,
+   "gpu_us": 386.568359375
+  },
+  "capa 55": {
+   "tipo": "atención",
+   "pared_us": 787.5,
+   "gpu_us": 782.9892578125
+  },
+  "capa 56": {
+   "tipo": "GDN",
+   "pared_us": 376.93359375,
+   "gpu_us": 370.6318359375
+  },
+  "capa 57": {
+   "tipo": "GDN",
+   "pared_us": 382.341796875,
+   "gpu_us": 372.2294921875
+  },
+  "capa 58": {
+   "tipo": "GDN",
+   "pared_us": 377.2216796875,
+   "gpu_us": 370.884765625
+  },
+  "capa 59": {
+   "tipo": "atención",
+   "pared_us": 780.01171875,
+   "gpu_us": 775.37109375
+  },
+  "capa 60": {
+   "tipo": "GDN",
+   "pared_us": 378.7890625,
+   "gpu_us": 372.9365234375
+  },
+  "capa 61": {
+   "tipo": "GDN",
+   "pared_us": 381.3173828125,
+   "gpu_us": 372.837890625
+  },
+  "capa 62": {
+   "tipo": "GDN",
+   "pared_us": 381.220703125,
+   "gpu_us": 374.7900390625
+  },
+  "capa 63": {
+   "tipo": "atención",
+   "pared_us": 789.484375,
+   "gpu_us": 784.7177734375
+  }
+ },
+ "kernels": {
+  "capa GDN": [
+   {
+    "kernel": "Marlin W4A8 (IMMA s8)",
+    "us": 176.20283381782858,
+    "lanz": 4.0,
+    "tipo": "int8 × int4 → s32"
+   },
+   {
+    "kernel": "NCCL AllReduce",
+    "us": 125.28641666666648,
+    "lanz": 2.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "gdn_arbol",
+    "us": 27.595849321705394,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor otros",
+    "us": 9.322667151162907,
+    "lanz": 4.979166666666667,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor rms_norm",
+    "us": 7.562083817829516,
+    "lanz": 1.9791666666666667,
+    "tipo": "fp16 → f32 → fp16"
+   },
+   {
+    "kernel": "_per_token_quant_int8",
+    "us": 6.804930717054258,
+    "lanz": 3.0,
+    "tipo": "fp16 → int8"
+   },
+   {
+    "kernel": "sk23_silu_had_q8",
+    "us": 5.826906007751945,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 → int8"
+   },
+   {
+    "kernel": "cuBLAS/cutlass GEMM fp16",
+    "us": 5.635479166666687,
+    "lanz": 1.0,
+    "tipo": "fp16 HMMA → f32"
+   },
+   {
+    "kernel": "arbol_conv",
+    "us": 5.287517926356571,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 → fp16 (conv, PTX)"
+   },
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 3.1215188953487236,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor marlin_scale",
+    "us": 2.8444408914728827,
+    "lanz": 2.0,
+    "tipo": "f32"
+   },
+   {
+    "kernel": "torch splitKreduce_kernel",
+    "us": 2.763379360465117,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "pn122_cinta",
+    "us": 2.4841584302325255,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 (cinta, PTX)"
+   },
+   {
+    "kernel": "memcpy32_post",
+    "us": 1.4680179263566284,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_prepare_rope_positions_kernel",
+    "us": 0.09493168604651163,
+    "lanz": 0.020833333333333332,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k",
+    "us": 0.07845106589147288,
+    "lanz": 0.020833333333333332,
+    "tipo": ""
+   }
+  ],
+  "capa atención": [
+   {
+    "kernel": "sk18h_batch2",
+    "us": 313.2590450581395,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "Marlin W4A8 (IMMA s8)",
+    "us": 173.41511046511587,
+    "lanz": 4.0,
+    "tipo": "int8 × int4 → s32"
+   },
+   {
+    "kernel": "NCCL AllReduce",
+    "us": 124.7560537790698,
+    "lanz": 2.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "sk18h_salida",
+    "us": 84.78013808139544,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "sk18h_union4",
+    "us": 50.75712790697667,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor rms_norm",
+    "us": 7.71455668604651,
+    "lanz": 2.0,
+    "tipo": "fp16 → f32 → fp16"
+   },
+   {
+    "kernel": "_per_token_quant_int8",
+    "us": 6.800520348837126,
+    "lanz": 3.0,
+    "tipo": "fp16 → int8"
+   },
+   {
+    "kernel": "sk23_silu_had_q8",
+    "us": 5.842079941860486,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 → int8"
+   },
+   {
+    "kernel": "sk18h_escribir2",
+    "us": 5.061975290697682,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor marlin_scale",
+    "us": 4.332962209302371,
+    "lanz": 3.0,
+    "tipo": "f32"
+   },
+   {
+    "kernel": "sk18h_prep2",
+    "us": 4.161906976744192,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_fused_qk_rmsnorm_rope_gate_kernel",
+    "us": 3.4620348837209196,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor otros",
+    "us": 2.3578720930232624,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "lm_head + gather": [
+   {
+    "kernel": "Marlin W4A16 (HMMA f16)",
+    "us": 1024.0081627906977,
+    "lanz": 1.0,
+    "tipo": "fp16 × int4 → f32"
+   },
+   {
+    "kernel": "NCCL AllGather",
+    "us": 854.0113023255811,
+    "lanz": 1.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "memcpy32_post",
+    "us": 11.328023255813957,
+    "lanz": 6.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor rms_norm",
+    "us": 3.9487441860465116,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 → fp16"
+   },
+   {
+    "kernel": "vectorized_gather_kernel",
+    "us": 2.503441860465116,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "verificación": [
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 54.230348837209306,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_gumbel_sample_kernel",
+    "us": 31.475720930232562,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k",
+    "us": 12.152744186046512,
+    "lanz": 3.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch index_elementwise_kernel",
+    "us": 11.081744186046512,
+    "lanz": 3.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch vectorized_elementwise_kernel",
+    "us": 7.370674418604646,
+    "lanz": 5.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_get_num_sampled_and_rejected_kernel",
+    "us": 7.325186046511628,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch reduce_kernel",
+    "us": 6.991023255813954,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "postprocess_mamba_fused_kernel",
+    "us": 6.368209302325582,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k_compactar_v2",
+    "us": 6.318976744186048,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_post_update_kernel",
+    "us": 6.176069767441859,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "CatArrayBatchedCopy_vectorized",
+    "us": 4.217348837209301,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch _scatter_gather_elementwise_kernel",
+    "us": 2.9359069767441857,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k_materializar",
+    "us": 2.0175348837209306,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_scatter_num_accepted_kernel",
+    "us": 1.617139534883721,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch elementwise_kernel_with_index",
+    "us": 1.3417674418604655,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "borrador: capas": [
+   {
+    "kernel": "kernel_unified_attention",
+    "us": 1129.0990232558136,
+    "lanz": 5.0,
+    "tipo": "fp16 HMMA (Triton)"
+   },
+   {
+    "kernel": "Marlin W4A8 (IMMA s8)",
+    "us": 888.1466046511614,
+    "lanz": 21.0,
+    "tipo": "int8 × int4 → s32"
+   },
+   {
+    "kernel": "NCCL AllReduce",
+    "us": 702.882883720929,
+    "lanz": 11.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "cuBLAS/cutlass GEMM fp16",
+    "us": 350.3297674418603,
+    "lanz": 13.0,
+    "tipo": "fp16 HMMA → f32"
+   },
+   {
+    "kernel": "triton inductor rms_norm",
+    "us": 57.777906976744205,
+    "lanz": 11.0,
+    "tipo": "fp16 → f32 → fp16"
+   },
+   {
+    "kernel": "_per_token_quant_int8",
+    "us": 55.51016279069754,
+    "lanz": 21.0,
+    "tipo": "fp16 → int8"
+   },
+   {
+    "kernel": "triton inductor otros",
+    "us": 42.43618604651165,
+    "lanz": 15.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor marlin_scale",
+    "us": 28.432418604651232,
+    "lanz": 20.0,
+    "tipo": "f32"
+   },
+   {
+    "kernel": "_reshape_cache_per_token_head",
+    "us": 26.064162790697686,
+    "lanz": 10.0,
+    "tipo": "fp16 → int8"
+   },
+   {
+    "kernel": "torch splitKreduce_kernel",
+    "us": 25.608139534883787,
+    "lanz": 11.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "sk_fwht128_f16",
+    "us": 22.547465116279064,
+    "lanz": 11.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "vllm::act_and_mul_kernel",
+    "us": 21.772883720930228,
+    "lanz": 5.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 12.585953488372091,
+    "lanz": 5.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_prepare_dflash_inputs_kernel",
+    "us": 11.03641860465116,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vllm::rms_norm_kernel",
+    "us": 6.866744186046511,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch unrolled_elementwise_kernel",
+    "us": 3.2729534883720937,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vllm::vocab_embedding::vocab_parallel_embedding_kernel",
+    "us": 2.96786046511628,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vllm::rotary_embedding_kernel",
+    "us": 2.2786976744186043,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vectorized_gather_kernel",
+    "us": 1.9720930232558138,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch vectorized_elementwise_kernel",
+    "us": 1.792023255813954,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "borrador: lm_head + top-k": [
+   {
+    "kernel": "Marlin W4A16 (HMMA f16)",
+    "us": 706.729534883721,
+    "lanz": 1.0,
+    "tipo": "fp16 × int4 → f32"
+   },
+   {
+    "kernel": "flashinfer::sampling::RadixTopKKernel_Unified",
+    "us": 83.09186046511627,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "NCCL AllGather",
+    "us": 25.679930232558135,
+    "lanz": 2.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "flashinfer::sampling::StableSortTopKByValueKernel",
+    "us": 7.4204186046511635,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch unrolled_elementwise_kernel",
+    "us": 5.62086046511628,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 4.466000000000002,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch vectorized_elementwise_kernel",
+    "us": 1.61646511627907,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "árbol + preparar paso": [
+   {
+    "kernel": "_k",
+    "us": 27.664720930232555,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch index_elementwise_kernel",
+    "us": 24.93058139534885,
+    "lanz": 8.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "cuBLAS/cutlass GEMM fp16",
+    "us": 14.456023255813957,
+    "lanz": 2.0,
+    "tipo": "fp16 HMMA → f32"
+   },
+   {
+    "kernel": "_k_meta_spec",
+    "us": 13.991627906976731,
+    "lanz": 6.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch unrolled_elementwise_kernel",
+    "us": 11.188930232558139,
+    "lanz": 5.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "precopy_mamba_align_fused_kernel",
+    "us": 6.410488372093024,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 6.2006744186046525,
+    "lanz": 3.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch vectorized_elementwise_kernel",
+    "us": 6.059953488372091,
+    "lanz": 4.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_gather_block_tables_kernel",
+    "us": 5.195976744186046,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor otros",
+    "us": 5.082255813953487,
+    "lanz": 3.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_combine_sampled_and_draft_tokens_kernel",
+    "us": 4.3579302325581395,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_compute_slot_mappings_kernel",
+    "us": 3.4769302325581397,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch _scatter_gather_elementwise_kernel",
+    "us": 3.4731860465116293,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "tensor_kernel_scan_innermost_dim",
+    "us": 2.4618139534883725,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "preprocess_mamba_align_fused_kernel",
+    "us": 2.3956511627906973,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch splitKreduce_kernel",
+    "us": 2.158186046511628,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k_materializar",
+    "us": 2.0465581395348837,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vectorized_gather_kernel",
+    "us": 1.7875813953488375,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_prepare_pos_seq_lens_kernel",
+    "us": 1.7816511627906977,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_expand_idx_mapping_kernel",
+    "us": 1.4846046511627908,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ]
+ }
+}

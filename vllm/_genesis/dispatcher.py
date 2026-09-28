@@ -1278,6 +1278,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN151": {
+        "title": "Metadata del GDN para el decode en arbol en un kernel",
+        "env_flag": "GENESIS_ENABLE_PN151_GDN_META",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-09-27. GDNAttentionMetadataBuilder.build corre por grupo GDN y por paso ~35 ops de torch (gather de la tabla de bloques, arange, indexado con mascara, expand de PN122, copy_/fill_ a los buffers del grafo FULL): el mayor consumidor de GPU ociosa del paso segun la pila de Python. En decode puro con spec, un kernel Triton escribe los mismos buffers con las mismas reglas; GENESIS_PN151_VERIFICAR=N compara contra el original en las primeras N llamadas."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN150": {
         "title": "Borrador DFlash: fc y proyeccion de contexto en grafos CUDA",
         "env_flag": "GENESIS_ENABLE_PN150_GRAFO_BORRADOR",
