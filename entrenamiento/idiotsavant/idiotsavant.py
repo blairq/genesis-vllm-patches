@@ -483,6 +483,7 @@ def cuantizar_capa(i, tipo, sd, hessiana, dev, Rt, R, solo=None):
             A = bloques(R @ W, HAD_ENTRADA[base])     # salida rotada + Hadamard por cabeza en la entrada
         elif clase == "escribe":
             A = R @ W                                 # salida rotada
+        else:
             A = bloques(R @ W, BLOQUE_DOWN)           # salida rotada + Hadamard en linea en la entrada
         Q, S = gptq(A, Ht[ent])
         p, s2, shp = empaquetar(Q, S)
