@@ -2406,6 +2406,24 @@ def apply_patch_N127() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN150 borrador en grafo")
+def apply_patch_PN150() -> PatchResult:
+    """PN150: fc y proyeccion de contexto del borrador DFlash en grafos CUDA (antes eager, ~600 us por paso)."""
+    name = "PN150 borrador en grafo"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_PN150_grafo_borrador
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN150_grafo_borrador.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN149 borrador sobre target rotado")
 def apply_patch_PN149() -> PatchResult:
     """PN149: embedding/lm_head compartidos con un target rotado; inerte sin genesis_rotacion."""

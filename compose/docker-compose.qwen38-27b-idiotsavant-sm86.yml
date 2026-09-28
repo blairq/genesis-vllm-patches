@@ -96,6 +96,7 @@ services:
       - GENESIS_PN122_ESCRIBIR_PAR=${GENESIS_PN122_ESCRIBIR_PAR:-ptx}    # cinta de rollback en PTX (pn122_cinta.cu): 34 -> 2,2 us por capa, bit a bit (0 = Triton en serie, 1 = Triton en grilla)
       - GENESIS_ARBOL_SALIDAS_PAR=${GENESIS_ARBOL_SALIDAS_PAR:-ptx}      # conv del arbol en PTX (arbol_conv.cu): 9 -> 3,9 us por capa, bit a bit (0 = Triton original, 1 = Triton desenrollado)
       - GENESIS_PN122_ARBOL_PTX=${GENESIS_PN122_ARBOL_PTX:-1}            # recurrencia del arbol en PTX (gdn_arbol.cu): 19,7 -> 11,7 us por capa, lee q/k/v con stride (sin las 3 copias de PN54)
+      - GENESIS_ENABLE_PN150_GRAFO_BORRADOR=${GENESIS_ENABLE_PN150_GRAFO_BORRADOR:-1}   # fc y contexto del borrador en grafos CUDA (eran eager): paso -3,1% / -1,6%, mismo texto
       - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
       - GENESIS_ENABLE_PN128_GDN_MTP_ASYNC_ORDER=1
       - GENESIS_ENABLE_B5_REJECTION_SAMPLER=1
@@ -281,7 +282,7 @@ services:
       - --enable-prefix-caching
       # profiler apagado salvo PROF_KIND/PROF_DIR en el entorno
       - --profiler-config
-      - '{"profiler": ${PROF_KIND:-null}, "torch_profiler_dir": "${PROF_DIR:-}", "torch_profiler_with_stack": false, "torch_profiler_record_shapes": false, "torch_profiler_use_gzip": true, "ignore_frontend": true, "delay_iterations": ${PROF_DELAY:-0}, "max_iterations": ${PROF_MAX:-0}}'
+      - '{"profiler": ${PROF_KIND:-null}, "torch_profiler_dir": "${PROF_DIR:-}", "torch_profiler_with_stack": ${PROF_STACK:-false}, "torch_profiler_record_shapes": false, "torch_profiler_use_gzip": true, "ignore_frontend": true, "delay_iterations": ${PROF_DELAY:-0}, "max_iterations": ${PROF_MAX:-0}}'
       - --enable-chunked-prefill
       - --max-num-batched-tokens
       - "8192"

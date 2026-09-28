@@ -1278,6 +1278,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN150": {
+        "title": "Borrador DFlash: fc y proyeccion de contexto en grafos CUDA",
+        "env_flag": "GENESIS_ENABLE_PN150_GRAFO_BORRADOR",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis-original 2026-09-27. DFlashSpeculator.propose corre combine_hidden_states y precompute_and_store_context_kv en eager (~12 kernels con 20-70 us de GPU ociosa antes de cada uno). En el decode en arbol la forma es fija por cantidad de pedidos y las entradas son buffers persistentes: se graban en grafos por forma y direccion (calienta en eager, graba en la segunda aparicion)."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN149": {
         "title": "Borrador DFlash en su base original sobre un target con el residuo rotado",
         "env_flag": "GENESIS_ENABLE_PN149_ROT_BORRADOR",
