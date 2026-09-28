@@ -66,6 +66,7 @@ services:
       - GENESIS_ENABLE_PN125_MARLIN_W4A8_ESCALAS=1   # escalas negativas de AutoRound: aca no hay
                                                      # (GPTQ las deja positivas), no hace nada
       - GENESIS_ENABLE_PN139_LM_HEAD_INT4=1      # lm_head int4 g128 al cargar (rotado da el mismo error)
+      - GENESIS_PN139_A8=${GENESIS_PN139_A8:-0}                 # lm_head W4A8 (activacion int8 por token, IMMA)
       - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1        # camino fp8 del lm_head (PN139 lo reemplaza)
       - GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD=0
       - GENESIS_ENABLE_PN118_INT8_MLP=0          # MLP int8 para checkpoints AWQ: no aplica
@@ -105,6 +106,8 @@ services:
       - GENESIS_PN131_MIXTO_VERIFICAR=${GENESIS_PN131_MIXTO_VERIFICAR:-0}              # N: compara contra el camino completo en las primeras N llamadas
       - GENESIS_ENABLE_PN152_AR_P2P=${GENESIS_ENABLE_PN152_AR_P2P:-1}                  # all-reduce de decode por P2P directo (SK-24): paso -4,9% / -6,4%, bit a bit con NCCL
       - GENESIS_PN152_MIN_I8=${GENESIS_PN152_MIN_I8:-1}                              # all-reduce P2P de decode en int8 por grupo de 64 desde estos bytes fp16 (1 = siempre, 0 = nunca): paso -1,3% / -3,5%, KL 0,0193 vs 0,0192
+      - GENESIS_ENABLE_PN153_LOGITS_RANGO=${GENESIS_ENABLE_PN153_LOGITS_RANGO:-1}      # logits del target sin AllGather: cada rango manda maximo + ganador gumbel (+ top-k): mismo token; paso -0,5% / -1,9%
+      - GENESIS_PN153_VERIFICAR=${GENESIS_PN153_VERIFICAR:-0}
       - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
       - GENESIS_ENABLE_PN128_GDN_MTP_ASYNC_ORDER=1
       - GENESIS_ENABLE_B5_REJECTION_SAMPLER=1

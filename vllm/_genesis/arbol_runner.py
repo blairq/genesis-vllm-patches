@@ -323,6 +323,14 @@ def _antes_del_forward(runner, ms, input_batch) -> None:
 
 _rejection0 = None
 
+
+def pos_del_ruido(pos, idx_mapping, R):
+    """La pos con la que se siembra el gumbel del target: en arbol, base + profundidad (ver abajo).
+    La usa tambien PN153 (logits_rango) para sacar el ganador por rango con el mismo ruido."""
+    if E.uniforme and pos.shape[0] == R * E.T and not (_modo() & 1):
+        return pos + E.delta_v[idx_mapping.long()].flatten().to(pos.dtype)
+    return pos
+
 def _rejection_sample(target_logits, draft_logits, draft_sampled, cu_num_logits, pos, idx_mapping,
                       expanded_idx_mapping, expanded_local_pos, temperature, seed,
                       num_speculative_steps, synthetic_conditional_rates=None, use_fp64=False,
@@ -478,6 +486,8 @@ def _envolver_runner() -> None:
 
     cls.sample, cls.sample_tokens, cls.execute_model = sample, sample_tokens, execute_model
     cls._genesis_arbol = True
+    from vllm._genesis import logits_rango
+    logits_rango.instalar(cls)        # PN153, por encima: necesita el estado del arbol (E)
 
     # model_state se crea mas tarde (load_model): se envuelve la clase la primera vez que se ve
     from vllm.v1.worker.gpu.model_states import mamba_hybrid as mh

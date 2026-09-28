@@ -51,6 +51,12 @@ def activo() -> bool:
     return os.environ.get("GENESIS_ENABLE_PN139_LM_HEAD_INT4", "0") == "1"
 
 
+def a8() -> bool:
+    """W4A8: la activacion (salida de la norma final, rotada: cresta baja) en int8 por token, IMMA s8
+    en vez de HMMA fp16. Con 36 filas el W4A16 limita por computo (972 us contra 402 con 9)."""
+    return os.environ.get("GENESIS_PN139_A8", "0") == "1"
+
+
 def solo_borrador() -> bool:
     """Queda por si algun checkpoint trae un lm_head dedicado para el MTP; con este NO pasa.
 
@@ -101,6 +107,7 @@ def preparar(layer, prefijo: str = "") -> bool:
         return False
 
     from vllm.model_executor.layers.quantization.utils.marlin_utils import (
+        marlin_act_int8_process_scales,
         marlin_permute_scales,
         marlin_make_workspace_new,
     )
@@ -112,9 +119,15 @@ def preparar(layer, prefijo: str = "") -> bool:
     dev = w.device
     qp, esc = cuantizar_int4_grupo(w.data)
     # repack al layout interno de Marlin y permutacion de las escalas, igual que el camino GPTQ
+    es_a8 = a8()
     qm = ops.gptq_marlin_repack(qp, torch.empty(0, dtype=torch.int32, device=dev),
-                                k, n, 4)
-    em = marlin_permute_scales(esc, size_k=k, size_n=n, group_size=G)
+                                k, n, 4, is_a_8bit=es_a8)
+    em = marlin_permute_scales(esc, size_k=k, size_n=n, group_size=G, is_a_8bit=es_a8)
+    layer.pn139_igs = None
+    if es_a8:
+        # como el camino GPTQ W4A8 de vLLM: escalas por grupo a int16 relativas al maximo (>= 0 por
+        # construccion: amax/7) y el factor global va a la escala de la activacion
+        em, layer.pn139_igs = marlin_act_int8_process_scales(em)
 
     replace_parameter(layer, "weight", qm)
     layer.register_parameter(
@@ -124,8 +137,8 @@ def preparar(layer, prefijo: str = "") -> bool:
     layer.pn139_n, layer.pn139_k = n, k
     layer.pn139_tipo = scalar_types.uint4b8
     setattr(layer, MARCA, True)
-    log.warning("PN139: lm_head %s a int4 g%d — %.0f MB -> %.0f MB por GPU",
-                prefijo or "?", G, n * k * 2 / 1e6, n * k / 2 / 1e6)
+    log.warning("PN139: lm_head %s a int4 g%d%s — %.0f MB -> %.0f MB por GPU",
+                prefijo or "?", G, " (A8)" if es_a8 else "", n * k * 2 / 1e6, n * k / 2 / 1e6)
     return True
 
 
@@ -141,7 +154,8 @@ def aplicar(layer, x: torch.Tensor, bias=None) -> torch.Tensor:
         workspace=layer.workspace, wtype=layer.pn139_tipo,
         input_size_per_partition=layer.pn139_k,
         output_size_per_partition=layer.pn139_n,
-        is_k_full=True, bias=bias)
+        is_k_full=True, bias=bias, input_global_scale=layer.pn139_igs,
+        input_dtype=torch.int8 if layer.pn139_igs is not None else None)
 
 
 class Genesis_INT4_LMHead_EmbeddingMethod:

@@ -110,13 +110,14 @@ def cortar(ker, nom, a, b, fw):
         while not es_ar(nom[j]): j += 1
         reg[f"capa {c:02d}"] = (prev + 1, j)
         prev = j
-    # post: lm_head del target = hasta el 1er AllGather despues del 1er Marlin fp16
-    m1 = next(x for x in range(prev + 1, b + 1) if "Marlin<" in nom[x] and not nom[x].split("<")[1].startswith(I8))
-    g1 = next(x for x in range(m1, b + 1) if "AllGather" in nom[x])
+    # post: lm_head del target = hasta el 1er AllGather (el de los logits enteros, o el de los candidatos
+    # con PN153). No se ancla en el Marlin fp16: con PN139_A8 el lm_head es Marlin I8
+    g1 = next(x for x in range(prev + 1, b + 1) if "AllGather" in nom[x])
     reg["lm_head + gather"] = (prev + 1, g1)
     q = next(x for x in range(g1, b + 1) if "_per_token_quant_int8" in nom[x])
     reg["verificación"] = (g1 + 1, q - 1)
-    m2 = next(x for x in range(q, b + 1) if "Marlin<" in nom[x] and not nom[x].split("<")[1].startswith(I8))
+    # lm_head del borrador: el Marlin seguido del top-k (fp16 o I8 segun PN139_A8)
+    m2 = next(x for x in range(q, b) if "Marlin<" in nom[x] and "TopK" in nom[x + 1])
     f2 = m2
     while f2 + 1 <= b and ("TopK" in nom[f2 + 1] or "AllGather" in nom[f2 + 1] or "copy" in nom[f2 + 1] or "add" in nom[f2 + 1]):
         f2 += 1
