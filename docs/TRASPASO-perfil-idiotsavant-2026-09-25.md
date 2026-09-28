@@ -219,6 +219,31 @@ Detalle de `borrador: capas`:
 
 ---
 
+## 3b. Hecho el 27-09 (después del P1): Python a la GPU, pasos mixtos, re-mediciones
+
+- **PN150:** fc y contexto del borrador en grafos CUDA. **PN151:** metadata del GDN en un kernel, verificada en 3000
+  llamadas. **Sincronización oculta** en `compactar_kernel`: `torch.tensor(list, device=cuda)` es sincrónico y dejaba
+  la CPU bloqueada 19,8 de 26 ms por paso.
+  - GPU ociosa entre fases con 1 pedido: 1.719 → 3 µs por paso.
+  - Paso acumulado del día: 29,36 → 25,67 ms (−12,6%) con 1 pedido; 40,94 → 38,31 ms (−6,4%) con 4.
+  - Herramientas: `huecos_cpu.py`, `huecos_py.py` (con `PROF_STACK=true`).
+- **Pasos mixtos** (`GENESIS_PN131_MIXTO=1`, prendido): los decodes van por SK-18h y solo el prefill por descuantizar +
+  FlashInfer. Descuantizar 147 → 55 ms en la fase decode4; prefill idéntico; decode 0,4–1,8% (la diferencia normal de
+  SK-18h). Herramienta: `pasos_mixtos.py`.
+- **PN135 NUNCA estuvo cableado.** Su "+0,4% / +0,7%" era del kernel aislado. Cablearlo es el patrón de SK-23: buffers
+  int8 fijos en la capa. En las capas GDN la norma también alimenta `in_proj_a/b` en fp16. Pendiente.
+- **PN136 inerte con idiotSavant:** se aplica el parche de texto pero el MLP lo reemplaza PN148/SK-23, y nunca
+  entra ("MLP partido" no aparece). TTFT igual en 2 × 2 corridas (fase `ttft`, prompts fríos con nonce). Para
+  medirlo hay que integrar el solape en `rot_down.py`.
+- **Literatura para el all-reduce, traducida a SM86 (2 × 3090, PCIe 4.0 x8 ~12 GB/s, con P2P, sin NVLink/NVSwitch):**
+  - **SiFAR** (arXiv 2607.08973), medido en H200/NVSwitch: `multimem.ld_reduce` NO aplica. El doble buffer (sin
+    barrera final) y las banderas especulativas SÍ, por P2P con escrituras remotas.
+  - **TokenWeave** (2505.11329, Hopper): partir el lote en dos y fusionar AR + RMSNorm. En Ampere, sin multimem.
+  - **ISO** (2409.11155): solapar dentro de la secuencia.
+  - **NanoFlow**: nano-lotes por stream.
+- **Disco lleno el 27-09:** el tier de KV (40 GB) más 49 GB de capturas del borrador y 6 variantes de 3,6 GB en
+  `trazas/`. Se vació el tier de KV. Las capturas son datos de investigación: preguntar antes de borrar.
+
 ## 4. Palancas, en el orden sugerido
 
 Ahorro = medido menos el techo del kernel: **es un máximo**. Los porcentajes son del paso (1 pedido / 4 pedidos).

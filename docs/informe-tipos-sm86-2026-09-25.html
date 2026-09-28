@@ -863,12 +863,12 @@
           <tr class="nuevo"><td class="n">1</td><td class="k">Cinta, conv y recurrencia del árbol en PTX<small>pn122_cinta.cu, arbol_conv.cu, gdn_arbol.cu</small></td>
             <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n mejor">−7,0%</td><td class="n mejor">−4,7%</td>
             <td class="porq">Medido contra la línea base del día. Cinta 34 → 2,2 µs por capa, conv 9 → 3,9, recurrencia 19,7 → 11,7 (el estado pasó de repartido por columnas, con una reducción entre warps por barrera, a filas enteras por warp), y sin las 3 copias de q/k/v de PN54. Cinta y conv bit a bit; la recurrencia suma en otro orden: error contra fp64 igual a Triton y aceptación del borrador igual o mejor.</td></tr>
-          <tr><td class="n">1b</td><td class="k">Pasos mixtos<small>los que decodifican van por SK-18h</small></td>
-            <td><span class="chip ch-lat">código</span></td><td class="n">—</td><td class="n">hasta −20 ms por paso mixto</td>
-            <td class="porq">Verificado en la traza: con un prefill en el lote, SK-18h no corre y se descuantizan las páginas de <em>todos</em> los pedidos (16 → 72 páginas). Es el patrón de opencode. Candidato a subir al segundo lugar.</td></tr>
-          <tr><td class="n">2</td><td class="k">Re-medir PN135 y PN136<small>sobre idiotSavant</small></td>
-            <td><span class="chip ch-neu">flag</span></td><td class="n">?</td><td class="n">?</td>
-            <td class="porq">Ya existen. Un perfil cada uno decide si los pasos 7 y 13 son trabajo nuevo.</td></tr>
+          <tr class="nuevo"><td class="n">1b</td><td class="k">Pasos mixtos<small>los decodes por SK-18h</small></td>
+            <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n">—</td><td class="n mejor">descuantizar −63%</td>
+            <td class="porq">Medido. En un paso con prefill, los pedidos que decodifican van por SK-18h y solo el prefill descuantiza sus páginas. Prefill idéntico; decode con la diferencia normal de SK-18h (0,4–1,8%).</td></tr>
+          <tr class="nuevo"><td class="n">2</td><td class="k">Re-medir PN135 y PN136<small>sobre idiotSavant</small></td>
+            <td><span class="chip ch-abierto">hay que cablear</span></td><td class="n">—</td><td class="n">—</td>
+            <td class="porq">PN135 nunca estuvo cableado: su +0,4% era del kernel aislado. PN136 queda inerte: el MLP lo reemplaza PN148/SK-23 y el solape nunca entra (TTFT igual en 2×2 corridas). Los dos se integran en el camino de SK-23.</td></tr>
           <tr><td class="n">3</td><td class="k">lm_head en W4A8 + logits sin AllGather<small>gumbel-max por rango</small></td>
             <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−1%</td><td class="n">−3%</td>
             <td class="porq">Misma región. El lm_head lee la norma final ya rotada y con 36 filas limita por cómputo en fp16. No se re-cuantiza: mismos int4, basta el KL.</td></tr>
