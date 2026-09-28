@@ -66,7 +66,7 @@ services:
       - GENESIS_ENABLE_PN125_MARLIN_W4A8_ESCALAS=1   # escalas negativas de AutoRound: aca no hay
                                                      # (GPTQ las deja positivas), no hace nada
       - GENESIS_ENABLE_PN139_LM_HEAD_INT4=1      # lm_head int4 g128 al cargar (rotado da el mismo error)
-      - GENESIS_PN139_A8=${GENESIS_PN139_A8:-0}                 # lm_head W4A8 (activacion int8 por token, IMMA)
+      - GENESIS_PN139_A8=${GENESIS_PN139_A8:-1}                 # lm_head W4A8 (IMMA): KL 0,0193 igual, aceptacion 4,40 vs 4,37 tok/paso; con PN153 paso -0,8% / -3,7%
       - GENESIS_ENABLE_PN77_FP8_LM_HEAD=1        # camino fp8 del lm_head (PN139 lo reemplaza)
       - GENESIS_ENABLE_PN108_DRAFT_FP8_LM_HEAD=0
       - GENESIS_ENABLE_PN118_INT8_MLP=0          # MLP int8 para checkpoints AWQ: no aplica
