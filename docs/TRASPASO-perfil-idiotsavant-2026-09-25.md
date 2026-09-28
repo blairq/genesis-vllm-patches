@@ -420,7 +420,17 @@ MISMO texto del oráculo.
 - **lm_head completo del borrador:** 386–674 µs para top-16. Vocabulario podado (los 32k más frecuentes)
   → ~1/8 de los bytes. Cambia los candidatos: medir la aceptación.
 
-### P6 · Logits sin AllGather — **−0,7% / −2%, costo bajo-medio**
+### P6 · Logits sin AllGather — **−0,7% / −2%, costo bajo-medio** · HECHO: −0,8% / −3,7% con el lm_head A8
+
+- **Resultado (28-09):**
+  - **PN153** (`logits_rango.py`): cada rango manda por fila su máximo, su ganador del gumbel-max con el mismo ruido (clave = índice global; reusa `gumbel_noised_argmax`) y, si algún pedido usa top_k, su top-(k+16). Con eso se arma un tensor ralo y el muestreo de vLLM corre sin cambios: mismo token.
+    - Verificado con `GENESIS_PN153_VERIFICAR`: 18.020 filas, 0 distintas.
+    - Paso −0,5% / −1,9%.
+    - Vuelven al camino normal: top_p sin top_k, min_p, penalidades, logprobs y gramática.
+  - **PN139_A8:** lm_head W4A8. KL 0,0193 igual; aceptación del borrador 4,40 contra 4,37 tok/paso (`ab_a8_acept.sh`, conc 1).
+  - **Juntos:** −0,8% / −3,7%.
+  - **Pendiente:** hacer el muestreo sobre los candidatos y no sobre las 248k columnas.
+  - Lo que sigue es el diagnóstico original.
 
 - **Qué pasa:** después del lm_head se juntan los logits enteros (NCCL AllGather: 220 / 844 µs) y después
   `_gumbel_sample_kernel`.

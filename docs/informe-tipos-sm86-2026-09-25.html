@@ -851,8 +851,8 @@
       El criterio: primero lo barato y seguro, después juntar los cambios que tocan el mismo kernel, y los de capa en
       tandas, porque cada tanda paga una validación de calidad.</p>
     <div class="cifras" id="acumulado-hoy">
-      <div><span>Paso de decode · 1 pedido · 62k</span><b>29,36 → 24,10 ms</b><span class="antes">−17,9% (27/28-09)</span></div>
-      <div><span>Paso de decode · 4 pedidos · ~15k</span><b>40,94 → 34,60 ms</b><span class="antes">−15,5% (27/28-09)</span></div>
+      <div><span>Paso de decode · 1 pedido · 62k</span><b>29,36 → 23,91 ms</b><span class="antes">−18,6% (27/28-09)</span></div>
+      <div><span>Paso de decode · 4 pedidos · ~15k</span><b>40,94 → 33,32 ms</b><span class="antes">−18,6% (27/28-09)</span></div>
       <div><span>GPU ociosa entre fases · 1 pedido</span><b>1.719 → 3 µs</b><span class="antes">por paso</span></div>
       <div><span>Calidad</span><b>igual</b><span class="antes">oráculo greedy, aceptación; KL +0,0001 por el AR int8</span></div>
     </div>
@@ -869,9 +869,9 @@
           <tr class="nuevo"><td class="n">2</td><td class="k">Re-medir PN135 y PN136<small>sobre idiotSavant</small></td>
             <td><span class="chip ch-abierto">hay que cablear</span></td><td class="n">—</td><td class="n">—</td>
             <td class="porq">PN135 nunca estuvo cableado: su +0,4% era del kernel aislado. PN136 queda inerte: el MLP lo reemplaza PN148/SK-23 y el solape nunca entra (TTFT igual en 2×2 corridas). Los dos se integran en el camino de SK-23.</td></tr>
-          <tr><td class="n">3</td><td class="k">lm_head en W4A8 + logits sin AllGather<small>gumbel-max por rango</small></td>
-            <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−1%</td><td class="n">−3%</td>
-            <td class="porq">Misma región. El lm_head lee la norma final ya rotada y con 36 filas limita por cómputo en fp16. No se re-cuantiza: mismos int4, basta el KL.</td></tr>
+          <tr class="nuevo"><td class="n">3</td><td class="k">lm_head en W4A8 + logits sin AllGather<small>PN153 · PN139_A8</small></td>
+            <td><span class="chip ch-hecho">hecho 28-09</span></td><td class="n mejor">−0,8%</td><td class="n mejor">−3,7%</td>
+            <td class="porq">Medido. Cada rango manda por fila su máximo, su ganador del gumbel-max (mismo ruido: clave = índice global) y, si hace falta, su top-(k+16). Con eso se arma un tensor ralo y el muestreo de vLLM corre igual: mismo token (18.020 filas verificadas, 0 distintas). Solo eso: −0,5% / −1,9%. El lm_head en W4A8 suma lo demás; también acelera el del borrador, que lo comparte (904 → 556 µs). KL 0,0193 igual; aceptación 4,40 contra 4,37 tok/paso.</td></tr>
           <tr class="nuevo"><td class="n">4</td><td class="k">All-reduce de decode por P2P directo<small>PN152 · SK-24</small></td>
             <td><span class="chip ch-hecho">hecho 27/28-09</span></td><td class="n mejor">−6,1%</td><td class="n mejor">−9,7%</td>
             <td class="porq">Medido, bit a bit con NCCL (mismo texto en el oráculo). Cada placa escribe su parcial en la memoria de la otra (memoria cruda por IPC), avisa con una bandera de época y suma. Doble buffer, sin barrera final, época en la GPU: va dentro de los grafos. Ideas de SiFAR (H200/NVSwitch) traducidas a PCIe 4.0 x8 con P2P. 90 KB: 36,9 → 14,8 µs; paso −4,9% / −6,4%. Encima, int8 por grupo de 64 (i8): las dos placas suman las dos partes cuantizadas en orden de rango, así quedan idénticas; gana en todos los tamaños (36 filas 44,9 → 26,7 µs), paso −1,3% / −3,5% más. KL en respuestas 0,0193 contra 0,0192 todo fp16.</td></tr>
