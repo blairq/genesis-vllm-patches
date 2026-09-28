@@ -362,7 +362,14 @@ La baja del banco greedy de 8 textos era de esos textos. Reajustar el borrador c
 - **K/V del contexto en fp16:** PN142 decuantiza las filas k/v de las 5 capas a una matriz fp16 [5120×5120] por rango; 69 µs por paso.
 - **`kernel_projection` de las convs:** bf16 en el checkpoint, ignoradas por la cuantización; 10 × 23 µs.
 - **All-reduce del embedding por NCCL:** 24 µs (y 22 µs en el target).
-- **lm_head completo para el top-16:** 390 µs, en el techo de DRAM. Vocabulario recortado (FR-Spec): sobre las capturas, un subconjunto de 32k cubre 98,1% de los tokens generados y uno de 64k, 99,3%. Pesa 1,9% del paso: la ganancia neta estimada es ≤ 0,5%, queda para después.
+- **K/V de contexto → PN157** (Marlin W4A16 con los mismos int4 del checkpoint) y **embedding → PN158** (P2P fp16): paso −0,5%. La conv en int8 (`GENESIS_PN157_BITS_CONV=8`) resta 0,9% de aceptación: queda para entrar con la próxima destilación.
+- **lm_head completo para el top-16 → PN159** (vocabulario recortado, FR-Spec/VocabTrim):
+  - orden de frecuencia desde las capturas de `dflash2.sh` (`tests/proto/pn159_frecuencias.py` → `datos/pn159_orden.npy`: tokens generados, top-4 del target y prompt). Cobertura en pedidos apartados: 32k 98,4%, 64k 99,5%;
+  - NO recuantiza: elige las columnas int4 y escalas del lm_head de PN139 antes de su repack (formato GPTQ, una columna por token). El lm_head ya está en la base rotada y la entrada llega rotada por PN149;
+  - los tokens frecuentes son casi todos ids bajos (tramo del rango 0): se reparten parejo entre rangos, intercalados por frecuencia, con un all-gather por trozos al cargar. Sin eso un rango hacía todo el trabajo;
+  - trampa: la carga llega justa (~22 de 23,6 GB reservados antes del borrador) y un transitorio de cientos de MB dejaba sin lugar al borrador (OOM). Por trozos, con `empty_cache` al final;
+  - aceptación (banco de agente, 2 arranques): apagado 5,607, **32k 5,411 (−3,5%)**, **64k 5,606 (igual)**. Top-k del borrador 492 → ~117 µs (32k; el all-gather y el top-k final caen en la región "árbol").
+  - fase 2 posible: filas dinámicas por pedido (NanoSpec, arXiv 2605.26444): el 85% de lo que queda afuera está en el prompt (57%) o ya se generó (28%).
 
 ## 4. Palancas, en el orden sugerido
 

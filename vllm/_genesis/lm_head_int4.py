@@ -136,6 +136,8 @@ def preparar(layer, prefijo: str = "") -> bool:
     layer.orig_dtype = w.dtype
     layer.pn139_n, layer.pn139_k = n, k
     layer.pn139_tipo = scalar_types.uint4b8
+    from vllm._genesis import vocab_borrador as _g159     # PN159: subconjunto para los candidatos del borrador
+    _g159.preparar(layer, qp, esc)                         # el int4 GPTQ ANTES del repack: columnas = tokens
     setattr(layer, MARCA, True)
     log.warning("PN139: lm_head %s a int4 g%d%s — %.0f MB -> %.0f MB por GPU",
                 prefijo or "?", G, " (A8)" if es_a8 else "", n * k * 2 / 1e6, n * k / 2 / 1e6)

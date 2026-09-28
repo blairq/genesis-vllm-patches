@@ -1300,6 +1300,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN159": {
+        "title": "Candidatos del borrador DFlash2 sobre vocabulario recortado (FR-Spec)",
+        "env_flag": "GENESIS_ENABLE_PN159_VOCAB_BORRADOR",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis-original 2026-09-28. compute_candidates del borrador hace el top-16 del lm_head completo (390 us por paso, techo de DRAM). Subconjunto fijo de los tokens mas frecuentes de la carga real (capturas de dflash2.sh: 32k cubre 98,4% de lo generado) en una matriz Marlin A8 propia por rango, con las mismas filas cuantizadas que PN139. Linea: FR-Spec (arXiv 2502.14856), VocabTrim (2506.22694); fase 2 con filas del contexto: NanoSpec (2605.26444)."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN158": {
         "title": "All-reduce del embedding de vocabulario por P2P (SK-24)",
         "env_flag": "GENESIS_ENABLE_PN158_EMBED_P2P",

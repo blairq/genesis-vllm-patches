@@ -6168,6 +6168,23 @@ def apply_patch_PN158() -> PatchResult:
         return _skipped(name, reason)
     return _failed(name, reason)
 
+@register_patch("PN159 vocabulario del borrador")
+def apply_patch_PN159() -> PatchResult:
+    """PN159: candidatos del borrador sobre vocabulario recortado."""
+    name = "PN159 vocabulario del borrador"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_PN159_vocab_borrador
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN159_vocab_borrador.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
