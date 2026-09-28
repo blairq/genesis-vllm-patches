@@ -211,6 +211,17 @@ BF16_ENTRADA = ()
 NORMA_DE = {"attn_in": "input_layernorm", "mlp_in": "post_attention_layernorm"}
 
 
+def usar_version(v: int) -> None:
+    """--version 1 reproduce EXACTO el checkpoint v1 publicado (o_proj/out_proj sin Hadamard en la
+    entrada, in_proj_a/b en BF16); 2 (por omision) es la v2 (DECISIONES.md, D2)."""
+    global BF16_ENTRADA
+    if v == 1:
+        HAD_ENTRADA.clear()
+        for b in ("linear_attn.in_proj_b", "linear_attn.in_proj_a"):
+            LINEALES["linear_attention"].pop(b, None)
+        BF16_ENTRADA = ("linear_attn.in_proj_b", "linear_attn.in_proj_a")   # orden del ignore de la v1
+
+
 # ─── lectura perezosa del BF16 (55 GB en 32 GB de RAM: tensor por tensor) ────────────────────────
 class Pesos:
     def __init__(self, d):
@@ -720,6 +731,10 @@ def cuantizar(a):
 
 def config_rotacion(g_final):
     """Lo que el servidor necesita saber del checkpoint (vLLM + parches Genesis)."""
+    if not HAD_ENTRADA:                               # --version 1: el config de siempre
+        return {"semilla": SEMILLA, "bloque": BLOQUE, "bloque_down": BLOQUE_DOWN,
+                "requiere": "GENESIS_ENABLE_PN148_ROT_DOWN=1",
+                "g_final": g_final.cpu().tolist() if torch.is_tensor(g_final) else list(g_final)}
     return {"semilla": SEMILLA, "bloque": BLOQUE, "bloque_down": BLOQUE_DOWN, "version": 2,
             "had_entrada": {k.split(".")[-1]: v for k, v in HAD_ENTRADA.items()},
             "requiere": "GENESIS_ENABLE_PN148_ROT_DOWN=1 GENESIS_ENABLE_PN154_HAD_SALIDAS=1 "
@@ -781,7 +796,7 @@ def armar(a):
     for i, t in enumerate(tc.layer_types):
         if t == "linear_attention":
             p_ = f"model.language_model.layers.{i}.linear_attn"
-            ignore += [p_, p_ + ".norm"]                  # v2: in_proj_a/b ya no (van en W4)
+            ignore += [p_, p_ + ".norm"] + [p_ + "." + b.split(".")[-1] for b in BF16_ENTRADA]   # v2: ninguna
     ignore += ["lm_head"]
     qcfg = {"config_groups": {"group_0": {
         "targets": ["Linear"],
@@ -1206,11 +1221,14 @@ def main():
     ap.add_argument("--dry-run", dest="dry_run", action="store_true",
                     help="validar todo (BF16, calibracion, recursos, matematica, dos capas en memoria) sin escribir capas")
     ap.add_argument("--json", action="store_true", help="estado: salida en JSON")
+    ap.add_argument("--version", type=int, choices=[1, 2], default=2,
+                    help="1 = el checkpoint v1 publicado (exacto); 2 = v2 (DECISIONES.md D2)")
     ap.add_argument("--modelo", help="realinear: el idiotSavant v1 de partida")
     ap.add_argument("--hessianas", help="realinear: directorio con capa_NN/H_attn_in.pt y H_attn_out.pt")
     ap.add_argument("--h_sobre_x", action="store_true",
                     help="realinear: las H_attn_in estan sobre x = g n (etapa A vieja) y no sobre n")
     a = ap.parse_args()
+    usar_version(a.version)
     os.makedirs(a.trabajo, exist_ok=True)
     os.makedirs(a.salida, exist_ok=True)
     if a.etapa == "estado":
