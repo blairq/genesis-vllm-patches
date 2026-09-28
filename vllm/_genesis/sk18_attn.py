@@ -114,7 +114,12 @@ MARGEN4 = float(os.environ.get("GENESIS_PN131_MARGEN4", 16))    # int4: svf <= 2
 VSH = 11
 MARGEN = 64.0          # V: svf <= 2^VSH -> hasta 4x el maximo inicial
 MARGEN_K = 16.0        # K: skf con ~11 bits; satura recien a 16x (k rotada/normalizada no crece tanto)
-CPG = int(os.environ.get("GENESIS_PN131_CPG", 16))
+CPG = int(os.environ.get("GENESIS_PN131_CPG", 16))     # minimo de paginas por grupo de union4 (fija NG del buffer)
+# union4 lanza R x NG bloques de 1 warp: con pocas filas (1 pedido) hacen falta muchos grupos para llenar
+# las 82 SM, y con muchas (4 pedidos) sobran y los parciales int64 [NG, R, 256] son trafico puro. El
+# grupo se elige para lanzar ~UNION_BLOQUES bloques (medido 28-09: 1 pedido CPG 16 -> 31,8 us, 64 -> 66,6;
+# 4 pedidos 16 -> 54,9, 64 -> 35,9). La suma entre grupos es entera: bit a bit con cualquier CPG.
+UNION_BLOQUES = int(os.environ.get("GENESIS_PN131_UNION_BLOQUES", 2400))
 LN2 = math.log(2)
 SH_H = 32 * (256 + 128) + 2 * 64 * 256 + 2 * 256 * 64 + 2 * 64 * 2 * 4
 # Warps por bloque de batch2 (int8): con 8, un bloque toma las 64 filas de una (secuencia, cabeza KV)
@@ -667,7 +672,9 @@ def _decode_uniforme(impl, query, kv_cache, md, output, B, L, capturando):
     R = B * nh * MB
     # En CUDA graph la grilla usa la cantidad MAXIMA de paginas; en eager, la justa.
     NCH = bf.nchmax if capturando else min(bf.nchmax, (int(md.max_seq_len) + bs - 1) // bs)
-    NG = (NCH + CPG - 1) // CPG
+    ng_obj = max(1, -(-UNION_BLOQUES // max(1, R)))
+    cpg = max(CPG, -(-NCH // ng_obj))
+    NG = (NCH + cpg - 1) // cpg
     Qb = bf.Q[: R * QD]
     lim = bf.lim[:R]
     mqb = bf.mqb[:R]
@@ -722,9 +729,9 @@ def _decode_uniforme(impl, query, kv_cache, md, output, B, L, capturando):
     Og = bf.Og[: NG * R * QD]
     Sg = bf.Sg[: NG * R]
     if mo == "int4":
-        ks["union"].lanzar((R, NG), [oh, ol, om, os_, oc, mqb, dcap, seq, Og, Sg, R, NCH, CPG, nh * MB, bs, NX])
+        ks["union"].lanzar((R, NG), [oh, ol, om, os_, oc, mqb, dcap, seq, Og, Sg, R, NCH, cpg, nh * MB, bs, NX])
     else:
-        ks["union"].lanzar((R, NG), [oh, ol, om, os_, mqb, dcap, seq, Og, Sg, R, NCH, CPG, nh * MB, bs, 0])
+        ks["union"].lanzar((R, NG), [oh, ol, om, os_, mqb, dcap, seq, Og, Sg, R, NCH, cpg, nh * MB, bs, 0])
     o16 = output[:nt].view(torch.int16)
     if mo == "int4":
         ks["salida"].lanzar((nt, nh * G), [Og, Sg, c.refs, _signos_dev(dev), o16, NG, R, L, nh, G, MB, VSH])

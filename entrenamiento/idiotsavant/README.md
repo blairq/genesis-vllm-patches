@@ -3,6 +3,9 @@
 - **`qwen3.8_27b_idiotSavant_sm_86`**: Qwen3.8-27B (sin censura, orcarouter) en W4 con el residuo
   rotado, para servirse como W4A8 en RTX 3090 (sm_86). Tiene la mitad de error que el int4 público
   (noon), a la misma velocidad.
+  - **v2 (28-09):** además, Hadamard por cabeza en la entrada de `o_proj`/`out_proj` e `in_proj_a/b`
+    en W4. KL servido 0,0193 → 0,0178, y 3 kernels menos por capa. Ver
+    [DECISIONES.md](DECISIONES.md) §D2.
 - **`qwen3.8_27b_idiotSavant_sm_86_dflash2`**: su borrador DFlash2.
 
 Publicados en https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86 (con esta carpeta adentro,
@@ -116,9 +119,26 @@ bash correr.sh idiotsavant.py todo --bf16 BF16 --calib calib_256x4096.npy --trab
 
 ### 6. Servir
 
-Hace falta la Hadamard antes de `down_proj` (PN148). El compose es
-`../../compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml`, con cada ajuste explicado. Al cambiar
-de checkpoint, vaciar el offload de KV.
+Parches que hacen falta (el config lo dice en `genesis_rotacion.requiere`):
+- **PN148:** la Hadamard antes de `down_proj`.
+- **Desde la v2, PN154:** la Hadamard por cabeza en la entrada de `o_proj`/`out_proj`, fusionada en SK-25.
+- **Desde la v2, PN155:** `in_proj_a/b` dentro del Marlin de `in_proj_qkvz`.
+
+El compose es `../../compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml`, con cada ajuste explicado.
+Para la v2: `IDIOTSAVANT_MODELO=qwen3.8_27b_idiotSavant_sm_86_v2 GENESIS_ENABLE_PN155_BA_EN_QKVZ=1`.
+Al cambiar de checkpoint, vaciar el offload de KV.
+
+### 7. De una v1 a la v2 sin recalibrar
+
+Si ya tenés la v1 y las Hessianas (`--conservar_hessianas`, o las de la etapa A vieja con `--h_sobre_x`):
+
+```bash
+bash correr.sh idiotsavant.py realinear --bf16 BF16 --modelo qwen3.8_27b_idiotSavant_sm_86 \
+     --hessianas trabajo --trabajo trabajo_v2 --salida qwen3.8_27b_idiotSavant_sm_86_v2
+```
+
+- **Qué rehace:** solo `o_proj`, `out_proj`, `in_proj_a` e `in_proj_b`, ~2 s por capa. Lo demás son enlaces duros a la v1.
+- **La corrida que armó la v2:** `realinear_v2.sh`, en la imagen de vLLM.
 
 ## Borrador DFlash2 (`dflash2.sh`)
 

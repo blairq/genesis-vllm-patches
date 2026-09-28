@@ -30,14 +30,30 @@ sk18h_salida(
     long long S = 0;
     for (int k = 0; k < NG; ++k) S += Sg[(size_t)k * R + row];
     if (S < 1) S = 1;
+    // (a << 20) / S sin division de 64 bits (emulada: cientos de instrucciones, 8 por hilo): cociente
+    // estimado con el reciproco en double (error relativo ~2^-52, y el cociente entra holgado en 52
+    // bits) y corregido a la baja o al alza: da el MISMO piso entero, bit a bit (28-09).
+    const unsigned long long Su = (unsigned long long)S;
+    const double inv = 1.0 / (double)Su;
+    long long Oe[8];
+#pragma unroll
+    for (int e = 0; e < 8; ++e) Oe[e] = 0;
+    for (int k = 0; k < NG; ++k) {
+        const long long* p = Og + ((size_t)k * R + row) * QD + lane * 8;
+#pragma unroll
+        for (int e = 0; e < 8; ++e) Oe[e] += p[e];
+    }
 #pragma unroll
     for (int e = 0; e < 8; ++e) {
         const int d = lane * 8 + e;
-        long long O = 0;
-        for (int k = 0; k < NG; ++k) O += Og[((size_t)k * R + row) * QD + d];
+        const long long O = Oe[e];
         const int neg = O < 0;
         const unsigned long long a = (unsigned long long)(neg ? -O : O);
-        const unsigned long long r = (a << 20) / (unsigned long long)S;
+        const unsigned long long x = a << 20;
+        unsigned long long r = (unsigned long long)((double)x * inv);
+        unsigned long long pr = r * Su;
+        if (pr > x) { r -= 1; pr -= Su; }
+        if (x - pr >= Su) r += 1;
         out[dst + d] = (unsigned short)q_a_fp16(r * 32769ull, E0, neg);
     }
 }
