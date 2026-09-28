@@ -850,6 +850,12 @@
       tiene cresta ~2,7 en vez de ~56. Todo lo que se midió con noon se vuelve a medir sobre idiotSavant.
       El criterio: primero lo barato y seguro, después juntar los cambios que tocan el mismo kernel, y los de capa en
       tandas, porque cada tanda paga una validación de calidad.</p>
+    <div class="cifras" id="acumulado-hoy">
+      <div><span>Paso de decode · 1 pedido · 62k</span><b>29,36 → 25,67 ms</b><span class="antes">−12,6% en el día (27-09)</span></div>
+      <div><span>Paso de decode · 4 pedidos · ~15k</span><b>40,94 → 38,31 ms</b><span class="antes">−6,4% en el día</span></div>
+      <div><span>GPU ociosa entre fases · 1 pedido</span><b>1.719 → 3 µs</b><span class="antes">por paso</span></div>
+      <div><span>Calidad</span><b>igual</b><span class="antes">oráculo greedy y aceptación del borrador</span></div>
+    </div>
     <div class="tabla-caja">
       <table class="pipe">
         <thead><tr><th class="n">#</th><th>Paso</th><th>Tipo</th><th class="n">1 pedido</th><th class="n">4 pedidos</th><th>Por qué va acá</th></tr></thead>
@@ -881,9 +887,9 @@
           <tr><td class="n">8</td><td class="k">in_proj_a/b en int8, dentro de in_proj_qkvz<small>un solo Marlin</small></td>
             <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−1%</td><td class="n">−1%</td>
             <td class="porq">Se va el cutlass fp16 + split-K de cada capa GDN. Son las compuertas: primero la sensibilidad por capa.</td></tr>
-          <tr class="nuevo"><td class="n">9</td><td class="k">Python a la GPU<small>PN150 borrador en grafo · PN151 metadata GDN en un kernel</small></td>
-            <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n mejor">−5,1%</td><td class="n mejor">−2,2%</td>
-            <td class="porq">Medido. PN150: el fc y la proyección de contexto del borrador, que vLLM corría en eager, en grafos CUDA por forma (−3,1% / −1,6%). PN151: el builder de metadata del GDN (~35 ops de torch por grupo y paso, el mayor consumidor según la pila de Python) en un kernel Triton, verificado en 3000 llamadas sin diferencias (−2,0% / −0,6%). GPU ociosa en huecos: 1.719 → 442 µs por paso. Mismo texto en el oráculo.</td></tr>
+          <tr class="nuevo"><td class="n">9</td><td class="k">Python a la GPU<small>PN150 borrador en grafo · PN151 metadata GDN en un kernel · sync oculta</small></td>
+            <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n mejor">−6,1%</td><td class="n mejor">−1,8%</td>
+            <td class="porq">Medido. PN150: el fc y la proyección de contexto del borrador en grafos CUDA (−3,1% / −1,6%). PN151: el builder de metadata del GDN (~35 ops de torch por grupo y paso) en un kernel, verificado en 3000 llamadas sin diferencias (−2,0% / −0,6%). Y una sincronización oculta nuestra: <span class="m">torch.tensor(lista, device=cuda)</span> en la compactación del árbol dejaba la CPU bloqueada 19,8 de 26 ms por paso. GPU ociosa en huecos con 1 pedido: 1.719 → 3 µs por paso. Mismo texto en el oráculo.</td></tr>
           <tr><td class="n">10</td><td class="k">Borrador<small>GEMM W4A8, atención partida, vocab podado</small></td>
             <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−3%</td><td class="n">−3%</td>
             <td class="porq">Todo el borrador en una tanda: se valida con la aceptación y, si baja, se re-ajusta con dflash2.sh.</td></tr>
