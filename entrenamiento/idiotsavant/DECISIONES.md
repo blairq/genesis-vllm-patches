@@ -180,6 +180,10 @@ con todo el stack):
 Baja 8–9%: es el error de A8 de o_proj/out_proj que desaparece, más que lo que suman las compuertas
 en W4.
 
+Velocidad, con todo el stack de la noche (SK-18h de 8 warps, etc.):
+- **Paso de decode de la v2 contra la v1:** −2,1% con 1 pedido; con 4 pedidos, dentro del ruido.
+- **El borrador DFlash2 no se reajustó** y no hizo falta. Con 40 pedidos de agente reales (tools, perfil coder, 4 en paralelo, 2 arranques por brazo), la aceptación da 5,546 (v1) contra 5,553 (v2).
+
 **D2.4. Cómo se arma.**
 - Desde cero: `idiotsavant.py todo` ya produce la v2 (`HAD_ENTRADA`, y `in_proj_a/b` en `LINEALES`).
 - Desde una v1, sin recalibrar: `idiotsavant.py realinear` rehace solo esas lineales con Hessianas guardadas. ~2 s por capa.

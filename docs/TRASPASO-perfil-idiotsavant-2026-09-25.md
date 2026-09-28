@@ -326,11 +326,22 @@ Detalle de `borrador: capas`:
 | v1 | 240 | 4,54 |
 | v2 | 239 | 4,41 |
 
-La aceptación baja, seguramente porque el borrador se ajustó contra la v1: reajustarlo contra la v2 (`dflash2.sh`) es lo pendiente. La captura ocupaba 49 GB: ver el disco antes.
+Con la carga REAL (`ab_v2_agente.sh`: 40 pedidos de agente con tools, perfil coder, 4 en paralelo, 2 arranques por brazo) la aceptación es la misma:
 
-**Lo que queda en la atención:**
-- batch2 sigue en ~44% del ancho de banda a 62k: 1 bloque por SM por los 254 registros, y K se lee en las dos pasadas.
-- Lo próximo: K de la página residente en shared memory entre pasadas (V en un buffer, ~93 KB).
+| | aceptación (2 arranques) | media |
+|---|---|---|
+| v1 | 5,553 / 5,538 | 5,546 |
+| v2 | 5,504 / 5,602 | 5,553 |
+
+La baja del banco greedy de 8 textos era de esos textos. Reajustar el borrador contra la v2 (`dflash2.sh`: ~8 h de captura, ~48 GB) queda opcional.
+
+**Lo que queda en la atención** (diagnóstico para la próxima sesión):
+- batch2 sigue en ~44% del ancho de banda a 62k: 1 bloque de 8 warps por SM por los 254 registros (128 son los acumuladores O hi/lo), y K se lee en las dos pasadas.
+- **La página es de 880 tokens** (BS del KV híbrido; `forma del KV: (bloques, 2, 880, 520)`). Consecuencias:
+  - a 62k hay 71 páginas activas × 2 cabezas = **142 bloques en 82 SM: 1,7 olas**, y la segunda a medias;
+  - K residente en shared memory entre pasadas NO entra (225 KB por página).
+- **Lo próximo** es partir la página en trozos (como el `SCH` del espejo HIB) para 3–4 olas parejas. El problema son los acumuladores por trozo: hoy [NCH=298, R, 256] × hi/lo int32 = 864 MiB con bmax=11.
+  - Hay que achicarlos antes: O parcial en fp32 (hi·256+lo cabe en ~2^40, no en fp32 exacto), o NCH por el largo real y no por max_model_len.
 
 ## 4. Palancas, en el orden sugerido
 
