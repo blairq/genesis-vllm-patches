@@ -1300,6 +1300,28 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN158": {
+        "title": "All-reduce del embedding de vocabulario por P2P (SK-24)",
+        "env_flag": "GENESIS_ENABLE_PN158_EMBED_P2P",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-09-28. El all-reduce del VocabParallelEmbedding seguia por NCCL (~22 us target + ~24 us borrador por paso); un custom op opaco lo manda por el P2P fp16 de PN152. Exacto: cada token lo aporta un solo rango."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN157": {
+        "title": "Borrador DFlash2: K/V de contexto y kernel_projection en Marlin",
+        "env_flag": "GENESIS_ENABLE_PN157_BORRADOR_MARLIN",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis-original 2026-09-28. PN142 decuantiza la K/V de contexto de las 5 capas a fp16 [5120x5120] por rango (69 us por paso); Marlin W4A16 sobre los mismos int4 del checkpoint: 25 us. Los kernel_projection de las convs (bf16, ignorados por la cuantizacion) se cuantizan al cargar a int8 por canal (RTN) y van por Marlin W8A16: 24 -> 11,5 us cada uno con 9 filas."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN156": {
         "title": "Norma del decoder que escribe int8 (SK-26) directo a Marlin W4A8",
         "env_flag": "GENESIS_ENABLE_PN156_NORMA_Q8",

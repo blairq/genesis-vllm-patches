@@ -6134,6 +6134,40 @@ def apply_patch_PN156() -> PatchResult:
         return _skipped(name, reason)
     return _failed(name, reason)
 
+@register_patch("PN157 borrador en Marlin")
+def apply_patch_PN157() -> PatchResult:
+    """PN157: K/V de contexto y kernel_projection del borrador DFlash2 en Marlin."""
+    name = "PN157 borrador en Marlin"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_PN157_borrador_marlin
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN157_borrador_marlin.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+@register_patch("PN158 embedding por P2P")
+def apply_patch_PN158() -> PatchResult:
+    """PN158: all-reduce del embedding de vocabulario por P2P fp16."""
+    name = "PN158 embedding por P2P"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN158_embed_p2p
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN158_embed_p2p.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════

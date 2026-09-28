@@ -348,6 +348,22 @@ La baja del banco greedy de 8 textos era de esos textos. Reajustar el borrador c
 - **Lo próximo** es partir la página en trozos (como el `SCH` del espejo HIB) para 3–4 olas parejas. El problema son los acumuladores por trozo: hoy [NCH=298, R, 256] × hi/lo int32 = 864 MiB con bmax=11.
   - Hay que achicarlos antes: O parcial en fp32 (hi·256+lo cabe en ~2^40, no en fp32 exacto), o NCH por el largo real y no por max_model_len.
 
+## 3e. El borrador (paso 10), 28-09 a la tarde
+
+**Atención del borrador: PN124 3D con segmentos sobre la ventana** (commit d2a0ffd, prendido):
+- DFlash2 verifica 9 queries por pedido, no causal, con ventana (2047, 0): aplanar al 3D (PN124 `Q_MAX`) no es exacto con ventana, así que iba por el 2D: ~135–145 µs por capa, constante en el largo.
+- `GENESIS_PN124_Q3D=16` deja al 3D tomar varias queries por secuencia. Pero el 3D partía `[0, seq_len)` en segmentos y la ventana podaba dentro de cada uno: a 62k trabajaba **un solo segmento** (194 µs, peor que el 2D).
+- Arreglo en el kernel (sub-parches de PN124): con ventana, los segmentos se reparten sobre `[inicio de la ventana, seq_len)`, y la reducción calcula la misma partición.
+- Offline (reloj fijo): 3,6x (1 pedido), 2,9x (2), 1,9x (4), constante de 3k a 62k. rel 4–7e-4 (orden de suma), exacto con largos mezclados.
+- Servidor aislado, dos réplicas en orden opuesto: **capas del borrador −35% / −19%, paso −3,1% (1 pedido) / −0,8% (4)**.
+- Trampa: `perfil_idiotsavant.sh` no borraba las trazas viejas (son de root) y `analizar_perfil.py` leía la primera. Arreglado: se borran desde el contenedor.
+
+**Lo que queda en el paso del borrador** (1 pedido, 1,73 ms en capas + 0,49 ms de lm_head):
+- **K/V del contexto en fp16:** PN142 decuantiza las filas k/v de las 5 capas a una matriz fp16 [5120×5120] por rango; 69 µs por paso.
+- **`kernel_projection` de las convs:** bf16 en el checkpoint, ignoradas por la cuantización; 10 × 23 µs.
+- **All-reduce del embedding por NCCL:** 24 µs (y 22 µs en el target).
+- **lm_head completo para el top-16:** 390 µs, en el techo de DRAM. Vocabulario recortado (FR-Spec): sobre las capturas, un subconjunto de 32k cubre 98,1% de los tokens generados y uno de 64k, 99,3%. Pesa 1,9% del paso: la ganancia neta estimada es ≤ 0,5%, queda para después.
+
 ## 4. Palancas, en el orden sugerido
 
 Ahorro = medido menos el techo del kernel: **es un máximo**. Los porcentajes son del paso (1 pedido / 4 pedidos).

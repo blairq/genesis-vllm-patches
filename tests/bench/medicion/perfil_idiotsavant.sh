@@ -41,8 +41,8 @@ mover_trazas() {   # $1 = dir temporal, $2 = fase: espera las dos trazas y las m
     [ "${n:-0}" -ge 2 ] && break; sleep 2
   done
   sleep 3   # que terminen de escribirse
-  rm -rf $MED/trazas/${LABEL}_$2 2>/dev/null
-  docker exec $N sh -c "mkdir -p /traces/${LABEL}_$2 && mv $1/* /traces/${LABEL}_$2/"
+  # las trazas son de root: un rm del host fallaba en silencio y analizar_perfil leia las VIEJAS
+  docker exec $N sh -c "rm -rf /traces/${LABEL}_$2; mkdir -p /traces/${LABEL}_$2 && mv $1/* /traces/${LABEL}_$2/"
   echo "$(date +%T) [$LABEL/$2] trazas: $(ls $MED/trazas/${LABEL}_$2 2>/dev/null | tr '\n' ' ')"
 }
 

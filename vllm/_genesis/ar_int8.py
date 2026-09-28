@@ -249,6 +249,29 @@ def all_reduce_int8(x: torch.Tensor) -> torch.Tensor:
     return torch.ops.vllm.genesis_ar_int8(x)
 
 
+def _impl_exacto(x: torch.Tensor) -> torch.Tensor:
+    """PN158: all-reduce fp16 por P2P (SK-24) si entra, si no NCCL. Sin int8: para el embedding de vocabulario
+    partido, donde cada token lo aporta UN rango y el otro suma ceros (la suma es exacta; int8 no lo seria)."""
+    from vllm.distributed.communication_op import tensor_model_parallel_all_reduce
+    from vllm.distributed.parallel_state import get_tensor_model_parallel_world_size
+    from vllm._genesis import ar_p2p as _g152
+    _g152.asegurar_inicializado()
+    if get_tensor_model_parallel_world_size() == 2 and _g152.activo() and _g152.sirve(x):
+        return _g152.all_reduce(x)
+    return tensor_model_parallel_all_reduce(x)
+
+
+def all_reduce_exacto(x: torch.Tensor) -> torch.Tensor:
+    return torch.ops.vllm.genesis_ar_exacto(x)
+
+
+if _flag("GENESIS_ENABLE_PN158_EMBED_P2P"):     # al importar, nunca dentro de una traza
+    try:
+        from vllm.utils.torch_utils import direct_register_custom_op as _reg
+        _reg(op_name="genesis_ar_exacto", op_func=_impl_exacto, mutates_args=[], fake_impl=_fake)
+    except Exception as _e:   # pragma: no cover
+        log.error("[PN158] no se pudo registrar el custom op: %s", _e)
+
 if _ACTIVO:
     try:
         registrar()
@@ -256,4 +279,4 @@ if _ACTIVO:
         log.error("[PN120] no se pudo registrar el custom op: %s", _e)
 
 
-__all__ = ["activo", "m_min", "grupo", "registrar", "all_reduce_int8"]
+__all__ = ["activo", "m_min", "grupo", "registrar", "all_reduce_int8", "all_reduce_exacto"]

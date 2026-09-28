@@ -89,6 +89,8 @@ services:
       - GENESIS_ENABLE_B3_CUSTOM_AR=1            # all-reduce propio para TP=2 con fallback
       # ── especulativo: DFlash2 + arbol de 8 nodos ────────────────────────────
       - GENESIS_ENABLE_PN142_DFLASH2=1           # DFlash2 usable en v0.29.0
+      - GENESIS_ENABLE_PN157_BORRADOR_MARLIN=${GENESIS_ENABLE_PN157_BORRADOR_MARLIN:-1}   # K/V de contexto del borrador en Marlin W4A16 (mismos int4 del checkpoint): 70 -> 25 us
+      - GENESIS_PN157_BITS_CONV=${GENESIS_PN157_BITS_CONV:-0}               # 8 = kernel_projection en int8 por canal: -0,9% de aceptacion en el banco de agente, neto cero; 0 = densa
       - GENESIS_PN144_ESCALA_RESIDUAL=32         # el residual del borrador desborda fp16 sin esto
       - GENESIS_ENABLE_ARBOL=1                   # arbol de borrador (+10-11% prosa)
       - GENESIS_ARBOL_CERRADA=0
@@ -109,6 +111,7 @@ services:
       - GENESIS_PN131_MIXTO_VERIFICAR=${GENESIS_PN131_MIXTO_VERIFICAR:-0}              # N: compara contra el camino completo en las primeras N llamadas
       - GENESIS_ENABLE_PN152_AR_P2P=${GENESIS_ENABLE_PN152_AR_P2P:-1}                  # all-reduce de decode por P2P directo (SK-24): paso -4,9% / -6,4%, bit a bit con NCCL
       - GENESIS_PN152_MIN_I8=${GENESIS_PN152_MIN_I8:-1}                              # all-reduce P2P de decode en int8 por grupo de 64 desde estos bytes fp16 (1 = siempre, 0 = nunca): paso -1,3% / -3,5%, KL 0,0193 vs 0,0192
+      - GENESIS_ENABLE_PN158_EMBED_P2P=${GENESIS_ENABLE_PN158_EMBED_P2P:-1}          # all-reduce del embedding (target y borrador) por P2P fp16 en vez de NCCL: exacto; con PN157 paso -0,5% / -0,4%
       - GENESIS_ENABLE_PN153_LOGITS_RANGO=${GENESIS_ENABLE_PN153_LOGITS_RANGO:-1}      # logits del target sin AllGather: cada rango manda maximo + ganador gumbel (+ top-k): mismo token; paso -0,5% / -1,9%
       - GENESIS_PN153_VERIFICAR=${GENESIS_PN153_VERIFICAR:-0}
       - GENESIS_ENABLE_PN154_HAD_SALIDAS=${GENESIS_ENABLE_PN154_HAD_SALIDAS:-1}  # Hadamard por cabeza en la entrada de o_proj/out_proj: solo actua si el checkpoint la declara (v2)
