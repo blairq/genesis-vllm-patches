@@ -197,8 +197,15 @@ def _impl(x: torch.Tensor) -> torch.Tensor:
 
     plano = x.reshape(-1, x.shape[-1])
     m, h = plano.shape
+    # PN152: con M chico (decode), all-reduce P2P directo (SK-24) en vez de NCCL. Se inicializa en la
+    # primera llamada en EAGER de cualquier tamano (la corrida de perfilado de memoria de vLLM), nunca
+    # dentro de una captura; si no aplica, sigue por NCCL. Mismo resultado: con 2 rangos es una suma fp16.
+    from vllm._genesis import ar_p2p as _g152
+    _g152.asegurar_inicializado()
     # ESTE if corre de verdad, porque el op es opaco a dynamo.
     if m < _M_MIN or h % _GRUPO != 0:
+        if _g152.activo() and w == 2 and _g152.sirve(x):
+            return _g152.all_reduce(x)
         return tensor_model_parallel_all_reduce(x)
 
     cuant, sumar = _compilados()

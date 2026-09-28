@@ -64,6 +64,7 @@ TIPO = {
     "_k_escribir": "f32 → f32 (cinta)",
     "_k_escribir_par": "fp16 → f32 (cinta, Triton en grilla)",
     "pn122_cinta": "fp16 → f32 (cinta, PTX)",
+    "sk24_ar": "fp16 (all-reduce P2P, PN152)",
     "_k_salidas_par": "fp16 → f32 → fp16 (conv, Triton desenrollado)",
     "arbol_conv": "fp16 → f32 → fp16 (conv, PTX)",
     "_reshape_cache_per_token_head": "fp16 → int8",
@@ -93,7 +94,7 @@ def union(ks):
 
 
 def es_ar(n):
-    return "AllReduce" in n or "cross_device" in n
+    return "AllReduce" in n or "cross_device" in n or n == "sk24_ar"
 
 
 def cortar(ker, nom, a, b, fw):

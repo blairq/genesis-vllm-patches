@@ -1,0 +1,967 @@
+{
+ "pasos": 44,
+ "paso_pared_us": 35849.521484375,
+ "paso_gpu_us": 35554.95751953125,
+ "regiones": {
+  "embedding": {
+   "pared_us": 46.6884765625,
+   "gpu_us": 42.62451171875,
+   "kernels": 2.0
+  },
+  "48 capas GDN": {
+   "pared_us": 17065.77685546875,
+   "gpu_us": 16935.2373046875,
+   "kernels": 1296.0
+  },
+  "16 capas atención": {
+   "pared_us": 12270.240234375,
+   "gpu_us": 12250.68212890625,
+   "kernels": 352.0
+  },
+  "lm_head + gather": {
+   "pared_us": 1937.87158203125,
+   "gpu_us": 1925.646484375,
+   "kernels": 10.0
+  },
+  "verificación": {
+   "pared_us": 187.36328125,
+   "gpu_us": 162.29345703125,
+   "kernels": 24.0
+  },
+  "borrador: capas": {
+   "pared_us": 3300.5986328125,
+   "gpu_us": 3264.13427734375,
+   "kernels": 167.0
+  },
+  "borrador: lm_head + top-k": {
+   "pared_us": 871.357421875,
+   "gpu_us": 861.4560546875,
+   "kernels": 12.0
+  },
+  "árbol + preparar paso": {
+   "pared_us": 194.70703125,
+   "gpu_us": 149.9580078125,
+   "kernels": 44.0
+  }
+ },
+ "capas": {
+  "capa 00": {
+   "tipo": "GDN",
+   "pared_us": 390.45458984375,
+   "gpu_us": 375.6220703125
+  },
+  "capa 01": {
+   "tipo": "GDN",
+   "pared_us": 358.69482421875,
+   "gpu_us": 356.62890625
+  },
+  "capa 02": {
+   "tipo": "GDN",
+   "pared_us": 357.33447265625,
+   "gpu_us": 354.759765625
+  },
+  "capa 03": {
+   "tipo": "atención",
+   "pared_us": 774.50927734375,
+   "gpu_us": 773.146484375
+  },
+  "capa 04": {
+   "tipo": "GDN",
+   "pared_us": 357.41357421875,
+   "gpu_us": 354.822265625
+  },
+  "capa 05": {
+   "tipo": "GDN",
+   "pared_us": 357.9423828125,
+   "gpu_us": 355.4150390625
+  },
+  "capa 06": {
+   "tipo": "GDN",
+   "pared_us": 357.76611328125,
+   "gpu_us": 355.36572265625
+  },
+  "capa 07": {
+   "tipo": "atención",
+   "pared_us": 772.98876953125,
+   "gpu_us": 771.662109375
+  },
+  "capa 08": {
+   "tipo": "GDN",
+   "pared_us": 358.27783203125,
+   "gpu_us": 355.8330078125
+  },
+  "capa 09": {
+   "tipo": "GDN",
+   "pared_us": 356.80615234375,
+   "gpu_us": 354.19873046875
+  },
+  "capa 10": {
+   "tipo": "GDN",
+   "pared_us": 356.837890625,
+   "gpu_us": 354.5185546875
+  },
+  "capa 11": {
+   "tipo": "atención",
+   "pared_us": 773.884765625,
+   "gpu_us": 772.65234375
+  },
+  "capa 12": {
+   "tipo": "GDN",
+   "pared_us": 356.998046875,
+   "gpu_us": 354.51708984375
+  },
+  "capa 13": {
+   "tipo": "GDN",
+   "pared_us": 355.541015625,
+   "gpu_us": 352.96533203125
+  },
+  "capa 14": {
+   "tipo": "GDN",
+   "pared_us": 356.693359375,
+   "gpu_us": 354.3740234375
+  },
+  "capa 15": {
+   "tipo": "atención",
+   "pared_us": 772.92529296875,
+   "gpu_us": 771.6591796875
+  },
+  "capa 16": {
+   "tipo": "GDN",
+   "pared_us": 355.861328125,
+   "gpu_us": 353.34912109375
+  },
+  "capa 17": {
+   "tipo": "GDN",
+   "pared_us": 355.60498046875,
+   "gpu_us": 353.04443359375
+  },
+  "capa 18": {
+   "tipo": "GDN",
+   "pared_us": 358.88671875,
+   "gpu_us": 356.486328125
+  },
+  "capa 19": {
+   "tipo": "atención",
+   "pared_us": 774.31640625,
+   "gpu_us": 773.10107421875
+  },
+  "capa 20": {
+   "tipo": "GDN",
+   "pared_us": 354.50146484375,
+   "gpu_us": 352.3896484375
+  },
+  "capa 21": {
+   "tipo": "GDN",
+   "pared_us": 355.814453125,
+   "gpu_us": 353.28759765625
+  },
+  "capa 22": {
+   "tipo": "GDN",
+   "pared_us": 355.33447265625,
+   "gpu_us": 352.775390625
+  },
+  "capa 23": {
+   "tipo": "atención",
+   "pared_us": 771.5009765625,
+   "gpu_us": 770.0751953125
+  },
+  "capa 24": {
+   "tipo": "GDN",
+   "pared_us": 355.49365234375,
+   "gpu_us": 353.27099609375
+  },
+  "capa 25": {
+   "tipo": "GDN",
+   "pared_us": 355.81396484375,
+   "gpu_us": 353.23681640625
+  },
+  "capa 26": {
+   "tipo": "GDN",
+   "pared_us": 356.24560546875,
+   "gpu_us": 353.7958984375
+  },
+  "capa 27": {
+   "tipo": "atención",
+   "pared_us": 769.13330078125,
+   "gpu_us": 767.91845703125
+  },
+  "capa 28": {
+   "tipo": "GDN",
+   "pared_us": 355.35009765625,
+   "gpu_us": 352.7744140625
+  },
+  "capa 29": {
+   "tipo": "GDN",
+   "pared_us": 354.1982421875,
+   "gpu_us": 351.70068359375
+  },
+  "capa 30": {
+   "tipo": "GDN",
+   "pared_us": 354.341796875,
+   "gpu_us": 351.861328125
+  },
+  "capa 31": {
+   "tipo": "atención",
+   "pared_us": 764.98828125,
+   "gpu_us": 763.8818359375
+  },
+  "capa 32": {
+   "tipo": "GDN",
+   "pared_us": 355.97412109375,
+   "gpu_us": 353.47900390625
+  },
+  "capa 33": {
+   "tipo": "GDN",
+   "pared_us": 355.94140625,
+   "gpu_us": 353.33251953125
+  },
+  "capa 34": {
+   "tipo": "GDN",
+   "pared_us": 352.56640625,
+   "gpu_us": 350.16455078125
+  },
+  "capa 35": {
+   "tipo": "atención",
+   "pared_us": 765.14794921875,
+   "gpu_us": 763.8037109375
+  },
+  "capa 36": {
+   "tipo": "GDN",
+   "pared_us": 353.25390625,
+   "gpu_us": 350.7890625
+  },
+  "capa 37": {
+   "tipo": "GDN",
+   "pared_us": 354.05419921875,
+   "gpu_us": 351.7353515625
+  },
+  "capa 38": {
+   "tipo": "GDN",
+   "pared_us": 352.4541015625,
+   "gpu_us": 350.06884765625
+  },
+  "capa 39": {
+   "tipo": "atención",
+   "pared_us": 762.4765625,
+   "gpu_us": 761.2587890625
+  },
+  "capa 40": {
+   "tipo": "GDN",
+   "pared_us": 354.869140625,
+   "gpu_us": 352.4365234375
+  },
+  "capa 41": {
+   "tipo": "GDN",
+   "pared_us": 352.88623046875,
+   "gpu_us": 350.3564453125
+  },
+  "capa 42": {
+   "tipo": "GDN",
+   "pared_us": 352.7412109375,
+   "gpu_us": 350.4677734375
+  },
+  "capa 43": {
+   "tipo": "atención",
+   "pared_us": 762.15673828125,
+   "gpu_us": 760.94189453125
+  },
+  "capa 44": {
+   "tipo": "GDN",
+   "pared_us": 350.1015625,
+   "gpu_us": 347.732421875
+  },
+  "capa 45": {
+   "tipo": "GDN",
+   "pared_us": 352.30908203125,
+   "gpu_us": 349.71630859375
+  },
+  "capa 46": {
+   "tipo": "GDN",
+   "pared_us": 354.13330078125,
+   "gpu_us": 351.7177734375
+  },
+  "capa 47": {
+   "tipo": "atención",
+   "pared_us": 760.732421875,
+   "gpu_us": 759.45263671875
+  },
+  "capa 48": {
+   "tipo": "GDN",
+   "pared_us": 348.03759765625,
+   "gpu_us": 346.01904296875
+  },
+  "capa 49": {
+   "tipo": "GDN",
+   "pared_us": 351.49365234375,
+   "gpu_us": 348.94921875
+  },
+  "capa 50": {
+   "tipo": "GDN",
+   "pared_us": 351.23779296875,
+   "gpu_us": 348.91748046875
+  },
+  "capa 51": {
+   "tipo": "atención",
+   "pared_us": 760.34814453125,
+   "gpu_us": 759.021484375
+  },
+  "capa 52": {
+   "tipo": "GDN",
+   "pared_us": 354.58154296875,
+   "gpu_us": 352.11572265625
+  },
+  "capa 53": {
+   "tipo": "GDN",
+   "pared_us": 352.26171875,
+   "gpu_us": 349.98876953125
+  },
+  "capa 54": {
+   "tipo": "GDN",
+   "pared_us": 353.958984375,
+   "gpu_us": 351.4951171875
+  },
+  "capa 55": {
+   "tipo": "atención",
+   "pared_us": 761.62841796875,
+   "gpu_us": 760.52490234375
+  },
+  "capa 56": {
+   "tipo": "GDN",
+   "pared_us": 352.43798828125,
+   "gpu_us": 350.03564453125
+  },
+  "capa 57": {
+   "tipo": "GDN",
+   "pared_us": 354.18115234375,
+   "gpu_us": 351.65185546875
+  },
+  "capa 58": {
+   "tipo": "GDN",
+   "pared_us": 352.91748046875,
+   "gpu_us": 350.5830078125
+  },
+  "capa 59": {
+   "tipo": "atención",
+   "pared_us": 762.58740234375,
+   "gpu_us": 761.27490234375
+  },
+  "capa 60": {
+   "tipo": "GDN",
+   "pared_us": 353.14111328125,
+   "gpu_us": 350.78955078125
+  },
+  "capa 61": {
+   "tipo": "GDN",
+   "pared_us": 355.7177734375,
+   "gpu_us": 352.96337890625
+  },
+  "capa 62": {
+   "tipo": "GDN",
+   "pared_us": 354.5341796875,
+   "gpu_us": 352.2626953125
+  },
+  "capa 63": {
+   "tipo": "atención",
+   "pared_us": 765.85205078125,
+   "gpu_us": 764.55810546875
+  }
+ },
+ "kernels": {
+  "capa GDN": [
+   {
+    "kernel": "Marlin W4A8 (IMMA s8)",
+    "us": 182.98649431818194,
+    "lanz": 4.0,
+    "tipo": "int8 × int4 → s32"
+   },
+   {
+    "kernel": "sk24_ar",
+    "us": 87.9543920454545,
+    "lanz": 2.0,
+    "tipo": "fp16 (all-reduce P2P, PN152)"
+   },
+   {
+    "kernel": "gdn_arbol",
+    "us": 28.335446969696967,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor otros",
+    "us": 9.446855587121345,
+    "lanz": 4.979166666666667,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor rms_norm",
+    "us": 7.706141571969705,
+    "lanz": 1.9791666666666667,
+    "tipo": "fp16 → f32 → fp16"
+   },
+   {
+    "kernel": "_per_token_quant_int8",
+    "us": 6.995694128787917,
+    "lanz": 3.0,
+    "tipo": "fp16 → int8"
+   },
+   {
+    "kernel": "sk23_silu_had_q8",
+    "us": 5.979842329545469,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 → int8"
+   },
+   {
+    "kernel": "cuBLAS/cutlass GEMM fp16",
+    "us": 5.828696022727265,
+    "lanz": 1.0,
+    "tipo": "fp16 HMMA → f32"
+   },
+   {
+    "kernel": "arbol_conv",
+    "us": 5.490341382575751,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 → fp16 (conv, PTX)"
+   },
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 3.2380075757575253,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor marlin_scale",
+    "us": 2.924838068181724,
+    "lanz": 2.0,
+    "tipo": "f32"
+   },
+   {
+    "kernel": "torch splitKreduce_kernel",
+    "us": 2.8761903409090777,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "pn122_cinta",
+    "us": 2.545355113636348,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 (cinta, PTX)"
+   },
+   {
+    "kernel": "memcpy32_post",
+    "us": 1.4992869318181956,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_prepare_rope_positions_kernel",
+    "us": 0.09574384469696968,
+    "lanz": 0.020833333333333332,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k",
+    "us": 0.0792286931818182,
+    "lanz": 0.020833333333333332,
+    "tipo": ""
+   }
+  ],
+  "capa atención": [
+   {
+    "kernel": "sk18h_batch2",
+    "us": 321.54779545454517,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "Marlin W4A8 (IMMA s8)",
+    "us": 180.21830113636372,
+    "lanz": 4.0,
+    "tipo": "int8 × int4 → s32"
+   },
+   {
+    "kernel": "sk24_ar",
+    "us": 87.44945596590922,
+    "lanz": 2.0,
+    "tipo": "fp16 (all-reduce P2P, PN152)"
+   },
+   {
+    "kernel": "sk18h_salida",
+    "us": 85.83614346590907,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "sk18h_union4",
+    "us": 51.9191022727272,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor rms_norm",
+    "us": 7.8697727272727285,
+    "lanz": 2.0,
+    "tipo": "fp16 → f32 → fp16"
+   },
+   {
+    "kernel": "_per_token_quant_int8",
+    "us": 6.963507102272615,
+    "lanz": 3.0,
+    "tipo": "fp16 → int8"
+   },
+   {
+    "kernel": "sk23_silu_had_q8",
+    "us": 5.968967329545456,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 → int8"
+   },
+   {
+    "kernel": "sk18h_escribir2",
+    "us": 5.224751420454562,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor marlin_scale",
+    "us": 4.45750000000004,
+    "lanz": 3.0,
+    "tipo": "f32"
+   },
+   {
+    "kernel": "sk18h_prep2",
+    "us": 4.175829545454551,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_fused_qk_rmsnorm_rope_gate_kernel",
+    "us": 3.540653409090898,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor otros",
+    "us": 2.3963579545454614,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "lm_head + gather": [
+   {
+    "kernel": "Marlin W4A16 (HMMA f16)",
+    "us": 1053.034227272727,
+    "lanz": 1.0,
+    "tipo": "fp16 × int4 → f32"
+   },
+   {
+    "kernel": "NCCL AllGather",
+    "us": 856.8432499999998,
+    "lanz": 1.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "memcpy32_post",
+    "us": 11.344977272727274,
+    "lanz": 6.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor rms_norm",
+    "us": 3.9448636363636354,
+    "lanz": 1.0,
+    "tipo": "fp16 → f32 → fp16"
+   },
+   {
+    "kernel": "vectorized_gather_kernel",
+    "us": 3.9047500000000017,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "verificación": [
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 54.88815909090911,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_gumbel_sample_kernel",
+    "us": 31.531295454545454,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k",
+    "us": 12.769590909090903,
+    "lanz": 3.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch index_elementwise_kernel",
+    "us": 11.291250000000007,
+    "lanz": 3.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch vectorized_elementwise_kernel",
+    "us": 7.543522727272725,
+    "lanz": 5.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch reduce_kernel",
+    "us": 7.135431818181821,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k_compactar_v2",
+    "us": 6.716454545454545,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_get_num_sampled_and_rejected_kernel",
+    "us": 6.5440000000000005,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "postprocess_mamba_fused_kernel",
+    "us": 6.448181818181817,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_post_update_kernel",
+    "us": 6.048795454545455,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "CatArrayBatchedCopy_vectorized",
+    "us": 4.235681818181818,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch _scatter_gather_elementwise_kernel",
+    "us": 2.9164545454545463,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k_materializar",
+    "us": 2.012409090909091,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_scatter_num_accepted_kernel",
+    "us": 1.6444318181818183,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch elementwise_kernel_with_index",
+    "us": 1.3527045454545454,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "borrador: capas": [
+   {
+    "kernel": "kernel_unified_attention",
+    "us": 1157.6489545454547,
+    "lanz": 5.0,
+    "tipo": "fp16 HMMA (Triton)"
+   },
+   {
+    "kernel": "Marlin W4A8 (IMMA s8)",
+    "us": 912.2482954545457,
+    "lanz": 21.0,
+    "tipo": "int8 × int4 → s32"
+   },
+   {
+    "kernel": "sk24_ar",
+    "us": 447.8067500000005,
+    "lanz": 10.0,
+    "tipo": "fp16 (all-reduce P2P, PN152)"
+   },
+   {
+    "kernel": "cuBLAS/cutlass GEMM fp16",
+    "us": 356.0096136363639,
+    "lanz": 13.0,
+    "tipo": "fp16 HMMA → f32"
+   },
+   {
+    "kernel": "NCCL AllReduce",
+    "us": 65.46497727272727,
+    "lanz": 1.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "triton inductor rms_norm",
+    "us": 58.76286363636371,
+    "lanz": 11.0,
+    "tipo": "fp16 → f32 → fp16"
+   },
+   {
+    "kernel": "_per_token_quant_int8",
+    "us": 56.57584090909077,
+    "lanz": 21.0,
+    "tipo": "fp16 → int8"
+   },
+   {
+    "kernel": "triton inductor otros",
+    "us": 43.247363636363644,
+    "lanz": 15.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor marlin_scale",
+    "us": 29.070409090909223,
+    "lanz": 20.0,
+    "tipo": "f32"
+   },
+   {
+    "kernel": "_reshape_cache_per_token_head",
+    "us": 26.542795454545445,
+    "lanz": 10.0,
+    "tipo": "fp16 → int8"
+   },
+   {
+    "kernel": "torch splitKreduce_kernel",
+    "us": 26.082931818181862,
+    "lanz": 11.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "sk_fwht128_f16",
+    "us": 22.91100000000003,
+    "lanz": 11.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "vllm::act_and_mul_kernel",
+    "us": 22.863749999999985,
+    "lanz": 5.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 12.81102272727271,
+    "lanz": 5.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_prepare_dflash_inputs_kernel",
+    "us": 10.80011363636364,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vllm::rms_norm_kernel",
+    "us": 6.9209090909090945,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch unrolled_elementwise_kernel",
+    "us": 3.3317272727272735,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vllm::vocab_embedding::vocab_parallel_embedding_kernel",
+    "us": 2.9730909090909097,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vllm::rotary_embedding_kernel",
+    "us": 2.3112499999999994,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vectorized_gather_kernel",
+    "us": 2.0283409090909092,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch vectorized_elementwise_kernel",
+    "us": 1.8203636363636362,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "borrador: lm_head + top-k": [
+   {
+    "kernel": "Marlin W4A16 (HMMA f16)",
+    "us": 728.8578181818182,
+    "lanz": 1.0,
+    "tipo": "fp16 × int4 → f32"
+   },
+   {
+    "kernel": "flashinfer::sampling::RadixTopKKernel_Unified",
+    "us": 85.35404545454547,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "NCCL AllGather",
+    "us": 27.183113636363636,
+    "lanz": 2.0,
+    "tipo": "fp16"
+   },
+   {
+    "kernel": "flashinfer::sampling::StableSortTopKByValueKernel",
+    "us": 7.499068181818183,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch unrolled_elementwise_kernel",
+    "us": 5.819704545454544,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 4.584068181818183,
+    "lanz": 2.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch vectorized_elementwise_kernel",
+    "us": 1.6422272727272729,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ],
+  "árbol + preparar paso": [
+   {
+    "kernel": "_k",
+    "us": 28.4869090909091,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch index_elementwise_kernel",
+    "us": 25.660636363636375,
+    "lanz": 8.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "cuBLAS/cutlass GEMM fp16",
+    "us": 14.79677272727273,
+    "lanz": 2.0,
+    "tipo": "fp16 HMMA → f32"
+   },
+   {
+    "kernel": "_k_meta_spec",
+    "us": 14.283136363636375,
+    "lanz": 6.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch unrolled_elementwise_kernel",
+    "us": 11.497636363636367,
+    "lanz": 5.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "precopy_mamba_align_fused_kernel",
+    "us": 6.480818181818182,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch elementwise_kernel",
+    "us": 6.290159090909089,
+    "lanz": 3.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch vectorized_elementwise_kernel",
+    "us": 6.197886363636361,
+    "lanz": 4.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "triton inductor otros",
+    "us": 5.15590909090909,
+    "lanz": 3.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_gather_block_tables_kernel",
+    "us": 5.115772727272725,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_combine_sampled_and_draft_tokens_kernel",
+    "us": 4.36225,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch _scatter_gather_elementwise_kernel",
+    "us": 3.581136363636365,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_compute_slot_mappings_kernel",
+    "us": 3.5352954545454547,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "tensor_kernel_scan_innermost_dim",
+    "us": 2.5069090909090908,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "preprocess_mamba_align_fused_kernel",
+    "us": 2.4320681818181833,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "torch splitKreduce_kernel",
+    "us": 2.218295454545454,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_k_materializar",
+    "us": 2.0923636363636358,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_prepare_pos_seq_lens_kernel",
+    "us": 1.8371818181818176,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "vectorized_gather_kernel",
+    "us": 1.8312727272727265,
+    "lanz": 1.0,
+    "tipo": ""
+   },
+   {
+    "kernel": "_expand_idx_mapping_kernel",
+    "us": 1.5476136363636364,
+    "lanz": 1.0,
+    "tipo": ""
+   }
+  ]
+ }
+}
