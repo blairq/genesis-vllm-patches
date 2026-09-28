@@ -17,8 +17,7 @@
 #     CALIB    la calibracion [./calib_256x4096.npy, la EXACTA de idiotSavant, viene con este repo].
 #              CALIB=desde-hf la arma desde el dataset publico (ver calibracion.py).
 #     TRABAJO  cache de trabajo [./trabajo]      SALIDA  el checkpoint [./qwen3.8_27b_idiotSavant_sm_86]
-#     VERSION  2 (por omision: o_proj/out_proj con Hadamard por cabeza, in_proj_a/b W4; DECISIONES D2)
-#              o 1 (el checkpoint v1, exacto)
+#     ARMADO   actual (por omision: con la actualizacion del 28-09, DECISIONES D2) o 2509 (el del 25-09, exacto)
 #  Codigos: 0 ok, 1 error, 2 faltan recursos o el dry-run encontro un problema.
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -58,12 +57,12 @@ log "3. calibracion: $CALIB"
 
 # 4. dry-run: valida BF16, calibracion, recursos, matematica y dos capas enteras en memoria
 log "4. dry-run"
-if ! bash ./correr.sh idiotsavant.py todo --dry-run --version "${VERSION:-2}" --bf16 "$BF16" --calib "$CALIB" --trabajo "$TRABAJO" --salida "$SALIDA"; then
+if ! bash ./correr.sh idiotsavant.py todo --dry-run --armado "${ARMADO:-actual}" --bf16 "$BF16" --calib "$CALIB" --trabajo "$TRABAJO" --salida "$SALIDA"; then
   log "el dry-run encontro problemas: ver las lineas FALLA de arriba"; exit 2
 fi
 [ $SOLO_VALIDAR = 1 ] && { log "listo para correr (sin --dry-run)"; exit 0; }
 
 # 5. reconstruccion (calibrar || cuantizar -> armar), retomable
 log "5. reconstruyendo -> $SALIDA  (avance: bash ./correr.sh idiotsavant.py estado --trabajo $TRABAJO --salida $SALIDA)"
-bash ./correr.sh idiotsavant.py todo --version "${VERSION:-2}" --bf16 "$BF16" --calib "$CALIB" --trabajo "$TRABAJO" --salida "$SALIDA"
+bash ./correr.sh idiotsavant.py todo --armado "${ARMADO:-actual}" --bf16 "$BF16" --calib "$CALIB" --trabajo "$TRABAJO" --salida "$SALIDA"
 log "LISTO: $SALIDA  (para servirlo hace falta la Hadamard antes de down_proj: ver README)"

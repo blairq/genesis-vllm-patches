@@ -4,8 +4,8 @@ R=/home/usuario/Proyectos/genesis-vllm-patches; M=$R/tests/bench/medicion
 C="-f $R/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml -f $R/compose/ov-aislado.yml"
 cd $R/compose
 for brazo in ${BRAZOS:-v1 v2 v1b v2b}; do
-  case $brazo in v2*) E="IDIOTSAVANT_MODELO=qwen3.8_27b_idiotSavant_sm_86_v2 GENESIS_ENABLE_PN155_BA_EN_QKVZ=1";;
-                 *) E="IDIOTSAVANT_MODELO=qwen3.8_27b_idiotSavant_sm_86 GENESIS_ENABLE_PN155_BA_EN_QKVZ=0";; esac
+  case $brazo in v2*) E="IDIOTSAVANT_MODELO=qwen3.8_27b_idiotSavant_sm_86 GENESIS_ENABLE_PN155_BA_EN_QKVZ=1";;
+                 *) E="IDIOTSAVANT_MODELO=qwen3.8_27b_idiotSavant_sm_86_2509 GENESIS_ENABLE_PN155_BA_EN_QKVZ=0";; esac
   docker rm -f genesis-27b-pruebas >/dev/null 2>&1
   docker run --rm -v /home/usuario/Proyectos/kv-offload:/k alpine sh -c 'rm -rf /k/*'
   env $E docker compose $C up -d --force-recreate >/dev/null 2>&1

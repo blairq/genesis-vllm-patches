@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """PN155 — in_proj_b / in_proj_a (compuertas del GDN) dentro del Marlin de in_proj_qkvz.
 
-En idiotSavant v1 las compuertas iban en fp16: cada capa GDN corria un cutlass fp16 + split-K (~7 us) para
-48 salidas. En el v2 van en W4 como el resto, pero Marlin no puede con ellas solas: con TP=2 son 24 filas
+Hasta el 25-09 las compuertas de idiotSavant iban en fp16: cada capa GDN corria un cutlass fp16 + split-K (~7 us) para
+48 salidas. Desde el 28-09 van en W4 como el resto, pero Marlin no puede con ellas solas: con TP=2 son 24 filas
 por rango (Marlin pide N >= 64). Por eso se suman a in_proj_qkvz como un quinto trozo:
 
     por rango: [q | k | v | z | b (24) + relleno (40) | a (24) + relleno (40)]  = 8192 + 128 = 65 x 128
@@ -56,7 +56,7 @@ def preparar(gdn) -> None:
         elif nombre == "weight_scale":
             p.data[base:base + RELLENO_POR_RANGO].fill_(1.0)
         elif nombre == "weight":
-            raise RuntimeError("[PN155] in_proj_qkvz no esta cuantizada: este parche es para idiotSavant v2")
+            raise RuntimeError("[PN155] in_proj_qkvz no esta cuantizada: este parche es para el idiotSavant actualizado el 28-09")
         cargar0 = p.weight_loader
 
         def cargar(param, w, sid=None, _c0=cargar0, _n=nombre):

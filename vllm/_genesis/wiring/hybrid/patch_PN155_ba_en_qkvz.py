@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PN155 — in_proj_b/a del GDN (W4 en idiotSavant v2) dentro del Marlin de in_proj_qkvz; ver
+"""PN155 — in_proj_b/a del GDN (W4 en idiotSavant desde el 28-09) dentro del Marlin de in_proj_qkvz; ver
 ``vllm._genesis.gdn_ba_qkvz``.
 """
 from __future__ import annotations

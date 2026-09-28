@@ -280,22 +280,22 @@ Detalle de `borrador: capas`:
 - PN151 vuelve al build original del GDN (~150 µs de huecos por paso).
 - Los huecos lanzados desde Python del prefill GDN de FLA (`chunk_*`, `_forward_core`).
 
-## 3d. Pasos 5, 6 y 8 del plan (noche del 28-09): idiotSavant v2 y la atención de decode
+## 3d. Pasos 5, 6 y 8 del plan (noche del 28-09): idiotSavant actualizado y la atención de decode
 
-**Capas (idiotSavant v2):** `models-cache/qwen3.8_27b_idiotSavant_sm_86_v2`, ahora el modelo por omisión del compose.
+**Capas (actualización del modelo, no una versión aparte):** `models-cache/qwen3.8_27b_idiotSavant_sm_86` tiene ahora los pesos nuevos; el armado del 25-09 quedó de respaldo en `..._sm_86_2509`.
 - **o_proj:** R·W·H₂₅₆, con Hadamard de una cabeza sobre la entrada. **out_proj:** R·W·H₁₂₈. Las dos con Hessiana Hc·H·Hc.
 - **in_proj_a/b:** W4 con GPTQ sobre la Hessiana rotada de attn_in (antes BF16).
-- **Cómo se armó:** `entrenamiento/idiotsavant/idiotsavant.py realinear`, que pasa de v1 a v2 sin recalibrar, a ~2 s por capa. Usa las Hessianas de `cuant-cache/A` con H_n = diag(1/g)·H_x·diag(1/g); g no tiene ceros en attn_in. La corrida es `realinear_v2.sh`.
-- **Reproducible:** `idiotsavant.py --version 2` es el default y produce la v2 desde cero; `--version 1` reproduce exacto la v1. Dry-run OK con las dos.
-- **HF:** subida la carpeta `reproducir/` (commit dfed4a5). Los pesos publicados siguen siendo v1 y el README lo aclara.
+- **Cómo se armó:** `entrenamiento/idiotsavant/idiotsavant.py realinear`, que pasa del armado del 25-09 al actual sin recalibrar, a ~2 s por capa. Usa las Hessianas de `cuant-cache/A` con H_n = diag(1/g)·H_x·diag(1/g); g no tiene ceros en attn_in. La corrida es `realinear_2809.sh`.
+- **Reproducible:** `idiotsavant.py` produce el armado actual desde cero; `--armado 2509` (o `ARMADO=2509` en `reconstruir.sh`) reproduce exacto el del 25-09. Dry-run OK con los dos.
+- **HF:** el repo es "work in progress": se actualiza el mismo modelo. Están subidos los scripts de `reproducir/` (commits dfed4a5 y 9bc1502); los pesos nuevos y la ficha actualizada están listos en el staging (`/home/usuario/Proyectos/hf/qwen3.8_27b_idiotSavant_sm_86`) y no se subieron: se sirven con PN154/PN155, que todavía no están en GitHub (35 commits sin push). Decisión del usuario.
 
 **Calidad (KL en respuestas, 48 ventanas, servido):**
 
 | | KL | top-1 |
 |---|---|---|
-| v1 | 0,0193 | 0,9559 |
-| v2, Hadamard en torch | 0,0176 | — |
-| v2, fusionado | 0,0178 | 0,9563 |
+| armado del 25-09 | 0,0193 | 0,9559 |
+| 28-09, Hadamard en torch | 0,0176 | — |
+| 28-09, fusionado | 0,0178 | 0,9563 |
 
 **Código:**
 - **PN154** (`had_salidas.py` + SK-25 `sk25_cabeza_had_q8.cu`):
@@ -311,7 +311,7 @@ Detalle de `borrador: capas`:
 - **salida:** la división u64 por elemento se reemplazó por recíproco double + corrección ±1. 18 → 12 µs (1 pedido) y 86 → 10 µs (4 pedidos) por capa.
 - **union4:** grupos adaptativos para ~2400 bloques (`GENESIS_PN131_UNION_BLOQUES`). 4 pedidos: 55 → 36 µs.
 
-**Paso medido contra la base del día** (v1, batch2 de 4 warps, `is27_v1b` → `is27_v2u`):
+**Paso medido contra la base del día** (armado del 25-09, batch2 de 4 warps, `is27_v1b` → `is27_v2u`):
 
 | | 1 pedido | 4 pedidos |
 |---|---|---|
@@ -323,17 +323,22 @@ Detalle de `borrador: capas`:
 
 | | tok/s | tok/paso |
 |---|---|---|
-| v1 | 240 | 4,54 |
-| v2 | 239 | 4,41 |
+| 25-09 | 240 | 4,54 |
+| 28-09 | 239 | 4,41 |
 
 Con la carga REAL (`ab_v2_agente.sh`: 40 pedidos de agente con tools, perfil coder, 4 en paralelo, 2 arranques por brazo) la aceptación es la misma:
 
 | | aceptación (2 arranques) | media |
 |---|---|---|
-| v1 | 5,553 / 5,538 | 5,546 |
-| v2 | 5,504 / 5,602 | 5,553 |
+| 25-09 | 5,553 / 5,538 | 5,546 |
+| 28-09 | 5,504 / 5,602 | 5,553 |
 
-La baja del banco greedy de 8 textos era de esos textos. Reajustar el borrador contra la v2 (`dflash2.sh`: ~8 h de captura, ~48 GB) queda opcional.
+La baja del banco greedy de 8 textos era de esos textos. Reajustar el borrador contra el modelo actualizado (`dflash2.sh`: ~8 h de captura, ~48 GB) queda opcional.
+
+**Otros hallazgos del 28-09:**
+- **PN90 no se aplicaba en vLLM 0.29** (anclajes viejos + un marcador que lo daba por obsoleto): toda la KV de todos los pedidos iba al disco (7,9 GB por 3 prompts de 28k) y llenó el disco dos veces. Arreglado; verificado: 16 KB. Tope del tier de disco 40 → 20 GB.
+- **Prefill** (`ab_prefill_2509.sh`, instancia aislada): el checkpoint del 25-09 y el actual dan lo mismo (~2.580 / ~2.180 tok/s a 28k / 57k), pero ~5% menos que lo medido el 25-09 (2.721 / 2.298). Viene de otro cambio del stack o de la placa: **pendiente de bisecar**.
+- **Medir siempre en la instancia aislada** (8361): en la de por omisión entra tráfico de Hermes.
 
 **Lo que queda en la atención** (diagnóstico para la próxima sesión):
 - batch2 sigue en ~44% del ancho de banda a 62k: 1 bloque de 8 warps por SM por los 254 registros (128 son los acumuladores O hi/lo), y K se lee en las dos pasadas.

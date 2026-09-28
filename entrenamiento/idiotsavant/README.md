@@ -3,7 +3,7 @@
 - **`qwen3.8_27b_idiotSavant_sm_86`**: Qwen3.8-27B (sin censura, orcarouter) en W4 con el residuo
   rotado, para servirse como W4A8 en RTX 3090 (sm_86). Tiene la mitad de error que el int4 público
   (noon), a la misma velocidad.
-  - **v2 (28-09):** además, Hadamard por cabeza en la entrada de `o_proj`/`out_proj` e `in_proj_a/b`
+  - **Actualizado el 28-09:** además, Hadamard por cabeza en la entrada de `o_proj`/`out_proj` e `in_proj_a/b`
     en W4. KL servido 0,0193 → 0,0178, y 3 kernels menos por capa. Ver
     [DECISIONES.md](DECISIONES.md) §D2.
 - **`qwen3.8_27b_idiotSavant_sm_86_dflash2`**: su borrador DFlash2.
@@ -121,24 +121,25 @@ bash correr.sh idiotsavant.py todo --bf16 BF16 --calib calib_256x4096.npy --trab
 
 Parches que hacen falta (el config lo dice en `genesis_rotacion.requiere`):
 - **PN148:** la Hadamard antes de `down_proj`.
-- **Desde la v2, PN154:** la Hadamard por cabeza en la entrada de `o_proj`/`out_proj`, fusionada en SK-25.
-- **Desde la v2, PN155:** `in_proj_a/b` dentro del Marlin de `in_proj_qkvz`.
+- **Desde el 28-09, PN154:** la Hadamard por cabeza en la entrada de `o_proj`/`out_proj`, fusionada en SK-25.
+- **Desde el 28-09, PN155:** `in_proj_a/b` dentro del Marlin de `in_proj_qkvz`.
 
 El compose es `../../compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml`, con cada ajuste explicado.
-Para la v2: `IDIOTSAVANT_MODELO=qwen3.8_27b_idiotSavant_sm_86_v2 GENESIS_ENABLE_PN155_BA_EN_QKVZ=1`.
+Para servir el armado del 25-09: `IDIOTSAVANT_MODELO=qwen3.8_27b_idiotSavant_sm_86_2509 GENESIS_ENABLE_PN155_BA_EN_QKVZ=0`.
 Al cambiar de checkpoint, vaciar el offload de KV.
 
-### 7. De una v1 a la v2 sin recalibrar
+### 7. Del armado del 25-09 al actual, sin recalibrar
 
-Si ya tenés la v1 y las Hessianas (`--conservar_hessianas`, o las de la etapa A vieja con `--h_sobre_x`):
+Si ya tenés el armado del 25-09 y las Hessianas (`--conservar_hessianas`, o las de la etapa A vieja con `--h_sobre_x`):
 
 ```bash
-bash correr.sh idiotsavant.py realinear --bf16 BF16 --modelo qwen3.8_27b_idiotSavant_sm_86 \
-     --hessianas trabajo --trabajo trabajo_v2 --salida qwen3.8_27b_idiotSavant_sm_86_v2
+bash correr.sh idiotsavant.py realinear --bf16 BF16 --modelo qwen3.8_27b_idiotSavant_sm_86_2509 \
+     --hessianas trabajo --trabajo trabajo_2809 --salida qwen3.8_27b_idiotSavant_sm_86
 ```
 
-- **Qué rehace:** solo `o_proj`, `out_proj`, `in_proj_a` e `in_proj_b`, ~2 s por capa. Lo demás son enlaces duros a la v1.
-- **La corrida que armó la v2:** `realinear_v2.sh`, en la imagen de vLLM.
+- **Qué rehace:** solo `o_proj`, `out_proj`, `in_proj_a` e `in_proj_b`, ~2 s por capa. Lo demás son enlaces duros al armado anterior.
+- **La corrida que armó el modelo actual:** `realinear_2809.sh`, en la imagen de vLLM.
+- **Armado del 25-09 exacto:** `ARMADO=2509 bash reconstruir.sh` (o `--armado 2509`).
 
 ## Borrador DFlash2 (`dflash2.sh`)
 

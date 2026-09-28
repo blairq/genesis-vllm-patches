@@ -145,13 +145,13 @@ el checkpoint **servible** en torch; la simulación en la base original no ve es
 
 Top-1 servido: 0,956 contra 0,938 de noon. Prefill y decode, en paridad con el modelo sin rotar.
 
-## D2. v2 (28-09): las lineales que escriben al residuo y las compuertas del GDN
+## D2. Actualización del 28-09: las lineales que escriben al residuo y las compuertas del GDN
 
-La v1 dejaba tres cosas afuera de la rotación: la entrada de `o_proj` (atención) y de `out_proj` (GDN),
+El armado del 25-09 dejaba tres cosas afuera de la rotación: la entrada de `o_proj` (atención) y de `out_proj` (GDN),
 que no leen el residuo, y las compuertas `in_proj_a/b` del GDN, que quedaban en BF16. Las tres costaban
 velocidad en SM86 y dos de ellas, calidad:
 
-| | v1 | v2 |
+| | 25-09 | 28-09 |
 |---|---|---|
 | Entrada de o_proj / out_proj | int8 por token sin rotar (cresta 12–21, error A8 2–3%) | Hadamard de una cabeza (256 / 128) en línea: `A = R W Hc`, Hessiana `Hc H Hc` |
 | Kernels entre la atención / el GDN y la lineal | compuerta o norma, `per_token_quant_int8`, escala × global (3–4 por capa) | SK-25: compuerta o norma + Hadamard + int8 en uno (~2,8 µs) |
@@ -163,7 +163,7 @@ velocidad en SM86 y dos de ellas, calidad:
 - Es el mismo patrón que SK-23 para `down_proj`.
 
 **D2.2. in_proj_a/b en W4.**
-- En la v1 se dejaron en BF16 por precaución, porque el GDN es sensible a sus compuertas. No se había medido.
+- El 25-09 se dejaron en BF16 por precaución, porque el GDN es sensible a sus compuertas. No se había medido.
 - Cuantizadas con GPTQ sobre la misma Hessiana rotada de `in_proj_qkv`, el error de pesos queda como el del resto (12–15%).
 - El modelo entero no empeora: ver D2.3.
 - **Marlin no las acepta solas** (24 filas por rango, el mínimo es 64). vLLM las suma a `in_proj_qkvz` como dos trozos de 64 filas por rango con relleno cero (PN155), y el forward las separa.
@@ -173,22 +173,22 @@ con todo el stack):
 
 | | KL respuesta | top-1 |
 |---|---|---|
-| idiotSavant v1 | 0,0193 | 0,9559 |
-| v2, Hadamard en torch (validación) | 0,0176 | 0,9556 |
-| **v2, SK-25 fusionado (lo que se sirve)** | **0,0178** | **0,9563** |
+| armado del 25-09 | 0,0193 | 0,9559 |
+| 28-09, Hadamard en torch (validación) | 0,0176 | 0,9556 |
+| **28-09, SK-25 fusionado (lo que se sirve)** | **0,0178** | **0,9563** |
 
 Baja 8–9%: es el error de A8 de o_proj/out_proj que desaparece, más que lo que suman las compuertas
 en W4.
 
 Velocidad, con todo el stack de la noche (SK-18h de 8 warps, etc.):
-- **Paso de decode de la v2 contra la v1:** −2,1% con 1 pedido; con 4 pedidos, dentro del ruido.
-- **El borrador DFlash2 no se reajustó** y no hizo falta. Con 40 pedidos de agente reales (tools, perfil coder, 4 en paralelo, 2 arranques por brazo), la aceptación da 5,546 (v1) contra 5,553 (v2).
+- **Paso de decode, 28-09 contra 25-09:** −2,1% con 1 pedido; con 4 pedidos, dentro del ruido.
+- **El borrador DFlash2 no se reajustó** y no hizo falta. Con 40 pedidos de agente reales (tools, perfil coder, 4 en paralelo, 2 arranques por brazo), la aceptación da 5,546 (25-09) contra 5,553 (28-09).
 
 **D2.4. Cómo se arma.**
-- Desde cero: `idiotsavant.py todo` ya produce la v2 (`HAD_ENTRADA`, y `in_proj_a/b` en `LINEALES`).
-- Desde una v1, sin recalibrar: `idiotsavant.py realinear` rehace solo esas lineales con Hessianas guardadas. ~2 s por capa.
+- Desde cero: `idiotsavant.py todo` produce el armado actual (`HAD_ENTRADA`, y `in_proj_a/b` en `LINEALES`); `--armado 2509` reproduce el del 25-09.
+- Desde el armado del 25-09, sin recalibrar: `idiotsavant.py realinear` rehace solo esas lineales con Hessianas guardadas. ~2 s por capa.
   - Si las Hessianas son las de `--conservar_hessianas` o las de la etapa A vieja, esta última guardaba attn_in sobre x = g·n: se pasa a n con `H_n = diag(1/g) H_x diag(1/g)`. Es exacto porque g no tiene ceros en ninguna `input_layernorm`.
-  - `realinear_v2.sh` es la corrida que armó el checkpoint publicado.
+  - `realinear_2809.sh` es la corrida que armó el checkpoint actual.
 
 ## E. El borrador DFlash2 (`dflash2.sh`)
 

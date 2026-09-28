@@ -7,10 +7,10 @@
 #            + un set de calibracion de tokens [N, L] int32 (.npy)
 #  Salida  : checkpoint compressed-tensors (pack-quantized, W4 simetrico g128) que vLLM carga tal
 #            cual, CON EL RESIDUO ROTADO. Se sirve como W4A8 (VLLM_MARLIN_INPUT_DTYPE=int8) y
-#            necesita GENESIS_ENABLE_PN148_ROT_DOWN=1 (Hadamard antes de down_proj) y, desde la v2,
+#            necesita GENESIS_ENABLE_PN148_ROT_DOWN=1 (Hadamard antes de down_proj) y, desde el 28-09,
 #            GENESIS_ENABLE_PN154_HAD_SALIDAS=1 y GENESIS_ENABLE_PN155_BA_EN_QKVZ=1 (config.json ->
 #            genesis_rotacion.requiere lo dice).
-#  v1 -> v2 sin recalibrar:  idiotsavant.py realinear --modelo V1 --hessianas DIR ... (ver README)
+#  del armado del 25-09 al actual sin recalibrar:  idiotsavant.py realinear --modelo DIR_2509 --hessianas DIR ... (README)
 #
 #  Uso (ver README.md; todo corre en el virtualenv local del proyecto, preparado con preparar.sh):
 #    bash correr.sh idiotsavant.py todo --dry-run  --bf16 BF16 --calib CALIB --trabajo DIR --salida DIR
@@ -86,13 +86,13 @@
 #      MLP se multiplicaba x7 y el KL servido saltaba a 0,17. Con H_n completa GPTQ lo compensa.)
 #
 #   * Escriben al residuo: self_attn.o_proj / linear_attn.out_proj.
-#         se cuantiza  A = R W Hc              con H~ = Hc H Hc        (v2, 28-09)
+#         se cuantiza  A = R W Hc              con H~ = Hc H Hc        (desde el 28-09)
 #     -> su SALIDA tiene que quedar en la base rotada. Hc = Hadamard de UNA cabeza (256 en la
 #        atencion, 128 en el GDN) sobre la entrada, aplicada EN LINEA en vLLM (PN154) por el kernel
 #        que produce esa entrada (SK-25: la compuerta sigmoide de la atencion / la RMSNormGated del
 #        GDN, + Hadamard + int8 por token, todo junto). Por cabeza porque asi cada rango de TP rota
-#        lo suyo y el kernel tiene la cabeza entera en registros. En la v1 no se tocaba (cresta
-#        12-21, A8 1,2-3%); la v2 baja el KL servido 0,0193 -> 0,0176 y ahorra 3 kernels por capa.
+#        lo suyo y el kernel tiene la cabeza entera en registros. Hasta el 25-09 no se tocaba (cresta
+#        12-21, A8 1,2-3%); con esto el KL servido baja 0,0193 -> 0,0178 y hay 3 kernels menos por capa.
 #
 #   * down_proj: escribe al residuo Y ademas su entrada tiene cresta ~27.
 #         se cuantiza  A = R W Hd              con H~ = Hd H Hd
@@ -102,10 +102,10 @@
 #     Sin esta Hadamard el KL W4A8 sube 15% (0,0116 -> 0,0134).
 #
 #   * linear_attn.in_proj_a / in_proj_b (compuertas del GDN): leen el residuo como in_proj_qkv, asi
-#     que son "entrada" (W diag(g) Rt) y desde la v2 van en W4 como todo: en vLLM se suman como un
+#     que son "entrada" (W diag(g) Rt) y desde el 28-09 van en W4 como todo: en vLLM se suman como un
 #     trozo mas al Marlin de in_proj_qkvz (PN155; solas no entran: 24 filas por rango con TP=2) y se
-#     va el cutlass fp16 + split-K de cada capa GDN. En la v1 quedaban en BF16 por precaucion; medido
-#     en la v2, el KL servido BAJA igual (ver DECISIONES.md, seccion D2).
+#     va el cutlass fp16 + split-K de cada capa GDN. Hasta el 25-09 quedaban en BF16 por precaucion;
+#     medido, el KL servido no empeora (ver DECISIONES.md, seccion D2).
 #
 #   * Todo lo demas de la capa (conv1d, A_log, dt_bias, normas internas q/k y la gated norm del
 #     GDN) opera DENTRO de la cabeza, despues de la proyeccion: no ve la base del residuo.
@@ -163,7 +163,7 @@ G = 128                  # grupo de las escalas int4
 SEMILLA = 20260924       # signos de la rotacion (los mismos que el borrador y PN149)
 BLOQUE = 1024            # Hadamard del residuo
 BLOQUE_DOWN = 512        # Hadamard en linea antes de down_proj (PN148)
-# Hadamard en linea en la ENTRADA de las lineales que escriben al residuo (v2, 28-09): una por cabeza,
+# Hadamard en linea en la ENTRADA de las lineales que escriben al residuo (actualizacion del 28-09): una por cabeza,
 # asi cada rango de TP rota sus cabezas sin comunicacion y el kernel que produce la entrada (la salida
 # de la atencion / la norma con compuerta del GDN) la aplica gratis junto con el int8 (PN154).
 HAD_ENTRADA = {"self_attn.o_proj": 256,          # head_dim de la atencion
@@ -199,27 +199,27 @@ LINEALES = {
                        "mlp.down_proj": ("mlp_down", "bajada")},
     "linear_attention": {"linear_attn.in_proj_qkv": ("attn_in", "entrada"),
                          "linear_attn.in_proj_z": ("attn_in", "entrada"),
-                         "linear_attn.in_proj_b": ("attn_in", "entrada"),     # v2: W4, van dentro del
+                         "linear_attn.in_proj_b": ("attn_in", "entrada"),     # 28-09: W4, van dentro del
                          "linear_attn.in_proj_a": ("attn_in", "entrada"),     # Marlin de in_proj_qkvz (PN155)
                          "linear_attn.out_proj": ("attn_out", "escribe"),
                          "mlp.gate_proj": ("mlp_in", "entrada"), "mlp.up_proj": ("mlp_in", "entrada"),
                          "mlp.down_proj": ("mlp_down", "bajada")},
 }
-# BF16 que leen el residuo: se pliegan y rotan pero no se cuantizan. Hasta la v1 eran las compuertas
-# del GDN (in_proj_a/b); en la v2 van en W4 (ver DECISIONES.md) y no queda ninguna.
+# BF16 que leen el residuo: se pliegan y rotan pero no se cuantizan. Hasta el 25-09 eran las compuertas
+# del GDN (in_proj_a/b); desde el 28-09 van en W4 (ver DECISIONES.md) y no queda ninguna.
 BF16_ENTRADA = ()
 NORMA_DE = {"attn_in": "input_layernorm", "mlp_in": "post_attention_layernorm"}
 
 
-def usar_version(v: int) -> None:
-    """--version 1 reproduce EXACTO el checkpoint v1 publicado (o_proj/out_proj sin Hadamard en la
-    entrada, in_proj_a/b en BF16); 2 (por omision) es la v2 (DECISIONES.md, D2)."""
+def usar_armado(armado: str) -> None:
+    """--armado 2509 reproduce EXACTO el armado del 25-09 (o_proj/out_proj sin Hadamard en la entrada,
+    in_proj_a/b en BF16); 'actual' (por omision) es el de hoy, actualizado el 28-09 (DECISIONES.md, D2)."""
     global BF16_ENTRADA
-    if v == 1:
+    if armado == "2509":
         HAD_ENTRADA.clear()
         for b in ("linear_attn.in_proj_b", "linear_attn.in_proj_a"):
             LINEALES["linear_attention"].pop(b, None)
-        BF16_ENTRADA = ("linear_attn.in_proj_b", "linear_attn.in_proj_a")   # orden del ignore de la v1
+        BF16_ENTRADA = ("linear_attn.in_proj_b", "linear_attn.in_proj_a")   # orden del ignore del 25-09
 
 
 # ─── lectura perezosa del BF16 (55 GB en 32 GB de RAM: tensor por tensor) ────────────────────────
@@ -731,11 +731,11 @@ def cuantizar(a):
 
 def config_rotacion(g_final):
     """Lo que el servidor necesita saber del checkpoint (vLLM + parches Genesis)."""
-    if not HAD_ENTRADA:                               # --version 1: el config de siempre
+    if not HAD_ENTRADA:                               # --armado 2509: el config de entonces
         return {"semilla": SEMILLA, "bloque": BLOQUE, "bloque_down": BLOQUE_DOWN,
                 "requiere": "GENESIS_ENABLE_PN148_ROT_DOWN=1",
                 "g_final": g_final.cpu().tolist() if torch.is_tensor(g_final) else list(g_final)}
-    return {"semilla": SEMILLA, "bloque": BLOQUE, "bloque_down": BLOQUE_DOWN, "version": 2,
+    return {"semilla": SEMILLA, "bloque": BLOQUE, "bloque_down": BLOQUE_DOWN, "revision": "2026-09-28",
             "had_entrada": {k.split(".")[-1]: v for k, v in HAD_ENTRADA.items()},
             "requiere": "GENESIS_ENABLE_PN148_ROT_DOWN=1 GENESIS_ENABLE_PN154_HAD_SALIDAS=1 "
                         "GENESIS_ENABLE_PN155_BA_EN_QKVZ=1",
@@ -796,7 +796,7 @@ def armar(a):
     for i, t in enumerate(tc.layer_types):
         if t == "linear_attention":
             p_ = f"model.language_model.layers.{i}.linear_attn"
-            ignore += [p_, p_ + ".norm"] + [p_ + "." + b.split(".")[-1] for b in BF16_ENTRADA]   # v2: ninguna
+            ignore += [p_, p_ + ".norm"] + [p_ + "." + b.split(".")[-1] for b in BF16_ENTRADA]   # hoy: ninguna
     ignore += ["lm_head"]
     qcfg = {"config_groups": {"group_0": {
         "targets": ["Linear"],
@@ -821,17 +821,17 @@ def armar(a):
           f"{np.median(e):.4f}", flush=True)
 
 
-# ─── etapa: realinear (v1 -> v2 sin recalibrar) ─────────────────────────────────────────────────────
+# ─── etapa: realinear (25-09 -> actual, sin recalibrar) ───────────────────────────────────────────────
 REALINEAR = {"full_attention": ("self_attn.o_proj",),
              "linear_attention": ("linear_attn.out_proj", "linear_attn.in_proj_b", "linear_attn.in_proj_a")}
 
 
 def realinear(a):
-    """Pasa un idiotSavant v1 (--modelo) a v2 rehaciendo SOLO lo que cambio: o_proj y out_proj con la
+    """Pasa un idiotSavant del 25-09 (--modelo) al armado actual rehaciendo SOLO lo que cambio: o_proj y out_proj con la
     Hadamard por cabeza en la entrada, e in_proj_a/b en W4. Usa Hessianas ya guardadas (--hessianas:
     capa_NN/H_attn_in.pt y H_attn_out.pt, formato de h_guardar): las de --conservar_hessianas, o las de
     la etapa A vieja (cuant-cache/A), que guardaba attn_in sobre x = g n en vez de n (--h_sobre_x).
-    El resto de cada capa se copia tal cual del v1. ~10 minutos con una GPU."""
+    El resto de cada capa se copia tal cual del armado del 25-09. ~10 minutos con una GPU."""
     dev = a.dispositivo
     torch.set_grad_enabled(False)
     m, tc, cfg0 = modelo_hf(a.bf16)
@@ -841,7 +841,7 @@ def realinear(a):
     Rt = Rt_de(D, dev)
     R = Rt.T.contiguous()
     informe = json.load(open(os.path.join(a.modelo, "informe_idiotsavant.json")))
-    print(f"[realinear] {a.modelo} -> {a.salida}, {n} capas", flush=True)
+    print(f"[realinear] {a.modelo} -> {a.salida}, {n} capas", flush=True)   # 25-09 -> actual
     for i in range(n):
         dirc = dir_capa(a, i)
         dst = os.path.join(a.salida, f"capa_{i:02d}.safetensors")
@@ -865,14 +865,14 @@ def realinear(a):
         tens, _, err_w, _ = cuantizar_capa(i, tipo, sd, hessiana, dev, Rt, R, solo=solo)
         with safe_open(os.path.join(a.modelo, f"capa_{i:02d}.safetensors"), "pt") as f:
             viejo = {k: f.get_tensor(k) for k in f.keys()}
-        for b in solo:                                # fuera la version v1 (bf16 o W4 sin Hadamard)
+        for b in solo:                                # fuera la version del 25-09 (bf16 o W4 sin Hadamard)
             for suf in (".weight", ".weight_packed", ".weight_scale", ".weight_shape"):
                 viejo.pop(pref + b + suf, None)
         viejo.update(tens)
         guardar_atomico({k: v.contiguous() for k, v in viejo.items()}, dst, fn=save_file)
         info = informe.get(str(i), {})
         info.setdefault("error_pesos", {}).update(err_w)
-        info["v2"] = sorted(solo)
+        info["realineadas_2809"] = sorted(solo)
         json.dump(info, open(os.path.join(dirc, "informe.json"), "w"), indent=1)
         marca(dirc, "REALINEADA")
         del sd, tens, viejo
@@ -882,7 +882,7 @@ def realinear(a):
     if n < tc.num_hidden_layers:
         print("[realinear] prueba parcial: no se arma", flush=True)
         return
-    # lo demas del v1: enlaces duros (no ocupan disco); config e indice nuevos
+    # lo demas del 25-09: enlaces duros (no ocupan disco); config e indice nuevos
     for f in os.listdir(a.modelo):
         src, dst = os.path.join(a.modelo, f), os.path.join(a.salida, f)
         if f.startswith("capa_") or f in ("config.json", "quantization_config.json", "model.safetensors.index.json",
@@ -1221,14 +1221,14 @@ def main():
     ap.add_argument("--dry-run", dest="dry_run", action="store_true",
                     help="validar todo (BF16, calibracion, recursos, matematica, dos capas en memoria) sin escribir capas")
     ap.add_argument("--json", action="store_true", help="estado: salida en JSON")
-    ap.add_argument("--version", type=int, choices=[1, 2], default=2,
-                    help="1 = el checkpoint v1 publicado (exacto); 2 = v2 (DECISIONES.md D2)")
-    ap.add_argument("--modelo", help="realinear: el idiotSavant v1 de partida")
+    ap.add_argument("--armado", choices=["actual", "2509"], default="actual",
+                    help="2509 = el armado del 25-09, exacto; actual = con la actualizacion del 28-09 (DECISIONES.md D2)")
+    ap.add_argument("--modelo", help="realinear: el idiotSavant del 25-09 de partida")
     ap.add_argument("--hessianas", help="realinear: directorio con capa_NN/H_attn_in.pt y H_attn_out.pt")
     ap.add_argument("--h_sobre_x", action="store_true",
                     help="realinear: las H_attn_in estan sobre x = g n (etapa A vieja) y no sobre n")
     a = ap.parse_args()
-    usar_version(a.version)
+    usar_armado(a.armado)
     os.makedirs(a.trabajo, exist_ok=True)
     os.makedirs(a.salida, exist_ok=True)
     if a.etapa == "estado":

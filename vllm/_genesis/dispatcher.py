@@ -1279,18 +1279,18 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "applies_to": {},
     },
     "PN154": {
-        "title": "Hadamard por cabeza en la entrada de o_proj/out_proj (idiotSavant v2)",
+        "title": "Hadamard por cabeza en la entrada de o_proj/out_proj (idiotSavant, 28-09)",
         "env_flag": "GENESIS_ENABLE_PN154_HAD_SALIDAS",
         "default_on": False,
         "category": "hybrid",
         "credit": (
-            "Genesis-original 2026-09-28. El checkpoint v2 guarda o_proj/out_proj como R W Hc (Hc Hadamard de una cabeza: 256 atencion, 128 GDN); la entrada llega x Hc. Baja el error A8 de las unicas lineales con la entrada sin rotar (cresta 12-21) y deja la Hadamard + int8 para fusionarse en el kernel anterior. Solo actua si config.json declara genesis_rotacion.had_entrada."
+            "Genesis-original 2026-09-28. El checkpoint actualizado el 28-09 guarda o_proj/out_proj como R W Hc (Hc Hadamard de una cabeza: 256 atencion, 128 GDN); la entrada llega x Hc. Baja el error A8 de las unicas lineales con la entrada sin rotar (cresta 12-21) y deja la Hadamard + int8 para fusionarse en el kernel anterior. Solo actua si config.json declara genesis_rotacion.had_entrada."
         ),
         "upstream_pr": None,
         "applies_to": {},
     },
     "PN155": {
-        "title": "in_proj_b/a del GDN dentro del Marlin de in_proj_qkvz (idiotSavant v2)",
+        "title": "in_proj_b/a del GDN dentro del Marlin de in_proj_qkvz (idiotSavant, 28-09)",
         "env_flag": "GENESIS_ENABLE_PN155_BA_EN_QKVZ",
         "default_on": False,
         "category": "hybrid",

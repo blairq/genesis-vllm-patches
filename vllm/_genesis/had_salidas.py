@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""PN154 — Hadamard por cabeza en la ENTRADA de o_proj (atencion) y out_proj (GDN), para idiotSavant v2.
+"""PN154 — Hadamard por cabeza en la ENTRADA de o_proj (atencion) y out_proj (GDN), para idiotSavant (actualizacion del 28-09).
 
-El checkpoint v2 (entrenamiento/idiotsavant/idiotsavant.py, HAD_ENTRADA) guarda esas dos lineales como
+El checkpoint actualizado (entrenamiento/idiotsavant/idiotsavant.py, HAD_ENTRADA) guarda esas dos lineales como
 A = R W Hc, con Hc la Hadamard por bloques de una cabeza (256 en la atencion, 128 en el GDN). Para que la
 cuenta de exacta, la entrada tiene que llegar multiplicada por Hc: y = (x Hc) A^T. Hc es simetrica y
 ortogonal. Por que:
@@ -13,7 +13,7 @@ ortogonal. Por que:
     en registros: ahi la Hadamard y el int8 salen gratis y desaparece el _per_token_quant de Marlin.
 
 Se prende SOLO si el checkpoint lo declara (config.json -> genesis_rotacion.had_entrada): con un checkpoint
-v1 este parche no hace nada. GENESIS_PN154_APAGAR=1 lo apaga igual (solo para depurar: con un v2 rompe).
+del 25-09 este parche no hace nada. GENESIS_PN154_APAGAR=1 lo apaga igual (solo para depurar: con el actual rompe).
 """
 from __future__ import annotations
 
