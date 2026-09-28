@@ -15,9 +15,13 @@ ker = sorted((e for e in ev if e.get("cat") in ("kernel", "gpu_memcpy", "gpu_mem
 rt = {e["args"].get("correlation"): e for e in ev if e.get("cat") in ("cuda_runtime", "cuda_driver") and "args" in e}
 py = sorted((e for e in ev if e.get("cat") == "python_function" and "dur" in e), key=lambda e: e["ts"])
 ts_py = [e["ts"] for e in py]
-ua = [e for e in ev if e.get("cat") == "user_annotation"]
+ua = sorted((e for e in ev if e.get("cat") == "user_annotation"), key=lambda e: e["ts"])
 pasos = int(sys.argv[2]) if len(sys.argv) > 2 else 20
-i0 = len(ua) // 2 - pasos // 2
+# solo decode puro (sin tokens de contexto): los ULTIMOS pasos, que son consecutivos. Con el profiler
+# corto (PROF_ITER) la ventana del medio arrastraba los chunks del prefill
+dec = [i for i, e in enumerate(ua) if "context_0(0)" in e["name"] and "generation_0(0)" not in e["name"]]
+i0 = max(dec[-1] - pasos, dec[0]) if dec else len(ua) // 2 - pasos // 2
+pasos = min(pasos, len(ua) - 1 - i0)
 t0, t1 = ua[i0]["ts"], ua[i0 + pasos]["ts"]
 
 

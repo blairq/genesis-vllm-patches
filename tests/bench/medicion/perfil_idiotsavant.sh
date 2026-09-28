@@ -119,7 +119,7 @@ guardar_avisos() {
 
 DECODE=$(echo $FASES | tr ' ' '\n' | grep -E '^decode' | tr '\n' ' ')
 if [ -n "$DECODE" ] || [ "${ORACULO:-0}" = 1 ]; then
-  arrancar /traces/${LABEL}_tmp 8 60
+  arrancar /traces/${LABEL}_tmp ${PROF_DELAY_DEC:-8} ${PROF_ITER:-60}     # con PROF_STACK=true usar ~25: la traza con pilas se come 10 GB y el cgroup (26 GB) mata al worker
   for FASE in $DECODE; do
     cargar $FASE
     mover_trazas /traces/${LABEL}_tmp $FASE

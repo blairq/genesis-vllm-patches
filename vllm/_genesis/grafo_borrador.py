@@ -34,17 +34,26 @@ _MAX_GRAFOS = 48
 _grafos: "OrderedDict[tuple, torch.cuda.CUDAGraph]" = OrderedDict()
 _vistos: dict = {}
 _pool = None
-_avisado = False
+
+
+def _uniforme(spec, n: int) -> bool:
+    """Solo se graban las formas del decode uniforme (N pedidos x (K+1)). En los pasos mixtos (prefill +
+    decode) n toma cualquier valor: grabarlos llenaba el tope con grafos que no se repiten y cada captura
+    es un cudaDeviceSynchronize (~16 ms de CPU bloqueada, visto en el perfil con pilas del 28-09)."""
+    k1 = getattr(spec, "num_speculative_steps", 0) + 1
+    return k1 > 1 and n % k1 == 0 and n // k1 <= getattr(spec, "max_num_reqs", 64)
 
 
 def _correr(clave, fn):
     """Corre ``fn`` (sin argumentos; lee y escribe solo buffers persistentes) grabado en un grafo."""
-    global _pool, _avisado
+    global _pool
     g = _grafos.get(clave)
     if g is not None:
         _grafos.move_to_end(clave)
         g.replay()
         return
+    if len(_vistos) > 4096:
+        _vistos.clear()
     n = _vistos.get(clave, 0) + 1
     _vistos[clave] = n
     if n < 2 or len(_grafos) >= _MAX_GRAFOS:
@@ -56,9 +65,7 @@ def _correr(clave, fn):
     with torch.cuda.graph(g, pool=_pool):
         fn()
     _grafos[clave] = g
-    if not _avisado:
-        _avisado = True
-        log.warning("[PN150] tramo del borrador grabado en grafo (primera clave: %s)", clave[:2])
+    log.warning("[PN150] grafo %d/%d grabado: %s n=%s", len(_grafos), _MAX_GRAFOS, clave[0], clave[1])
     g.replay()                     # la captura no ejecuta: este paso corre ahora
 
 
@@ -74,7 +81,7 @@ def combinar(spec, aux_hidden_states, last_hidden_states, n: int, dummy_run: boo
         else:
             hs = last_hidden_states
         spec.hidden_states[:n].copy_(hs[:n])
-    if not _en_grafo(dummy_run):
+    if not _en_grafo(dummy_run) or not _uniforme(spec, n):
         fn()
         return
     fuentes = tuple(aux_hidden_states) if aux_hidden_states else (last_hidden_states,)
@@ -88,7 +95,7 @@ def contexto(spec, n: int, context_slots, dummy_run: bool) -> None:
     hs, pos = spec.hidden_states[:n], spec.context_positions[:n]
     def fn():
         spec.model.precompute_and_store_context_kv(hs, pos, context_slots)
-    if not _en_grafo(dummy_run) or context_slots is None:
+    if not _en_grafo(dummy_run) or context_slots is None or not _uniforme(spec, n):
         fn()
         return
     slots = context_slots if isinstance(context_slots, (list, tuple)) else [context_slots]
