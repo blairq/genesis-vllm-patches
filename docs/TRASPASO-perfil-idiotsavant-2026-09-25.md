@@ -371,7 +371,15 @@ MISMO texto del oráculo.
 - **Historia:** memorias sk18f-streaming-entero (perfil ncu: barreras), ptx-acumulador-mma-no-leer-escribir
   (una carrera silenciosa con el reescalado), pn131-sk18-integrado-vllm (trampas de grafos).
 
-### P3 · All-reduce de decode — **−6% / −11%, costo medio**
+### P3 · All-reduce de decode — **−6% / −11%, costo medio** · HECHO: −6,1% / −9,7% (PN152 + i8)
+
+- **Resultado (27/28-09):** PN152 (SK-24, `ar_p2p.py`) escribe el parcial en la memoria de la otra placa,
+  bandera de época, doble buffer; bit a bit con NCCL: paso −4,9% / −6,4%. Encima, `sk24_ar_i8`
+  (`GENESIS_PN152_MIN_I8=1`, int8 por grupo de 64, las dos placas suman las dos partes cuantizadas en orden de
+  rango): −1,3% / −3,5% más. Calidad: el KL por prompt_logprobs no pasa por el decode, así que se midió la misma
+  cuenta en el prefill (PN120 prendido vs apagado, `tests/bench/medicion/kl_ar_int8.sh`): 0,0193 vs 0,0192 en
+  respuestas, determinista entre arranques. Pendiente: latencia base (~13 µs para 9 filas contra ~8 teóricos) y
+  el all-reduce del embedding. Lo que sigue es el diagnóstico original.
 
 - **Qué pasa:** NCCL `AllReduce_Sum_f16_RING_LL`, grilla 2, **128 por paso** más 11 del borrador:
   - 26 µs para 92 KB (9 filas) y 61 µs para 369 KB (36 filas);
