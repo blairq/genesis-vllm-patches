@@ -6185,6 +6185,23 @@ def apply_patch_PN159() -> PatchResult:
         return _skipped(name, reason)
     return _failed(name, reason)
 
+@register_patch("PN160 borrador fusionado")
+def apply_patch_PN160() -> PatchResult:
+    """PN160: lineales del borrador con SK-32."""
+    name = "PN160 borrador fusionado"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_PN160_borrador_fusion
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN160_borrador_fusion.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════

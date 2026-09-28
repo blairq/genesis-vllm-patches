@@ -1300,6 +1300,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN160": {
+        "title": "Borrador DFlash2: cuantizacion y SiluAndMul fusionados (SK-32)",
+        "env_flag": "GENESIS_ENABLE_PN160_BORRADOR_FUSION",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis-original 2026-09-28. Cada lineal W4A8 del borrador corria per_token_quant_int8 + la escala por la global (inductor) + Marlin, y delante de down_proj act_and_mul: el borrador no tenia ninguna de las fusiones del target. SK-32 hace la cuantizacion (y el SiluAndMul) en un kernel y el int8 entra directo a Marlin (rot_down._gemm_int8)."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN159": {
         "title": "Candidatos del borrador DFlash2 sobre vocabulario recortado (FR-Spec)",
         "env_flag": "GENESIS_ENABLE_PN159_VOCAB_BORRADOR",
