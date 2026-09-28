@@ -851,8 +851,8 @@
       El criterio: primero lo barato y seguro, después juntar los cambios que tocan el mismo kernel, y los de capa en
       tandas, porque cada tanda paga una validación de calidad.</p>
     <div class="cifras" id="acumulado-hoy">
-      <div><span>Paso de decode · 1 pedido · 62k</span><b>29,36 → 25,67 ms</b><span class="antes">−12,6% en el día (27-09)</span></div>
-      <div><span>Paso de decode · 4 pedidos · ~15k</span><b>40,94 → 38,31 ms</b><span class="antes">−6,4% en el día</span></div>
+      <div><span>Paso de decode · 1 pedido · 62k</span><b>29,36 → 24,42 ms</b><span class="antes">−16,9% en el día (27-09)</span></div>
+      <div><span>Paso de decode · 4 pedidos · ~15k</span><b>40,94 → 35,85 ms</b><span class="antes">−12,4% en el día</span></div>
       <div><span>GPU ociosa entre fases · 1 pedido</span><b>1.719 → 3 µs</b><span class="antes">por paso</span></div>
       <div><span>Calidad</span><b>igual</b><span class="antes">oráculo greedy y aceptación del borrador</span></div>
     </div>
@@ -872,9 +872,9 @@
           <tr><td class="n">3</td><td class="k">lm_head en W4A8 + logits sin AllGather<small>gumbel-max por rango</small></td>
             <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−1%</td><td class="n">−3%</td>
             <td class="porq">Misma región. El lm_head lee la norma final ya rotada y con 36 filas limita por cómputo en fp16. No se re-cuantiza: mismos int4, basta el KL.</td></tr>
-          <tr><td class="n">4</td><td class="k">All-reduce P2P de una pasada, int8 también en decode</td>
-            <td><span class="chip ch-lat">código</span> <span class="chip ch-cambio">capa</span></td><td class="n">−6%</td><td class="n">−11%</td>
-            <td class="porq">El mayor con 4 pedidos. Con la cresta baja el int8 del residuo es seguro, y la mitad de bytes va en el mismo kernel nuevo.</td></tr>
+          <tr class="nuevo"><td class="n">4</td><td class="k">All-reduce de decode por P2P directo<small>PN152 · SK-24</small></td>
+            <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n mejor">−4,9%</td><td class="n mejor">−6,4%</td>
+            <td class="porq">Medido, bit a bit con NCCL (mismo texto en el oráculo). Cada placa escribe su parcial en la memoria de la otra (memoria cruda por IPC), avisa con una bandera de época y suma. Doble buffer, sin barrera final, época en la GPU: va dentro de los grafos. Ideas de SiFAR (H200/NVSwitch) traducidas a PCIe 4.0 x8 con P2P. 90 KB: 36,9 → 14,8 µs. Pendiente: int8 para los mensajes de 4+ pedidos.</td></tr>
           <tr><td class="n">5</td><td class="k">Atención de decode + Hadamard en o_proj<small>la salida escribe int8 rotado</small></td>
             <td><span class="chip ch-lat">código</span> <span class="chip ch-cambio">capa</span></td><td class="n">−9%</td><td class="n">−11%</td>
             <td class="porq">sk18h_salida hay que reescribirla igual: ahí la Hadamard y el int8 salen gratis y desaparece la cuantización antes de o_proj. o_proj se re-cuantiza como W·H.</td></tr>
