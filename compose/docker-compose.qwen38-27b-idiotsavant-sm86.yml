@@ -109,7 +109,7 @@ services:
       - GENESIS_ENABLE_PN153_LOGITS_RANGO=${GENESIS_ENABLE_PN153_LOGITS_RANGO:-1}      # logits del target sin AllGather: cada rango manda maximo + ganador gumbel (+ top-k): mismo token; paso -0,5% / -1,9%
       - GENESIS_PN153_VERIFICAR=${GENESIS_PN153_VERIFICAR:-0}
       - GENESIS_ENABLE_PN154_HAD_SALIDAS=${GENESIS_ENABLE_PN154_HAD_SALIDAS:-1}  # Hadamard por cabeza en la entrada de o_proj/out_proj: solo actua si el checkpoint la declara (v2)
-      - GENESIS_ENABLE_PN155_BA_EN_QKVZ=${GENESIS_ENABLE_PN155_BA_EN_QKVZ:-1}      # in_proj_b/a (W4, v2) dentro del Marlin de in_proj_qkvz: SOLO con el checkpoint v2 (con la v1, 0)
+      - GENESIS_ENABLE_PN155_BA_EN_QKVZ=${GENESIS_ENABLE_PN155_BA_EN_QKVZ:-1}      # in_proj_b/a (W4, v2) dentro del Marlin de in_proj_qkvz (checkpoint del 28-09; con el del 25-09, 0)
       - GENESIS_SK18H_NW=${GENESIS_SK18H_NW:-8}                              # warps por bloque de SK-18h batch2: 8 = un bloque por (secuencia, cabeza), K/V una vez
       - GENESIS_PN131_UNION_BLOQUES=${GENESIS_PN131_UNION_BLOQUES:-2400}          # union4: paginas por grupo elegidas para ~2400 bloques (1 pedido CPG 16, 4 pedidos ~60); bit a bit
       - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
@@ -123,7 +123,7 @@ services:
       - GENESIS_PN114_GUARD_BLOCK_TABLE=0
       # ── offload de KV: RAM (2 GB) -> disco ──────────────────────────────────
       - GENESIS_ENABLE_PN81_KV_DISK_QUOTA=1      # tope y poda del tier de disco
-      - GENESIS_KV_DISK_MAX_GB=40                # 40 y no 64: con el disco justo, 64 lo llena
+      - GENESIS_KV_DISK_MAX_GB=${GENESIS_KV_DISK_MAX_GB:-20}                # 20 (28-09): con el respaldo del modelo quedan ~64 GB libres y 40 llenaba el disco
       - GENESIS_KV_DISK_CHECK_SECS=60
       - GENESIS_KV_DISK_ORPHAN_DAYS=3
       - GENESIS_KV_DISK_ORPHAN_CHECK_SECS=3600
@@ -246,7 +246,7 @@ services:
         exec vllm serve "$@"
       - --
     command:
-      - /root/.cache/huggingface/${IDIOTSAVANT_MODELO:-qwen3.8_27b_idiotSavant_sm_86_v2}   # v2 (28-09): KL 0,0178; la v1 es ..._sm_86 con GENESIS_ENABLE_PN155_BA_EN_QKVZ=0
+      - /root/.cache/huggingface/${IDIOTSAVANT_MODELO:-qwen3.8_27b_idiotSavant_sm_86}   # actualizado el 28-09 (KL 0,0178); el armado del 25-09 quedo en ..._sm_86_2509 (servirlo con GENESIS_ENABLE_PN155_BA_EN_QKVZ=0)
       - --served-model-name
       - qwen3.8_27b_idiotSavant_sm_86
       - qwen3.8                        # alias que usan opencode, Hermes y el healthcheck

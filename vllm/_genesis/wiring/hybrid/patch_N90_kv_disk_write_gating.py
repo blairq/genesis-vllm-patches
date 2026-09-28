@@ -247,10 +247,10 @@ TIER_COMPLETE_OLD = (
     "            # LoadStoreSpec AND to increment ref_cnt (protecting blocks from\n"
     "            # eviction during the async transfer). One prepare_read() call per\n"
     "            # secondary tier.\n"
-    "            for tier in self.secondary_tiers:\n"
-    "                job_metadata = self.create_store_job(keys, req_context)\n"
+    "            for tier_idx, tier in enumerate(self.secondary_tiers):\n"
+    "                job_metadata = self.create_store_job(keys, req_context, tier_idx)\n"
     "                tier.submit_store(job_metadata)\n"
-)
+)   # vLLM 0.29: enumerate + tier_idx (antes "for tier in ..." sin tier_idx: el anclaje viejo dejaba PN90 SIN aplicar)
 
 TIER_COMPLETE_NEW = (
     "        if success:\n"
@@ -263,13 +263,13 @@ TIER_COMPLETE_NEW = (
     "            pass\n"
 )
 
-FINISHED_JOBS_OLD = (
+FINISHED_JOBS_OLD = (   # vLLM 0.29: _pop_job y "not in _jobs"
     "            for completed_job in tier.get_finished_jobs():\n"
     "                job_id = completed_job.job_id\n"
-    "                job_metadata = self._transfer_jobs.pop(job_id, None)\n"
+    "                job_metadata = self._pop_job(job_id)\n"
     "                assert job_metadata is not None, (\n"
     "                    f\"Finished job_id {job_id} from tier #{i}\"\n"
-    "                    f\" ({tier.tier_type}) not in _transfer_jobs\"\n"
+    "                    f\" ({tier.tier_type}) not in _jobs\"\n"
     "                )\n"
 )
 
@@ -283,23 +283,21 @@ FINISHED_JOBS_NEW = (
     "                job_id = completed_job.job_id\n"
     "                if _g90.is_demote_job_id(job_id):\n"
     "                    continue\n"
-    "                job_metadata = self._transfer_jobs.pop(job_id, None)\n"
+    "                job_metadata = self._pop_job(job_id)\n"
     "                assert job_metadata is not None, (\n"
     "                    f\"Finished job_id {job_id} from tier #{i}\"\n"
-    "                    f\" ({tier.tier_type}) not in _transfer_jobs\"\n"
+    "                    f\" ({tier.tier_type}) not in _jobs\"\n"
     "                )\n"
 )
 
 
 # ─────────────────── camino REQUEST_LEVEL ───────────────────
 
-REQUEST_LEVEL_OLD = (
-    "        # Filter out keys that are not ready in primary (e.g. in-flight)\n"
-    "        ready_keys = tuple(\n"
-    "            k\n"
-    "            for k in keys\n"
-    "            if self.primary_tier.lookup(k, req_context) is LookupResult.HIT\n"
-    "        )\n"
+REQUEST_LEVEL_OLD = (   # vLLM 0.29: lista con HIT_PENDING
+    "        state = self._req_state[req_context.req_id]\n"
+    "        ready_keys = []\n"
+    "        for key in keys:\n"
+    "            result = self.primary_tier.lookup(key, req_context)\n"
 )
 
 REQUEST_LEVEL_NEW = (
@@ -312,12 +310,10 @@ REQUEST_LEVEL_NEW = (
     "            getattr(req_context, 'kv_transfer_params', None)\n"
     "        ):\n"
     "            return\n"
-    "        # Filter out keys that are not ready in primary (e.g. in-flight)\n"
-    "        ready_keys = tuple(\n"
-    "            k\n"
-    "            for k in keys\n"
-    "            if self.primary_tier.lookup(k, req_context) is LookupResult.HIT\n"
-    "        )\n"
+    "        state = self._req_state[req_context.req_id]\n"
+    "        ready_keys = []\n"
+    "        for key in keys:\n"
+    "            result = self.primary_tier.lookup(key, req_context)\n"
 )
 
 
@@ -389,13 +385,12 @@ def _tiering_patcher() -> TextPatcher | None:
                 required=True,
             ),
         ],
-        upstream_drift_markers=[
-            # v0.29.0 se llevo la idea entera adentro: la cascada pasa a nivel de request
-            # (`request_level_tiers`) y las claves que todavia no estan listas se estacionan
-            # en `pending_cascade_keys` en vez de forzar el store por bloque. Aplicar PN90
-            # encima seria gatear dos veces la misma escritura.
-            "pending_cascade_keys",
-        ],
+        # Sin marcador de "upstream ya lo trae" (28-09): la nota decia que v0.29.0 se habia llevado la
+        # idea adentro (request_level_tiers + pending_cascade_keys), y por eso PN90 se salteaba. Medido:
+        # con ese salteo el complete_store de 0.29 sigue copiando a disco CADA bloque de CADA pedido
+        # (7,9 GB con 3 prompts anonimos de 28k); el nivel de request no filtra por agente. Los
+        # anclajes se actualizaron a 0.29.
+        upstream_drift_markers=[],
     )
 
 
