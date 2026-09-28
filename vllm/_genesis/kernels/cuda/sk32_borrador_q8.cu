@@ -96,3 +96,39 @@ sk32_silu_q8(const __half* __restrict__ x, int8_t* __restrict__ q, float* __rest
     }
     if (threadIdx.x == 0) esc[t] = am / 127.f * gscale[0];
 }
+
+// sk32_conv_q8: preparacion de la conv agrupada del borrador (DFlash2, taps = 2) + cuantizacion, en un kernel.
+//   y[t, d] = (b0[d] + c[t, 0, g]) * h[t, d] + [t mod BSQ >= 1] * (b1[d] + c[t, 1, g]) * h[t-1, d],  g = d / GS
+// (c = los coeficientes del lado 0 de kernel_projection, [T, 2 lados, 2 taps, G]; b = base_kernel[0], [2, N]).
+// y se redondea a fp16 como la salida de inductor y se cuantiza como per_token_quant_int8.
+#ifndef GS
+#define GS 16
+#endif
+__device__ __forceinline__ float conv_y(const __half* h0, const __half* h1, const __half* b0, const __half* b1,
+                                        const __half* c, int G, int d, bool prev) {
+    const int g = d / GS;
+    float y = (__half2float(b0[d]) + __half2float(c[g])) * __half2float(h0[d]);
+    if (prev) y += (__half2float(b1[d]) + __half2float(c[G + g])) * __half2float(h1[d]);
+    return __half2float(__float2half_rn(y));
+}
+
+extern "C" __global__ void __launch_bounds__(256)
+sk32_conv_q8(const __half* __restrict__ h, const __half* __restrict__ coef, const __half* __restrict__ base,
+             int8_t* __restrict__ q, float* __restrict__ esc, const float* __restrict__ gscale,
+             int N, int G, int BSQ, int sh, int sc, int sq)
+{
+    __shared__ float sm[8];
+    const int t = blockIdx.x;
+    const bool prev = (t % BSQ) >= 1;
+    const __half* h0 = h + (size_t)t * sh;
+    const __half* h1 = prev ? h + (size_t)(t - 1) * sh : h0;
+    const __half* c = coef + (size_t)t * sc;             // lado 0: [tap 0: G][tap 1: G]
+    const __half* b0 = base;
+    const __half* b1 = base + N;
+    float m = 0.f;
+    for (int d = threadIdx.x; d < N; d += 256) m = fmaxf(m, fabsf(conv_y(h0, h1, b0, b1, c, G, d, prev)));
+    const float am = fmaxf(max_bloque(m, sm), 1e-10f), r = 127.f / am;
+    int8_t* qf = q + (size_t)t * sq;
+    for (int d = threadIdx.x; d < N; d += 256) qf[d] = q_lejos(conv_y(h0, h1, b0, b1, c, G, d, prev), r);
+    if (threadIdx.x == 0) esc[t] = am / 127.f * gscale[0];
+}
