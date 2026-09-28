@@ -280,6 +280,58 @@ Detalle de `borrador: capas`:
 - PN151 vuelve al build original del GDN (~150 µs de huecos por paso).
 - Los huecos lanzados desde Python del prefill GDN de FLA (`chunk_*`, `_forward_core`).
 
+## 3d. Pasos 5, 6 y 8 del plan (noche del 28-09): idiotSavant v2 y la atención de decode
+
+**Capas (idiotSavant v2):** `models-cache/qwen3.8_27b_idiotSavant_sm_86_v2`, ahora el modelo por omisión del compose.
+- **o_proj:** R·W·H₂₅₆, con Hadamard de una cabeza sobre la entrada. **out_proj:** R·W·H₁₂₈. Las dos con Hessiana Hc·H·Hc.
+- **in_proj_a/b:** W4 con GPTQ sobre la Hessiana rotada de attn_in (antes BF16).
+- **Cómo se armó:** `entrenamiento/idiotsavant/idiotsavant.py realinear`, que pasa de v1 a v2 sin recalibrar, a ~2 s por capa. Usa las Hessianas de `cuant-cache/A` con H_n = diag(1/g)·H_x·diag(1/g); g no tiene ceros en attn_in. La corrida es `realinear_v2.sh`.
+- **Reproducible:** `idiotsavant.py --version 2` es el default y produce la v2 desde cero; `--version 1` reproduce exacto la v1. Dry-run OK con las dos.
+- **HF:** subida la carpeta `reproducir/` (commit dfed4a5). Los pesos publicados siguen siendo v1 y el README lo aclara.
+
+**Calidad (KL en respuestas, 48 ventanas, servido):**
+
+| | KL | top-1 |
+|---|---|---|
+| v1 | 0,0193 | 0,9559 |
+| v2, Hadamard en torch | 0,0176 | — |
+| v2, fusionado | 0,0178 | 0,9563 |
+
+**Código:**
+- **PN154** (`had_salidas.py` + SK-25 `sk25_cabeza_had_q8.cu`):
+  - compuerta sigmoide (atención) o RMSNormGated (GDN) + Hadamard por cabeza + int8 por token en un kernel de ~2,8 µs;
+  - Marlin recibe el int8 directo;
+  - solo actúa si el config declara `genesis_rotacion.had_entrada`;
+  - prueba: `tests/proto/sk25_test.py`.
+- **PN155** (`gdn_ba_qkvz.py`): b/a como trozos 4 y 5 (64 filas por rango, relleno cero) de in_proj_qkvz.
+- **Por capa GDN:** −10 µs (cutlass fp16, split-K, norma de inductor, cuantización y escala).
+
+**Atención SK-18h (todo bit a bit, mismo texto en el oráculo):**
+- **batch2 con NWARPS=8** (`GENESIS_SK18H_NW`): un bloque por (secuencia, cabeza) con las 64 filas, y K/V se carga una vez. Paso −5,7% / −6,0%.
+- **salida:** la división u64 por elemento se reemplazó por recíproco double + corrección ±1. 18 → 12 µs (1 pedido) y 86 → 10 µs (4 pedidos) por capa.
+- **union4:** grupos adaptativos para ~2400 bloques (`GENESIS_PN131_UNION_BLOQUES`). 4 pedidos: 55 → 36 µs.
+
+**Paso medido contra la base del día** (v1, batch2 de 4 warps, `is27_v1b` → `is27_v2u`):
+
+| | 1 pedido | 4 pedidos |
+|---|---|---|
+| Antes | 24,00 ms | 33,55 ms |
+| Después | 21,99 ms | 30,00 ms |
+| Cambio | −8,3% | −10,6% |
+
+**Punta a punta** (`ab_v2_acept.sh`, prompts reales greedy, conc 1):
+
+| | tok/s | tok/paso |
+|---|---|---|
+| v1 | 240 | 4,54 |
+| v2 | 239 | 4,41 |
+
+La aceptación baja, seguramente porque el borrador se ajustó contra la v1: reajustarlo contra la v2 (`dflash2.sh`) es lo pendiente. La captura ocupaba 49 GB: ver el disco antes.
+
+**Lo que queda en la atención:**
+- batch2 sigue en ~44% del ancho de banda a 62k: 1 bloque por SM por los 254 registros, y K se lee en las dos pasadas.
+- Lo próximo: K de la página residente en shared memory entre pasadas (V en un buffer, ~93 KB).
+
 ## 4. Palancas, en el orden sugerido
 
 Ahorro = medido menos el techo del kernel: **es un máximo**. Los porcentajes son del paso (1 pedido / 4 pedidos).

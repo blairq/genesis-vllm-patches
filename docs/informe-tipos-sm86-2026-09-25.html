@@ -851,10 +851,10 @@
       El criterio: primero lo barato y seguro, después juntar los cambios que tocan el mismo kernel, y los de capa en
       tandas, porque cada tanda paga una validación de calidad.</p>
     <div class="cifras" id="acumulado-hoy">
-      <div><span>Paso de decode · 1 pedido · 62k</span><b>29,36 → 23,91 ms</b><span class="antes">−18,6% (27/28-09)</span></div>
-      <div><span>Paso de decode · 4 pedidos · ~15k</span><b>40,94 → 33,32 ms</b><span class="antes">−18,6% (27/28-09)</span></div>
+      <div><span>Paso de decode · 1 pedido · 62k</span><b>29,36 → 21,99 ms</b><span class="antes">−25,1% (27/28-09)</span></div>
+      <div><span>Paso de decode · 4 pedidos · ~15k</span><b>40,94 → 30,00 ms</b><span class="antes">−26,7% (27/28-09)</span></div>
       <div><span>GPU ociosa entre fases · 1 pedido</span><b>1.719 → 3 µs</b><span class="antes">por paso</span></div>
-      <div><span>Calidad</span><b>igual</b><span class="antes">oráculo greedy, aceptación; KL +0,0001 por el AR int8</span></div>
+      <div><span>Calidad</span><b>igual</b><span class="antes">KL 0,0193 → 0,0178 con la v2; aceptación −3% hasta reajustar el borrador</span></div>
     </div>
     <div class="tabla-caja">
       <table class="pipe">
@@ -875,18 +875,18 @@
           <tr class="nuevo"><td class="n">4</td><td class="k">All-reduce de decode por P2P directo<small>PN152 · SK-24</small></td>
             <td><span class="chip ch-hecho">hecho 27/28-09</span></td><td class="n mejor">−6,1%</td><td class="n mejor">−9,7%</td>
             <td class="porq">Medido, bit a bit con NCCL (mismo texto en el oráculo). Cada placa escribe su parcial en la memoria de la otra (memoria cruda por IPC), avisa con una bandera de época y suma. Doble buffer, sin barrera final, época en la GPU: va dentro de los grafos. Ideas de SiFAR (H200/NVSwitch) traducidas a PCIe 4.0 x8 con P2P. 90 KB: 36,9 → 14,8 µs; paso −4,9% / −6,4%. Encima, int8 por grupo de 64 (i8): las dos placas suman las dos partes cuantizadas en orden de rango, así quedan idénticas; gana en todos los tamaños (36 filas 44,9 → 26,7 µs), paso −1,3% / −3,5% más. KL en respuestas 0,0193 contra 0,0192 todo fp16.</td></tr>
-          <tr><td class="n">5</td><td class="k">Atención de decode + Hadamard en o_proj<small>la salida escribe int8 rotado</small></td>
-            <td><span class="chip ch-lat">código</span> <span class="chip ch-cambio">capa</span></td><td class="n">−9%</td><td class="n">−11%</td>
-            <td class="porq">sk18h_salida hay que reescribirla igual: ahí la Hadamard y el int8 salen gratis y desaparece la cuantización antes de o_proj. o_proj se re-cuantiza como W·H.</td></tr>
-          <tr><td class="n">6</td><td class="k">Hadamard en out_proj<small>la norma con compuerta escribe int8 rotado</small></td>
-            <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−0,5%</td><td class="n">−0,5%</td>
-            <td class="porq">El mismo patrón del lado GDN, en la misma tanda que o_proj.</td></tr>
+          <tr class="nuevo"><td class="n">5</td><td class="k">Atención de decode + Hadamard en o_proj<small>SK-18h 8 warps · salida sin div64 · SK-25 · v2</small></td>
+            <td><span class="chip ch-hecho">hecho 28-09</span></td><td class="n mejor">−6,5%</td><td class="n mejor">−10%</td>
+            <td class="porq">Medido, y bit a bit en la atención (mismo texto en el oráculo). <b>batch2 con 8 warps</b>: un bloque por (secuencia, cabeza) carga K/V una vez para las 64 filas, en vez de dos bloques de 4 warps que cargaban lo mismo (−5,7% / −6,0%). <b>salida</b> hacía una división de 64 bits emulada por elemento: con recíproco y corrección, 18 → 12 µs y 86 → 10 µs por capa. <b>union4</b> con grupos adaptativos (4 pedidos 55 → 36 µs). <b>Capa</b>: o_proj = R·W·H<sub>256</sub> (Hadamard por cabeza) y SK-25 hace compuerta + Hadamard + int8 en un kernel de 2,8 µs.</td></tr>
+          <tr class="nuevo"><td class="n">6</td><td class="k">Hadamard en out_proj<small>PN154 · SK-25 modo GDN</small></td>
+            <td><span class="chip ch-hecho">hecho 28-09</span></td><td class="n mejor" colspan="2">con el 8: −10 µs por capa GDN</td>
+            <td class="porq">Medido. out_proj = R·W·H<sub>128</sub>; SK-25 hace RMSNormGated + Hadamard por cabeza + int8 por token y Marlin lo toma directo (se van la norma de inductor, la cuantización y la escala × global). Junto con o_proj, el KL servido baja 0,0193 → 0,0178: era el error de A8 de las únicas lineales con la entrada sin rotar.</td></tr>
           <tr><td class="n">7</td><td class="k">Norma que escribe int8<small>SK-20 con g = 1, cableada como SK-23</small></td>
             <td><span class="chip ch-lat">código</span></td><td class="n">−2–4%</td><td class="n">−2–4%</td>
             <td class="porq">Según el paso 2. Con 5–7 hechos, todas las lineales reciben el int8 del kernel anterior.</td></tr>
-          <tr><td class="n">8</td><td class="k">in_proj_a/b en int8, dentro de in_proj_qkvz<small>un solo Marlin</small></td>
-            <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−1%</td><td class="n">−1%</td>
-            <td class="porq">Se va el cutlass fp16 + split-K de cada capa GDN. Son las compuertas: primero la sensibilidad por capa.</td></tr>
+          <tr class="nuevo"><td class="n">8</td><td class="k">in_proj_a/b en W4, dentro de in_proj_qkvz<small>PN155 · un solo Marlin</small></td>
+            <td><span class="chip ch-hecho">hecho 28-09</span></td><td class="n mejor" colspan="2">con el 6: v2 −2,1% (1 pedido)</td>
+            <td class="porq">Medido. GPTQ W4 sobre la Hessiana rotada de attn_in; Marlin no las acepta solas (24 filas por rango), así que van como dos trozos de 64 filas (con relleno cero) de in_proj_qkvz. Se va el cutlass fp16 + split-K. El KL no empeora (baja, con el 6). Punta a punta la v2 queda en paridad de tok/s: la aceptación del borrador cae 3% porque se ajustó contra la v1 — reajustarlo es lo que falta.</td></tr>
           <tr class="nuevo"><td class="n">9</td><td class="k">Python a la GPU<small>PN150 borrador en grafo · PN151 metadata GDN en un kernel · sync oculta</small></td>
             <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n mejor">−6,1%</td><td class="n mejor">−1,8%</td>
             <td class="porq">Medido. PN150: el fc y la proyección de contexto del borrador en grafos CUDA (−3,1% / −1,6%). PN151: el builder de metadata del GDN (~35 ops de torch por grupo y paso) en un kernel, verificado en 3000 llamadas sin diferencias (−2,0% / −0,6%). Y una sincronización oculta nuestra: <span class="m">torch.tensor(lista, device=cuda)</span> en la compactación del árbol dejaba la CPU bloqueada 19,8 de 26 ms por paso. GPU ociosa en huecos con 1 pedido: 1.719 → 3 µs por paso. Mismo texto en el oráculo.</td></tr>
