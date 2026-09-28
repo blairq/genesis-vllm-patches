@@ -117,6 +117,14 @@ MARGEN_K = 16.0        # K: skf con ~11 bits; satura recien a 16x (k rotada/norm
 CPG = int(os.environ.get("GENESIS_PN131_CPG", 16))
 LN2 = math.log(2)
 SH_H = 32 * (256 + 128) + 2 * 64 * 256 + 2 * 256 * 64 + 2 * 64 * 2 * 4
+# Warps por bloque de batch2 (int8): con 8, un bloque toma las 64 filas de una (secuencia, cabeza KV)
+# (9 tokens del arbol x 6 cabezas Q = 54) y carga K/V de la pagina UNA vez para los 8 warps; con 4
+# eran 2 bloques que cargaban lo mismo. Bit a bit igual (misma cuenta por fila). 28-09.
+NW8 = int(os.environ.get("GENESIS_SK18H_NW", "8"))
+
+
+def sh_h(nw: int) -> int:
+    return 8 * nw * (256 + 128) + 2 * 64 * 256 + 2 * 256 * 64 + 2 * 64 * 2 * 4
 SH_I = 32 * QPLANOS * 128 + 2 * 128 * 128 + 2 * 256 * 64 + 2 * 32 * 128 + 2 * 128 * 2 * 8
 _QA_QB = None
 _k = {}
@@ -241,6 +249,7 @@ def _kernels(md="int8"):
             return ks
         arb = ["-DARBOL=1"] if (ARBOL and ROT_PTX) else []
         ks = dict(main=Kernel("sk18h_batch2.cu", "sk18h_batch2", defs=defs + arb, warps=4),
+                  main8=Kernel("sk18h_batch2.cu", "sk18h_batch2", defs=defs + arb + [f"-DNWARPS={NW8}"], warps=NW8),
                   escribir=Kernel("sk18h_escribir2.cu" if ROT_PTX else "sk18h_escribir.cu",
                                   "sk18h_escribir2" if ROT_PTX else "sk18h_escribir", warps=1),
                   prep=Kernel("sk18h_prep2.cu" if ROT_PTX else "sk18h_prep.cu",
@@ -700,13 +709,16 @@ def _decode_uniforme(impl, query, kv_cache, md, output, B, L, capturando):
                                                 bf.mqb8[:R], bf.dcap8[:R], oh, ol, om, os_,
                                                 blk8, bt.stride(0), bs, NCH, nh, MB // 32, ZSH, VSH,
                                                 bf.dueno, mqb, oc, VENT], shared=SH_H)
-    elif ARBOL and ROT_PTX:
-        ks["main"].lanzar((NCH, B * nh * (MB // 32)), [Qb, raw, bt, seq, lim, mqb, dcap, bf.abase[:R], bf.amask[:R],
-                                          oh, ol, om, os_,
-                                          blk, bt.stride(0), bs, NCH, nh, MB // 32, ZSH, VSH], shared=SH_H)
     else:
-        ks["main"].lanzar((NCH, B * nh * (MB // 32)), [Qb, raw, bt, seq, lim, mqb, dcap, oh, ol, om, os_,
-                                          blk, bt.stride(0), bs, NCH, nh, MB // 32, ZSH, VSH], shared=SH_H)
+        bq = 8 * NW8 if (NW8 != 4 and MB % (8 * NW8) == 0) else 32
+        km, sh = (ks["main8"], sh_h(NW8)) if bq != 32 else (ks["main"], SH_H)
+        if ARBOL and ROT_PTX:
+            km.lanzar((NCH, B * nh * (MB // bq)), [Qb, raw, bt, seq, lim, mqb, dcap, bf.abase[:R], bf.amask[:R],
+                                                   oh, ol, om, os_,
+                                                   blk, bt.stride(0), bs, NCH, nh, MB // bq, ZSH, VSH], shared=sh)
+        else:
+            km.lanzar((NCH, B * nh * (MB // bq)), [Qb, raw, bt, seq, lim, mqb, dcap, oh, ol, om, os_,
+                                                   blk, bt.stride(0), bs, NCH, nh, MB // bq, ZSH, VSH], shared=sh)
     Og = bf.Og[: NG * R * QD]
     Sg = bf.Sg[: NG * R]
     if mo == "int4":

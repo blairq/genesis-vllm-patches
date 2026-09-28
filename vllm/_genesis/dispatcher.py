@@ -1278,6 +1278,28 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN154": {
+        "title": "Hadamard por cabeza en la entrada de o_proj/out_proj (idiotSavant v2)",
+        "env_flag": "GENESIS_ENABLE_PN154_HAD_SALIDAS",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-09-28. El checkpoint v2 guarda o_proj/out_proj como R W Hc (Hc Hadamard de una cabeza: 256 atencion, 128 GDN); la entrada llega x Hc. Baja el error A8 de las unicas lineales con la entrada sin rotar (cresta 12-21) y deja la Hadamard + int8 para fusionarse en el kernel anterior. Solo actua si config.json declara genesis_rotacion.had_entrada."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
+    "PN155": {
+        "title": "in_proj_b/a del GDN dentro del Marlin de in_proj_qkvz (idiotSavant v2)",
+        "env_flag": "GENESIS_ENABLE_PN155_BA_EN_QKVZ",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-09-28. Las compuertas b/a (48 salidas, 24 por rango) no entran solas en Marlin (N>=64): se agregan como quinto trozo de in_proj_qkvz ([b|a|relleno] = 128 filas por rango) y el forward las separa. Se va el cutlass fp16 + split-K por capa GDN."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN151": {
         "title": "Metadata del GDN para el decode en arbol en un kernel",
         "env_flag": "GENESIS_ENABLE_PN151_GDN_META",

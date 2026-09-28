@@ -2406,6 +2406,42 @@ def apply_patch_N127() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN154 Hadamard en la entrada de o_proj/out_proj")
+def apply_patch_PN154() -> PatchResult:
+    """PN154: Hadamard por cabeza en la entrada de o_proj/out_proj (checkpoint idiotSavant v2)."""
+    name = "PN154 Hadamard en la entrada de o_proj/out_proj"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN154_had_salidas
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN154_had_salidas.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN155 in_proj_ba en in_proj_qkvz")
+def apply_patch_PN155() -> PatchResult:
+    """PN155: in_proj_b/a (W4) dentro del Marlin de in_proj_qkvz (checkpoint idiotSavant v2)."""
+    name = "PN155 in_proj_ba en in_proj_qkvz"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN155_ba_en_qkvz
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN155_ba_en_qkvz.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN151 metadata GDN en un kernel")
 def apply_patch_PN151() -> PatchResult:
     """PN151: el build de la metadata del GDN (decode en arbol) en un kernel en vez de ~35 ops de torch."""

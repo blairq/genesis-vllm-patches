@@ -108,6 +108,9 @@ services:
       - GENESIS_PN152_MIN_I8=${GENESIS_PN152_MIN_I8:-1}                              # all-reduce P2P de decode en int8 por grupo de 64 desde estos bytes fp16 (1 = siempre, 0 = nunca): paso -1,3% / -3,5%, KL 0,0193 vs 0,0192
       - GENESIS_ENABLE_PN153_LOGITS_RANGO=${GENESIS_ENABLE_PN153_LOGITS_RANGO:-1}      # logits del target sin AllGather: cada rango manda maximo + ganador gumbel (+ top-k): mismo token; paso -0,5% / -1,9%
       - GENESIS_PN153_VERIFICAR=${GENESIS_PN153_VERIFICAR:-0}
+      - GENESIS_ENABLE_PN154_HAD_SALIDAS=${GENESIS_ENABLE_PN154_HAD_SALIDAS:-1}  # Hadamard por cabeza en la entrada de o_proj/out_proj: solo actua si el checkpoint la declara (v2)
+      - GENESIS_ENABLE_PN155_BA_EN_QKVZ=${GENESIS_ENABLE_PN155_BA_EN_QKVZ:-0}      # in_proj_b/a (W4, v2) dentro del Marlin de in_proj_qkvz: SOLO con el checkpoint v2
+      - GENESIS_SK18H_NW=${GENESIS_SK18H_NW:-8}                              # warps por bloque de SK-18h batch2: 8 = un bloque por (secuencia, cabeza), K/V una vez
       - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
       - GENESIS_ENABLE_PN128_GDN_MTP_ASYNC_ORDER=1
       - GENESIS_ENABLE_B5_REJECTION_SAMPLER=1
@@ -242,7 +245,7 @@ services:
         exec vllm serve "$@"
       - --
     command:
-      - /root/.cache/huggingface/qwen3.8_27b_idiotSavant_sm_86
+      - /root/.cache/huggingface/${IDIOTSAVANT_MODELO:-qwen3.8_27b_idiotSavant_sm_86}
       - --served-model-name
       - qwen3.8_27b_idiotSavant_sm_86
       - qwen3.8                        # alias que usan opencode, Hermes y el healthcheck

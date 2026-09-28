@@ -7,7 +7,10 @@
 #            + un set de calibracion de tokens [N, L] int32 (.npy)
 #  Salida  : checkpoint compressed-tensors (pack-quantized, W4 simetrico g128) que vLLM carga tal
 #            cual, CON EL RESIDUO ROTADO. Se sirve como W4A8 (VLLM_MARLIN_INPUT_DTYPE=int8) y
-#            necesita GENESIS_ENABLE_PN148_ROT_DOWN=1 (Hadamard antes de down_proj).
+#            necesita GENESIS_ENABLE_PN148_ROT_DOWN=1 (Hadamard antes de down_proj) y, desde la v2,
+#            GENESIS_ENABLE_PN154_HAD_SALIDAS=1 y GENESIS_ENABLE_PN155_BA_EN_QKVZ=1 (config.json ->
+#            genesis_rotacion.requiere lo dice).
+#  v1 -> v2 sin recalibrar:  idiotsavant.py realinear --modelo V1 --hessianas DIR ... (ver README)
 #
 #  Uso (ver README.md; todo corre en el virtualenv local del proyecto, preparado con preparar.sh):
 #    bash correr.sh idiotsavant.py todo --dry-run  --bf16 BF16 --calib CALIB --trabajo DIR --salida DIR
@@ -83,9 +86,13 @@
 #      MLP se multiplicaba x7 y el KL servido saltaba a 0,17. Con H_n completa GPTQ lo compensa.)
 #
 #   * Escriben al residuo: self_attn.o_proj / linear_attn.out_proj.
-#         se cuantiza  A = R W                 con su Hessiana tal cual
-#     -> su SALIDA tiene que quedar en la base rotada. Rotar su entrada casi no ayuda (cresta
-#        12-21, A8 1,2% con o sin rotacion), asi que no se toca.
+#         se cuantiza  A = R W Hc              con H~ = Hc H Hc        (v2, 28-09)
+#     -> su SALIDA tiene que quedar en la base rotada. Hc = Hadamard de UNA cabeza (256 en la
+#        atencion, 128 en el GDN) sobre la entrada, aplicada EN LINEA en vLLM (PN154) por el kernel
+#        que produce esa entrada (SK-25: la compuerta sigmoide de la atencion / la RMSNormGated del
+#        GDN, + Hadamard + int8 por token, todo junto). Por cabeza porque asi cada rango de TP rota
+#        lo suyo y el kernel tiene la cabeza entera en registros. En la v1 no se tocaba (cresta
+#        12-21, A8 1,2-3%); la v2 baja el KL servido 0,0193 -> 0,0176 y ahorra 3 kernels por capa.
 #
 #   * down_proj: escribe al residuo Y ademas su entrada tiene cresta ~27.
 #         se cuantiza  A = R W Hd              con H~ = Hd H Hd
@@ -94,8 +101,11 @@
 #     cada GPU tiene la mitad de 17408 = 8704 = 17 x 512: los bloques no cruzan la particion.
 #     Sin esta Hadamard el KL W4A8 sube 15% (0,0116 -> 0,0134).
 #
-#   * linear_attn.in_proj_a / in_proj_b (compuertas del GDN): quedan en BF16 (son chicas y el
-#     GDN es sensible a sus compuertas), pero leen el residuo: se pliegan igual, W diag(g) Rt.
+#   * linear_attn.in_proj_a / in_proj_b (compuertas del GDN): leen el residuo como in_proj_qkv, asi
+#     que son "entrada" (W diag(g) Rt) y desde la v2 van en W4 como todo: en vLLM se suman como un
+#     trozo mas al Marlin de in_proj_qkvz (PN155; solas no entran: 24 filas por rango con TP=2) y se
+#     va el cutlass fp16 + split-K de cada capa GDN. En la v1 quedaban en BF16 por precaucion; medido
+#     en la v2, el KL servido BAJA igual (ver DECISIONES.md, seccion D2).
 #
 #   * Todo lo demas de la capa (conv1d, A_log, dt_bias, normas internas q/k y la gated norm del
 #     GDN) opera DENTRO de la cabeza, despues de la proyeccion: no ve la base del residuo.
@@ -153,6 +163,11 @@ G = 128                  # grupo de las escalas int4
 SEMILLA = 20260924       # signos de la rotacion (los mismos que el borrador y PN149)
 BLOQUE = 1024            # Hadamard del residuo
 BLOQUE_DOWN = 512        # Hadamard en linea antes de down_proj (PN148)
+# Hadamard en linea en la ENTRADA de las lineales que escriben al residuo (v2, 28-09): una por cabeza,
+# asi cada rango de TP rota sus cabezas sin comunicacion y el kernel que produce la entrada (la salida
+# de la atencion / la norma con compuerta del GDN) la aplica gratis junto con el int8 (PN154).
+HAD_ENTRADA = {"self_attn.o_proj": 256,          # head_dim de la atencion
+               "linear_attn.out_proj": 128}      # linear_value_head_dim del GDN
 DAMP = 0.01
 
 COPIAR = ("chat_template.jinja", "generation_config.json", "tokenizer.json", "tokenizer_config.json",
@@ -184,12 +199,15 @@ LINEALES = {
                        "mlp.down_proj": ("mlp_down", "bajada")},
     "linear_attention": {"linear_attn.in_proj_qkv": ("attn_in", "entrada"),
                          "linear_attn.in_proj_z": ("attn_in", "entrada"),
+                         "linear_attn.in_proj_b": ("attn_in", "entrada"),     # v2: W4, van dentro del
+                         "linear_attn.in_proj_a": ("attn_in", "entrada"),     # Marlin de in_proj_qkvz (PN155)
                          "linear_attn.out_proj": ("attn_out", "escribe"),
                          "mlp.gate_proj": ("mlp_in", "entrada"), "mlp.up_proj": ("mlp_in", "entrada"),
                          "mlp.down_proj": ("mlp_down", "bajada")},
 }
-# BF16 que leen el residuo (compuertas del GDN): se pliegan y rotan pero no se cuantizan
-BF16_ENTRADA = ("linear_attn.in_proj_a", "linear_attn.in_proj_b")
+# BF16 que leen el residuo: se pliegan y rotan pero no se cuantizan. Hasta la v1 eran las compuertas
+# del GDN (in_proj_a/b); en la v2 van en W4 (ver DECISIONES.md) y no queda ninguna.
+BF16_ENTRADA = ()
 NORMA_DE = {"attn_in": "input_layernorm", "mlp_in": "post_attention_layernorm"}
 
 
@@ -435,7 +453,7 @@ def enganchar(capa, lin, D, eps, Rt, dev, sumar):
     return acc, ganchos
 
 
-def cuantizar_capa(i, tipo, sd, hessiana, dev, Rt, R):
+def cuantizar_capa(i, tipo, sd, hessiana, dev, Rt, R, solo=None):
     """La capa i en su forma SERVIBLE. hessiana(entrada) -> H [n, n] fp32 (del disco o en memoria).
     Devuelve (tensores con nombres del checkpoint, pesos efectivos para medir, error de pesos, muertos)."""
     pref = f"model.language_model.layers.{i}."
@@ -444,6 +462,8 @@ def cuantizar_capa(i, tipo, sd, hessiana, dev, Rt, R):
     muertos = {e: (g[e] == 0).nonzero().flatten().tolist() for e in g}
     tens, efect, err_w, Ht = {}, {}, {}, {}
     for base, (ent, clase) in lin.items():
+        if solo is not None and base not in solo:
+            continue
         W = sd[base + ".weight"].float()
         if ent not in Ht:
             Ht = {}                                   # una viva por vez (la de down es 1,2 GB)
@@ -452,13 +472,17 @@ def cuantizar_capa(i, tipo, sd, hessiana, dev, Rt, R):
                 H = R @ H @ Rt                        # Hessiana de n~ = n Rt
             elif clase == "bajada":
                 H = bloques(bloques(H, BLOQUE_DOWN).T.contiguous(), BLOQUE_DOWN)   # Hd H Hd
+            elif base in HAD_ENTRADA:                 # attn_out: la usan solo o_proj/out_proj
+                b = HAD_ENTRADA[base]
+                H = bloques(bloques(H, b).T.contiguous(), b)                       # Hc H Hc
             Ht = {ent: H}
             del H
         if clase == "entrada":
             A = (W * g[ent][None, :]) @ Rt            # norma plegada + entrada rotada
+        elif clase == "escribe" and base in HAD_ENTRADA:
+            A = bloques(R @ W, HAD_ENTRADA[base])     # salida rotada + Hadamard por cabeza en la entrada
         elif clase == "escribe":
             A = R @ W                                 # salida rotada
-        else:
             A = bloques(R @ W, BLOQUE_DOWN)           # salida rotada + Hadamard en linea en la entrada
         Q, S = gptq(A, Ht[ent])
         p, s2, shp = empaquetar(Q, S)
@@ -470,6 +494,8 @@ def cuantizar_capa(i, tipo, sd, hessiana, dev, Rt, R):
         efect[base + ".weight"] = Ad.cpu()
         del A, Ad, Q, S, W
     del Ht
+    if solo is not None:
+        return tens, efect, err_w, muertos
     for k, v in sd.items():
         base = k[: -len(".weight")] if k.endswith(".weight") else k
         if base in lin:
@@ -491,6 +517,12 @@ def error_local(m, tc, i, efect, x, y, dev, Rt, rot_emb):
     cq.load_state_dict({k: (v.float() if not k.endswith("A_log") else v).to(dev) for k, v in efect.items()},
                        assign=True, strict=True)
     cq.mlp.down_proj.register_forward_pre_hook(lambda mo, ar: (bloques(ar[0], BLOQUE_DOWN),))
+    for base, b in HAD_ENTRADA.items():
+        try:
+            mod = cq.get_submodule(base)
+        except AttributeError:
+            continue
+        mod.register_forward_pre_hook(lambda mo, ar, b=b: (bloques(ar[0], b),))
     xr = x.to(dev).float() @ Rt
     ref = y.to(dev).float() @ Rt
     n_ap, L = xr.shape[:2]
@@ -685,6 +717,15 @@ def cuantizar(a):
     marca(a.trabajo, "CUANTIZACION_TERMINADA")
 
 
+def config_rotacion(g_final):
+    """Lo que el servidor necesita saber del checkpoint (vLLM + parches Genesis)."""
+    return {"semilla": SEMILLA, "bloque": BLOQUE, "bloque_down": BLOQUE_DOWN, "version": 2,
+            "had_entrada": {k.split(".")[-1]: v for k, v in HAD_ENTRADA.items()},
+            "requiere": "GENESIS_ENABLE_PN148_ROT_DOWN=1 GENESIS_ENABLE_PN154_HAD_SALIDAS=1 "
+                        "GENESIS_ENABLE_PN155_BA_EN_QKVZ=1",
+            "g_final": g_final.cpu().tolist() if torch.is_tensor(g_final) else list(g_final)}
+
+
 # ─── etapa: armar ────────────────────────────────────────────────────────────────────────────────
 def armar(a):
     """Lo que esta fuera de las capas, el indice y el config. Ver el encabezado."""
@@ -739,7 +780,7 @@ def armar(a):
     for i, t in enumerate(tc.layer_types):
         if t == "linear_attention":
             p_ = f"model.language_model.layers.{i}.linear_attn"
-            ignore += [p_, p_ + ".norm", p_ + ".in_proj_b", p_ + ".in_proj_a"]
+            ignore += [p_, p_ + ".norm"]                  # v2: in_proj_a/b ya no (van en W4)
     ignore += ["lm_head"]
     qcfg = {"config_groups": {"group_0": {
         "targets": ["Linear"],
@@ -750,8 +791,7 @@ def armar(a):
         "quant_method": "compressed-tensors", "kv_cache_scheme": None, "format": "pack-quantized",
         "quantization_status": "compressed", "global_compression_ratio": None, "ignore": ignore}
     cfg["quantization_config"] = qcfg
-    cfg["genesis_rotacion"] = {"semilla": SEMILLA, "bloque": BLOQUE, "bloque_down": BLOQUE_DOWN,
-                               "requiere": "GENESIS_ENABLE_PN148_ROT_DOWN=1", "g_final": g_final.cpu().tolist()}
+    cfg["genesis_rotacion"] = config_rotacion(g_final)
     json.dump(cfg, open(os.path.join(a.salida, "config.json"), "w"), indent=2)
     json.dump(qcfg, open(os.path.join(a.salida, "quantization_config.json"), "w"), indent=2)
     json.dump(PROCESSOR_CONFIG, open(os.path.join(a.salida, "processor_config.json"), "w"), indent=2)
@@ -763,6 +803,96 @@ def armar(a):
     e = [v["error_capa"] for v in informe.values()]
     print(f"[armar] LISTO {a.salida}: {len(mapa)} tensores, {total / 1e9:.1f} GB; error local mediano "
           f"{np.median(e):.4f}", flush=True)
+
+
+# ─── etapa: realinear (v1 -> v2 sin recalibrar) ─────────────────────────────────────────────────────
+REALINEAR = {"full_attention": ("self_attn.o_proj",),
+             "linear_attention": ("linear_attn.out_proj", "linear_attn.in_proj_b", "linear_attn.in_proj_a")}
+
+
+def realinear(a):
+    """Pasa un idiotSavant v1 (--modelo) a v2 rehaciendo SOLO lo que cambio: o_proj y out_proj con la
+    Hadamard por cabeza en la entrada, e in_proj_a/b en W4. Usa Hessianas ya guardadas (--hessianas:
+    capa_NN/H_attn_in.pt y H_attn_out.pt, formato de h_guardar): las de --conservar_hessianas, o las de
+    la etapa A vieja (cuant-cache/A), que guardaba attn_in sobre x = g n en vez de n (--h_sobre_x).
+    El resto de cada capa se copia tal cual del v1. ~10 minutos con una GPU."""
+    dev = a.dispositivo
+    torch.set_grad_enabled(False)
+    m, tc, cfg0 = modelo_hf(a.bf16)
+    D = tc.hidden_size
+    n = a.capas or tc.num_hidden_layers
+    P = Pesos(a.bf16)
+    Rt = Rt_de(D, dev)
+    R = Rt.T.contiguous()
+    informe = json.load(open(os.path.join(a.modelo, "informe_idiotsavant.json")))
+    print(f"[realinear] {a.modelo} -> {a.salida}, {n} capas", flush=True)
+    for i in range(n):
+        dirc = dir_capa(a, i)
+        dst = os.path.join(a.salida, f"capa_{i:02d}.safetensors")
+        if hay(dirc, "REALINEADA") and os.path.exists(dst):
+            continue
+        esperar_recursos(2, 1.5 + a.margen_disco, a.salida, f"realinear capa {i}")   # ~1 GB: la RAM del cgroup incluye el page cache
+        t0 = time.time()
+        tipo = tc.layer_types[i]
+        pref = f"model.language_model.layers.{i}."
+        solo = REALINEAR[tipo]
+        nombres = [b + ".weight" for b in solo] + [v + ".weight" for v in NORMA_DE.values()]
+        sd = {k: P.get(pref + k, dev, torch.bfloat16) for k in nombres}
+        dh = os.path.join(a.hessianas, f"capa_{i:02d}")
+
+        def hessiana(ent):
+            H = h_cargar(os.path.join(dh, f"H_{ent}.pt"), dev)
+            if ent == "attn_in" and a.h_sobre_x:      # H_x = diag(g) H_n diag(g), con g sin ceros en attn_in
+                g = 1 + sd["input_layernorm.weight"].float()
+                H = H / g[:, None] / g[None, :]
+            return H
+        tens, _, err_w, _ = cuantizar_capa(i, tipo, sd, hessiana, dev, Rt, R, solo=solo)
+        with safe_open(os.path.join(a.modelo, f"capa_{i:02d}.safetensors"), "pt") as f:
+            viejo = {k: f.get_tensor(k) for k in f.keys()}
+        for b in solo:                                # fuera la version v1 (bf16 o W4 sin Hadamard)
+            for suf in (".weight", ".weight_packed", ".weight_scale", ".weight_shape"):
+                viejo.pop(pref + b + suf, None)
+        viejo.update(tens)
+        guardar_atomico({k: v.contiguous() for k, v in viejo.items()}, dst, fn=save_file)
+        info = informe.get(str(i), {})
+        info.setdefault("error_pesos", {}).update(err_w)
+        info["v2"] = sorted(solo)
+        json.dump(info, open(os.path.join(dirc, "informe.json"), "w"), indent=1)
+        marca(dirc, "REALINEADA")
+        del sd, tens, viejo
+        torch.cuda.empty_cache() if dev.startswith("cuda") else None
+        print(f"[realinear] capa {i:02d} {tipo:16s} " + "  ".join(f"{b.split('.')[-1]} {e:.4f}" for b, e in err_w.items())
+              + f"  {time.time() - t0:4.0f}s", flush=True)
+    if n < tc.num_hidden_layers:
+        print("[realinear] prueba parcial: no se arma", flush=True)
+        return
+    # lo demas del v1: enlaces duros (no ocupan disco); config e indice nuevos
+    for f in os.listdir(a.modelo):
+        src, dst = os.path.join(a.modelo, f), os.path.join(a.salida, f)
+        if f.startswith("capa_") or f in ("config.json", "quantization_config.json", "model.safetensors.index.json",
+                                          "informe_idiotsavant.json") or os.path.isdir(src) or os.path.exists(dst):
+            continue
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copy2(src, dst)
+    cfg = json.load(open(os.path.join(a.modelo, "config.json")))
+    qcfg = cfg["quantization_config"]
+    qcfg["ignore"] = [x for x in qcfg["ignore"] if not x.endswith((".in_proj_b", ".in_proj_a"))]
+    cfg["genesis_rotacion"] = config_rotacion(cfg["genesis_rotacion"]["g_final"])
+    json.dump(cfg, open(os.path.join(a.salida, "config.json"), "w"), indent=2)
+    json.dump(qcfg, open(os.path.join(a.salida, "quantization_config.json"), "w"), indent=2)
+    mapa, total = {}, 0
+    for f in [f"capa_{i:02d}.safetensors" for i in range(tc.num_hidden_layers)] + ["resto.safetensors"]:
+        with safe_open(os.path.join(a.salida, f), "pt") as fh:
+            for k in fh.keys():
+                mapa[k] = f
+        total += os.path.getsize(os.path.join(a.salida, f))
+    json.dump({"metadata": {"total_size": total}, "weight_map": mapa},
+              open(os.path.join(a.salida, "model.safetensors.index.json"), "w"), indent=1)
+    informe = {i: json.load(open(os.path.join(dir_capa(a, i), "informe.json"))) for i in range(tc.num_hidden_layers)}
+    json.dump(informe, open(os.path.join(a.salida, "informe_idiotsavant.json"), "w"), indent=1)
+    print(f"[realinear] LISTO {a.salida}: {len(mapa)} tensores, {total / 1e9:.1f} GB", flush=True)
 
 
 # ─── estado (para humanos, scripts y LLMs) ─────────────────────────────────────────────────────────
@@ -1057,7 +1187,7 @@ def todo(a):
 
 def main():
     ap = argparse.ArgumentParser(description="reconstruye qwen3.8_27b_idiotSavant_sm_86 desde el BF16")
-    ap.add_argument("etapa", choices=["todo", "calibrar", "cuantizar", "armar", "estado"])
+    ap.add_argument("etapa", choices=["todo", "calibrar", "cuantizar", "armar", "estado", "realinear"])
     ap.add_argument("--bf16", help="orcarouter/Qwen3.8-27B-Uncensored (BF16)")
     ap.add_argument("--calib", help=".npy int [N, L] de tokens de trafico real")
     ap.add_argument("--trabajo", required=True, help="cache de trabajo (Hessianas, marcas, estado)")
@@ -1075,11 +1205,19 @@ def main():
     ap.add_argument("--dry-run", dest="dry_run", action="store_true",
                     help="validar todo (BF16, calibracion, recursos, matematica, dos capas en memoria) sin escribir capas")
     ap.add_argument("--json", action="store_true", help="estado: salida en JSON")
+    ap.add_argument("--modelo", help="realinear: el idiotSavant v1 de partida")
+    ap.add_argument("--hessianas", help="realinear: directorio con capa_NN/H_attn_in.pt y H_attn_out.pt")
+    ap.add_argument("--h_sobre_x", action="store_true",
+                    help="realinear: las H_attn_in estan sobre x = g n (etapa A vieja) y no sobre n")
     a = ap.parse_args()
     os.makedirs(a.trabajo, exist_ok=True)
     os.makedirs(a.salida, exist_ok=True)
     if a.etapa == "estado":
         return estado(a)
+    if a.etapa == "realinear":
+        if not (a.bf16 and a.modelo and a.hessianas):
+            ap.error("realinear necesita --bf16, --modelo y --hessianas")
+        return realinear(a)
     if not a.bf16 or not a.calib:
         ap.error("--bf16 y --calib son obligatorios salvo en 'estado'")
     if a.dry_run:
