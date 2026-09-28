@@ -65,6 +65,17 @@ for modo in (True, "ptx"):
     igual = torch.equal(correr(args, False).view(torch.int32), correr(args, modo).view(torch.int32))
     ok &= igual
     print(f"{'A_log/dt_bias bf16':24} {str(modo):5} {'IDENTICA' if igual else 'DISTINTA'}")
+# k y v como vistas con stride de token de un tensor mezclado (como las deja la conv en el servidor)
+args = lote([9] * 3)
+Tt = args[4].shape[1]
+mix = torch.randn(Tt, 2 * H * K + HV * V, device=dev, dtype=dt)
+mix[:, H * K:2 * H * K] = args[4].view(Tt, H * K); mix[:, 2 * H * K:] = args[5].view(Tt, HV * V)
+args = args[:4] + (mix[:, H * K:2 * H * K].view(1, Tt, H, K), mix[:, 2 * H * K:].view(1, Tt, HV, V)) + args[6:]
+ref = correr(args[:4] + (args[4].contiguous(), args[5].contiguous()) + args[6:], False)
+for modo in (True, "ptx"):
+    igual = torch.equal(ref.view(torch.int32), correr(args, modo).view(torch.int32))
+    ok &= igual
+    print(f"{'k/v con stride':24} {str(modo):5} {'IDENTICA' if igual else 'DISTINTA'}")
 args = lote([9, 9, 9], sid=[1, 0, -1])                                        # pedidos sin slot spec
 for modo in (True, "ptx"):
     igual = torch.equal(correr(args, False).view(torch.int32), correr(args, modo).view(torch.int32))

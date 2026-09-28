@@ -1,41 +1,71 @@
 #!/usr/bin/env bash
-# perfil_idiotsavant.sh <label>: trazas torch del stack de idiotSavant TAL CUAL se sirve (compose de
-# produccion + instancia aislada: sin trafico ajeno). Tres fases:
-#   decode1  un pedido, ~55k de contexto ya cacheado, DFlash2 + arbol, 60 pasos
+# perfil_idiotsavant.sh <etiqueta>: trazas torch del stack de idiotSavant TAL CUAL se sirve (compose de
+# produccion + instancia aislada: sin trafico ajeno). Fases:
+#   decode1  un pedido, ~62k de contexto ya cacheado, DFlash2 + arbol, 60 pasos
 #   decode4  cuatro pedidos a la vez (el patron real: un hilo y subagentes)
-#   prefill  un prefill frio de ~16k tokens (chunks como en produccion)
-# Deja las trazas en tests/bench/medicion/trazas/<label>_<fase>. NO levanta produccion al final
-# (lo hace quien lo llama). Correr con setsid nohup.
+#   prefill  un prefill frio de ~15k tokens (chunks como en produccion)
+# Las fases de decode (y el oraculo, con ORACULO=1) corren sobre UN SOLO arranque del servidor: el
+# profiler se prende y apaga por fase y las trazas se mueven a su carpeta. El prefill necesita otra
+# configuracion del profiler (sin iteraciones de retardo) y va en un arranque aparte.
+#
+# Variables: FASES (default "decode1 decode4 prefill"), ORACULO=1 (texto greedy + aceptacion del borrador
+# en tests/bench/medicion/oraculo/<etiqueta>.json), y cualquier GENESIS_* declarada en el compose.
+# Deja las trazas en tests/bench/medicion/trazas/<etiqueta>_<fase> y los avisos de Genesis en
+# analisis_perfil/<etiqueta>_<fase>.log. NO levanta idiotSavant al final (lo hace quien lo llama).
+# Tiempos (27-09): ~1 min de arranque + ~1,5 min por fase. Correr con setsid nohup.
 set -uo pipefail
 LABEL=$1
 R=/home/usuario/Proyectos/genesis-vllm-patches
 MED=$R/tests/bench/medicion
 C="-f $R/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml -f $R/compose/ov-aislado.yml"
 N=genesis-27b-pruebas
+FASES=${FASES:-decode1 decode4 prefill}
+mkdir -p $MED/analisis_perfil $MED/oraculo
 cd $R/compose
-docker stop genesis-27b-idiotsavant >/dev/null 2>&1
-for FASE in ${FASES:-decode1 decode4 prefill}; do
+
+arrancar() {   # $1 = dir de trazas (dentro del contenedor), $2 = delay, $3 = max iteraciones
   docker rm -f $N >/dev/null 2>&1
-  case $FASE in decode*) DEL=8; MAX=60 ;; prefill) DEL=0; MAX=12 ;; esac
-  rm -rf $MED/trazas/${LABEL}_$FASE
-  PROF_KIND='"torch"' PROF_DIR=/traces/${LABEL}_$FASE PROF_DELAY=$DEL PROF_MAX=$MAX docker compose $C up -d --force-recreate >/dev/null 2>&1
-  t0=$(date +%s)
-  until [ "$(docker inspect -f '{{.State.Health.Status}}' $N 2>/dev/null)" = healthy ]; do
-    [ $(( $(date +%s) - t0 )) -gt 1800 ] && { echo "[$FASE] no arranco"; docker logs --tail 20 $N; exit 1; }
-    sleep 15
+  PROF_KIND='"torch"' PROF_DIR=$1 PROF_DELAY=$2 PROF_MAX=$3 docker compose $C up -d --force-recreate >/dev/null 2>&1
+  local t0=$(date +%s)
+  # /health cada 5 s: el healthcheck de docker del override es cada 60 s y hacia perder hasta un minuto
+  until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do
+    [ $(( $(date +%s) - t0 )) -gt 1800 ] && { echo "no arranco"; docker logs --tail 20 $N; exit 1; }
+    sleep 5
   done
-  echo "$(date +%T) [$LABEL/$FASE] listo"
-  docker exec -i -e FASE=$FASE $N python3 - <<'PY'
+  echo "$(date +%T) [$LABEL] servidor listo en $(( $(date +%s) - t0 )) s"
+}
+
+mover_trazas() {   # $1 = dir temporal, $2 = fase: espera las dos trazas y las mueve a <etiqueta>_<fase>
+  for i in $(seq 1 90); do
+    n=$(docker exec $N sh -c "ls $1 2>/dev/null | grep -c 'pt.trace.json'" 2>/dev/null || echo 0)
+    [ "${n:-0}" -ge 2 ] && break; sleep 2
+  done
+  sleep 3   # que terminen de escribirse
+  rm -rf $MED/trazas/${LABEL}_$2 2>/dev/null
+  docker exec $N sh -c "mkdir -p /traces/${LABEL}_$2 && mv $1/* /traces/${LABEL}_$2/"
+  echo "$(date +%T) [$LABEL/$2] trazas: $(ls $MED/trazas/${LABEL}_$2 2>/dev/null | tr '\n' ' ')"
+}
+
+cargar() {   # $1 = fase: la carga de trabajo, dentro del contenedor
+  docker exec -i -e FASE=$1 $N python3 - <<'PY'
 import glob, json, os, threading, time, urllib.request
 H = {"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["VLLM_API_KEY"]}
 U = "http://127.0.0.1:8320"
 def post(path, cuerpo=None, t=900):
     b = json.dumps(cuerpo).encode() if cuerpo is not None else b""
-    return json.load(urllib.request.urlopen(urllib.request.Request(U + path, b, H, method="POST"), timeout=t)) if cuerpo is not None \
-        else urllib.request.urlopen(urllib.request.Request(U + path, b, H, method="POST"), timeout=t).read()
+    r = urllib.request.urlopen(urllib.request.Request(U + path, b, H, method="POST"), timeout=t)
+    return json.load(r) if cuerpo is not None else r.read()
 def chat(txt, mt):
     return post("/v1/chat/completions", {"model": "qwen3.8", "messages": [{"role": "user", "content": txt}], "max_tokens": mt,
                                          "temperature": 0, "chat_template_kwargs": {"enable_thinking": False}})
+def spec():
+    m = urllib.request.urlopen(urllib.request.Request(U + "/metrics", headers=H), timeout=60).read().decode()
+    d = {}
+    for l in m.splitlines():
+        for k in ("num_accepted_tokens_total", "num_drafts_total"):
+            if l.startswith("vllm:spec_decode_" + k):
+                d[k] = float(l.split()[1])
+    return d
 fs = sorted(glob.glob("/usr/local/lib/python3.12/dist-packages/vllm/_genesis/**/*.py", recursive=True))
 txt = "".join(open(f, errors="ignore").read() for f in fs)
 fase = os.environ["FASE"]
@@ -43,22 +73,60 @@ chat("Explicame en detalle la paginacion de memoria virtual, con TLB y fallos de
 if fase == "decode1":
     largo = txt[:200000] + "\n\nEscribi un resumen largo y detallado de este codigo, modulo por modulo."
     chat(largo, 8)                                   # deja el prefijo en la cache
-    post("/start_profile"); r = chat(largo, 400); print("decode1", r["usage"])
+    post("/start_profile"); r = chat(largo, 400); print("decode1", r["usage"]["completion_tokens"], "tokens")
+    post("/stop_profile", t=900)
 elif fase == "decode4":
     ps = [txt[i * 60000:i * 60000 + 50000] + "\n\nExplica en detalle que hace este codigo." for i in range(4)]
     for p in ps: chat(p, 8)
     post("/start_profile")
-    hs = [threading.Thread(target=lambda p=p: print("decode4", chat(p, 400)["usage"])) for p in ps]
+    hs = [threading.Thread(target=lambda p=p: chat(p, 400)) for p in ps]
     [h.start() for h in hs]; [h.join() for h in hs]
-else:
+    post("/stop_profile", t=900); print("decode4 ok")
+elif fase == "prefill":
     corto = txt[300000:356000] + "\n\nDeci solo OK."
-    post("/start_profile"); t = time.time(); r = chat(corto, 1); print("prefill", r["usage"], round(time.time() - t, 2), "s")
-post("/stop_profile", t=900)
+    post("/start_profile"); t = time.time(); r = chat(corto, 1)
+    print("prefill", r["usage"]["prompt_tokens"], "tokens", round(time.time() - t, 2), "s")
+    post("/stop_profile", t=900)
+elif fase == "oraculo":
+    # Dos corridas con cambios bit a bit exactos tienen que dar el MISMO texto; con cambios que reordenan
+    # sumas el texto diverge y lo que tiene que quedar igual es la aceptacion del borrador (delta de los
+    # contadores alrededor de estos pedidos, sin lo que hicieron las fases anteriores).
+    ps = ["Escribi una funcion en Python que resuelva el problema de las N reinas con backtracking, con tests.",
+          "Conta la historia de la computacion desde Babbage hasta los transformers, con detalle tecnico.",
+          "Explica paso a paso como funciona un compilador: lexer, parser, AST, SSA, optimizaciones y emision."]
+    s0 = spec()
+    out = [chat(p, n)["choices"][0]["message"]["content"] for p, n in zip(ps, (600, 2000, 600))]
+    s1 = spec()
+    acc, dr = s1["num_accepted_tokens_total"] - s0["num_accepted_tokens_total"], s1["num_drafts_total"] - s0["num_drafts_total"]
+    print("ORACULO_JSON " + json.dumps({"textos": out, "aceptados": acc, "borradores": dr,
+                                        "aceptados_por_borrador": acc / max(dr, 1)}, ensure_ascii=False))
 PY
-  for i in $(seq 1 60); do n=$(ls $MED/trazas/${LABEL}_$FASE 2>/dev/null | grep -c "json"); [ "$n" -ge 2 ] && break; sleep 10; done
-  sleep 20; echo "$(date +%T) [$LABEL/$FASE] trazas: $(ls $MED/trazas/${LABEL}_$FASE 2>/dev/null | tr '\n' ' ')"
-  mkdir -p $MED/analisis_perfil
-  docker logs $N 2>&1 | grep -iE "genesis|warning|error|no aplica" > $MED/analisis_perfil/${LABEL}_$FASE.log   # los avisos, antes de borrar el contenedor
-done
+}
+
+guardar_avisos() {
+  docker logs $N 2>&1 | grep -iE "genesis|warning|error|no aplica" > $MED/analisis_perfil/${LABEL}_$1.log
+}
+
+DECODE=$(echo $FASES | tr ' ' '\n' | grep -E '^decode' | tr '\n' ' ')
+if [ -n "$DECODE" ] || [ "${ORACULO:-0}" = 1 ]; then
+  arrancar /traces/${LABEL}_tmp 8 60
+  for FASE in $DECODE; do
+    cargar $FASE
+    mover_trazas /traces/${LABEL}_tmp $FASE
+    guardar_avisos $FASE
+  done
+  if [ "${ORACULO:-0}" = 1 ]; then
+    cargar oraculo | grep '^ORACULO_JSON ' | sed 's/^ORACULO_JSON //' > $MED/oraculo/$LABEL.json
+    echo "$(date +%T) [$LABEL] oraculo: $(python3 -c "import json;d=json.load(open('$MED/oraculo/$LABEL.json'));print(round(d['aceptados_por_borrador'],3),'aceptados por borrador')")"
+    guardar_avisos oraculo
+  fi
+fi
+if echo " $FASES " | grep -q ' prefill '; then
+  arrancar /traces/${LABEL}_tmp 0 12
+  cargar prefill
+  mover_trazas /traces/${LABEL}_tmp prefill
+  guardar_avisos prefill
+fi
+docker exec $N sh -c "rmdir /traces/${LABEL}_tmp" 2>/dev/null
 docker rm -f $N >/dev/null 2>&1
 echo "$(date +%T) LISTO"

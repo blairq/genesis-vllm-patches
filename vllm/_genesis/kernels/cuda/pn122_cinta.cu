@@ -98,7 +98,7 @@ __device__ __forceinline__ float logf_nv(float x) {
 extern "C" __global__ void __launch_bounds__(NW * 32)
 pn122_cinta(const float* __restrict__ A_log, const __half* __restrict__ a, const __half* __restrict__ b,
             const float* __restrict__ dt_bias, float beta_sp, float threshold,
-            const __half* __restrict__ k, const __half* __restrict__ v,
+            const __half* __restrict__ k, const __half* __restrict__ v, long long sk, long long sv,   // stride de token
             const int* __restrict__ cu, const int* __restrict__ sidx, const int* __restrict__ slots,
             float* __restrict__ cinta, int N)
 {
@@ -114,7 +114,7 @@ pn122_cinta(const float* __restrict__ A_log, const __half* __restrict__ a, const
     if (blockIdx.z > 0) {
         const unsigned c = (blockIdx.z - 1u) * (NW * 32) + tid;
         if (c < HV * VD / 4) {
-            const uint2 raw = __ldg(reinterpret_cast<const uint2*>(v + (size_t)src * HV * VD) + c);
+            const uint2 raw = __ldg(reinterpret_cast<const uint2*>(v + (size_t)src * sv) + c);
             float4 o;
             o.x = h2f((unsigned short)(raw.x & 0xffffu)); o.y = h2f((unsigned short)(raw.x >> 16));
             o.z = h2f((unsigned short)(raw.y & 0xffffu)); o.w = h2f((unsigned short)(raw.y >> 16));
@@ -129,7 +129,7 @@ pn122_cinta(const float* __restrict__ A_log, const __half* __restrict__ a, const
     // cada shfl.sync lleva una ruta de respaldo por CALL (14 en el SASS de la primera version).
     {
         const unsigned wk = w < H ? w : 0u;
-        const uint2 raw = __ldg(reinterpret_cast<const uint2*>(k + ((size_t)src * H + wk) * KD) + l);
+        const uint2 raw = __ldg(reinterpret_cast<const uint2*>(k + (size_t)src * sk + (size_t)wk * KD) + l);
         float x[4];
         x[0] = h2f((unsigned short)(raw.x & 0xffffu)); x[1] = h2f((unsigned short)(raw.x >> 16));
         x[2] = h2f((unsigned short)(raw.y & 0xffffu)); x[3] = h2f((unsigned short)(raw.y >> 16));

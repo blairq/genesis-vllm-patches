@@ -938,8 +938,9 @@ def escribir_cinta(A_log, a, b, dt_bias, k, v, cu_seqlens, sidx, slots, cinta, N
             motivo = "A_log/dt_bias sin copia fp32 (primera vez dentro de una captura)"
         elif not (k.dtype == v.dtype == a.dtype == b.dtype == torch.float16 and cinta.dtype == torch.float32):
             motivo = f"dtypes k={k.dtype} v={v.dtype} a={a.dtype} b={b.dtype} cinta={cinta.dtype}"
-        elif not (k.is_contiguous() and v.is_contiguous() and a.is_contiguous() and b.is_contiguous()):
-            motivo = "k/v/a/b no contiguos"
+        elif not (a.is_contiguous() and b.is_contiguous() and k.stride(-1) == 1 and v.stride(-1) == 1
+                  and k.stride(-2) == K and v.stride(-2) == V and k.stride(-3) % 4 == 0 and v.stride(-3) % 4 == 0):
+            motivo = f"layout k {tuple(k.stride())} v {tuple(v.stride())} (el PTX lee k/v con stride de token)"
         if motivo is not None:
             _avisar_cinta(motivo)
             modo = "par"
@@ -952,14 +953,18 @@ def escribir_cinta(A_log, a, b, dt_bias, k, v, cu_seqlens, sidx, slots, cinta, N
             from vllm._genesis.kernels.ptx_lab import Kernel
             kern = _k_cinta_ptx[clave] = Kernel("pn122_cinta.cu", "pn122_cinta",
                                                 defs=[f"-DH={H}", f"-DHV={HV}", f"-DTM={TM}"], warps=8)
+        import ctypes
         kern.lanzar((N, TM, 1 + (HV * V // 4 + 255) // 256),
-                    [A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N])
+                    [A_log, a, b, dt_bias, 1.0, 20.0, k, v, ctypes.c_longlong(k.stride(-3)),
+                     ctypes.c_longlong(v.stride(-3)), cu_seqlens, sidx, slots, cinta, N])
     elif modo == "par":
+        k, v = k.contiguous(), v.contiguous()
         _k_escribir_par[(N, TM, H + HV)](
             A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N,
             H=H, HV=HV, K=K, V=V, BK=BK, BV=triton.next_power_of_2(V), TM=TM, ROW=ROW,
             IS_L2=True, num_warps=4, num_stages=1)
     else:
+        k, v = k.contiguous(), v.contiguous()
         _k_escribir[(N,)](
             A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N,
             H=H, HV=HV, K=K, V=V, BK=BK, BHV=triton.next_power_of_2(HV * V),
@@ -1002,6 +1007,56 @@ def _diag_cresta(layer, ssm_state, sidx) -> None:
                 cr(SR, "fila"), cr(SR, "col"), S.abs().max().item(), S.abs().median().item())
 
 
+_ARBOL_PTX = os.environ.get("GENESIS_PN122_ARBOL_PTX", "0").strip().lower() in _TRUTHY
+_ARBOL_RPW = 4                      # filas por warp (barrido 27-09: 4 gana a 8 y a 2)
+
+
+def qkv_con_stride() -> bool:
+    """PN54 pregunta esto en ``rearrange_mixed_qkv``: con el PTX del arbol, q/k/v se pasan como vistas con
+    stride de token (sin copias). Si despues el paso no va por el PTX, ``spec_update`` hace las copias."""
+    return _ACTIVO and _ARBOL_PTX
+_k_arbol_ptx: dict = {}
+
+
+def _arbol_ptx_motivo(layer, A_log, dt_bias, q, k, v, a, b, h, H, HV, K, V):
+    """None si gdn_arbol.cu sirve para estos tensores; si no, el motivo (va al log una vez)."""
+    T1 = layer.num_spec + 1
+    m = None
+    if not (K == 128 and V == 128 and HV % H == 0 and T1 <= 32 and V % (4 * _ARBOL_RPW) == 0):
+        m = f"formas K={K} V={V} H={H} HV={HV} T={T1}"
+    elif not (q.dtype == k.dtype == v.dtype == a.dtype == b.dtype == torch.float16):
+        m = f"dtypes q={q.dtype} a={a.dtype}"
+    elif h.dtype not in (torch.float16, torch.float32) or tuple(h.stride()[1:]) != (V * K, K, 1):
+        m = f"estado {h.dtype} {tuple(h.stride())}"
+    elif not all(t.stride(-1) == 1 and t.stride(-2) == K and t.stride(-3) % 4 == 0 and t.data_ptr() % 8 == 0
+                 for t in (q, k, v)):
+        m = f"layout q {tuple(q.stride())} k {tuple(k.stride())} v {tuple(v.stride())}"
+    elif _f32(A_log) is None or _f32(dt_bias) is None:
+        m = "A_log/dt_bias sin copia fp32 (primera vez dentro de una captura)"
+    if m is not None and m not in _avisos_cinta:
+        _avisos_cinta.add(m)
+        log.warning("[PN122 arbol] PTX no aplica, uso Triton: %s", m)
+    return m
+
+
+def _lanzar_arbol_ptx(layer, A_log, a, b, dt_bias, q, k, v, o, h, cu, sidx, nacc, slots, cinta, N,
+                      H, HV, K, V, TM):
+    import ctypes
+    T1 = layer.num_spec + 1
+    hdt = 0 if h.dtype == torch.float16 else 1
+    clave = (H, HV, TM, T1, hdt)
+    kern = _k_arbol_ptx.get(clave)
+    if kern is None:
+        from vllm._genesis.kernels.ptx_lab import Kernel
+        kern = _k_arbol_ptx[clave] = Kernel(
+            "gdn_arbol.cu", "gdn_arbol", warps=4,
+            defs=[f"-DH={H}", f"-DHV={HV}", f"-DTM={TM}", f"-DTMAX={T1}", f"-DHDT={hdt}", f"-DRPW={_ARBOL_RPW}"])
+    L = ctypes.c_longlong
+    kern.lanzar((V // (4 * _ARBOL_RPW), N * HV),
+                [_f32(A_log), a, b, _f32(dt_bias), q, k, v, L(q.stride(-3)), L(k.stride(-3)), L(v.stride(-3)),
+                 o, h, L(h.stride(0)), cu, sidx, nacc, slots, cinta, _camino_gpu, _anc_gpu, K ** -0.5, N])
+
+
 def spec_update(layer, A_log, a, b, dt_bias, q, k, v, ssm_state, cu_seqlens,
                 spec_state_indices, num_accepted_tokens, slots):
     """Reemplazo de ``fused_sigmoid_gating_delta_rule_update`` en el camino spec.
@@ -1021,8 +1076,13 @@ def spec_update(layer, A_log, a, b, dt_bias, q, k, v, ssm_state, cu_seqlens,
     sidx = spec_state_indices[:, 0].contiguous() if spec_state_indices.ndim == 2 \
         else spec_state_indices
     nacc = num_accepted_tokens
-    q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
     a, b = a.contiguous(), b.contiguous()
+    # PTX del arbol (gdn_arbol.cu): lee q/k/v con su stride de token, asi que no hacen falta las tres
+    # copias .contiguous() (6,6 us por capa en el perfil del 25-09).
+    arbol_ptx = (_ARBOL_PTX and paso_arbol_activo() and _camino_gpu is not None and not _CERRADA
+                 and _arbol_ptx_motivo(layer, A_log, dt_bias, q, k, v, a, b, ssm_state, H, HV, K, V) is None)
+    if not arbol_ptx:
+        q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
     _bits = sync_bits()
     if _bits & 64:
         torch.cuda.synchronize()
@@ -1066,6 +1126,9 @@ def spec_update(layer, A_log, a, b, dt_bias, q, k, v, ssm_state, cu_seqlens,
                 _camino_gpu, Gb, Cm, aux, Gb.stride(1), aux.stride(1), K ** -0.5, N,
                 H=H, HV=HV, K=K, V=V, BK=BK, BV=BV, BT=BT, T=T1, TM=TM, ROW=ROW, IS_L2=True,
                 num_warps=4, num_stages=3)
+    elif arbol_ptx:
+        _lanzar_arbol_ptx(layer, A_log, a, b, dt_bias, q, k, v, o, ssm_state, cu_seqlens, sidx, nacc, slots,
+                          cinta, N, H, HV, K, V, TM)
     elif paso_arbol_activo() and _camino_gpu is not None:
         _k_spec_arbol[(triton.cdiv(V, BV), N * HV)](
             A_log, a, b, dt_bias, 1.0, 20.0, q, k, v, o, ssm_state, ssm_state.stride(0),

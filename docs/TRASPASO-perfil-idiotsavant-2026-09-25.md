@@ -265,9 +265,44 @@ Todas deben dar la **misma salida** (bit a bit o dentro del ruido fp16): verific
   Solución: copia fp32 exacta y creada fuera de la captura del grafo, strides genéricos, y el motivo al log.
   `perfil_idiotsavant.sh` ahora guarda esos avisos en `analisis_perfil/<etiqueta>_<fase>.log`.
 
-**Pendiente de este frente**
-- Las 3 copias de torch de q/k/v por capa GDN (~1%): se van cuando `_k_spec_arbol` pase a PTX leyendo con stride.
-- `_k_spec_arbol`: 19–45 µs, ocupación 10%.
+### ✅ P1-bis HECHO (27-09): recurrencia del árbol en PTX y sin copias — paso acumulado −7,0% (1 pedido), −4,7% (4)
+
+Perfil `is27_arbol22` contra `is27_base`. Las tres piezas juntas: cinta, conv y recurrencia en PTX, más sin las copias.
+
+| | 1 pedido | 4 pedidos |
+|---|---|---|
+| `_k_spec_arbol` → `gdn_arbol.cu` | 19,7 → 11,7 µs | 44,6 → 27,4 µs |
+| Copias de q/k/v | 6,4 → 0 µs | 9,9 → 3,1 µs |
+| Capas GDN | −15,6% | −11,8% |
+| **Paso** | **−7,0%** | **−4,7%** |
+
+**Qué hacía Triton** (TTGIR): el estado [32, 128] repartido por COLUMNAS entre los 128 hilos. Cada h·k y h·q era una
+reducción entre 4 warps por shared con barrera, dos por token.
+
+**Qué hace el PTX**
+- **Layout:** cada warp es dueño de 4 filas enteras (`RPW=4`, barrido contra 8 y 2) y reduce dentro del warp.
+- **Una reducción por token:** h·k y h·q juntas, con `o = e·(h·q) + d·(k·q)`. Es reduce-scatter; el decaimiento
+  queda fuera del camino crítico.
+- **Prólogo:** normas, g, beta y filas de cinta, con todas las cargas primero.
+- **Máscaras del árbol** en shared, leídas en dirección uniforme. Sin eso, 71 CALL de respaldo de `shfl.sync`.
+- **ncu:** issue 36% contra 20% de Triton. Lo que queda son 3 latencias de memoria encadenadas en el prólogo y los 14
+  pasos secuenciales de la regla delta.
+
+**Validación**
+- **NO es bit a bit** con Triton, porque cambia el orden de las sumas. Error contra fp64 igual al de Triton en 5
+  casos (`tests/proto/gdn_arbol_ptx.py`).
+- **Oráculo:** el texto diverge, la aceptación queda igual o mejor (2,96 contra 2,89 aceptados por borrador).
+
+**Copias:** eran de PN54 (`rearrange_mixed_qkv`), no nuestras. Ahora, con el PTX del árbol activo, devuelve vistas con
+stride (`gdn_cinta.qkv_con_stride()`), y la cinta PTX también lee con stride. Control: quitar las copias dio el
+MISMO texto del oráculo.
+
+**Flags** (prendidos por omisión): `GENESIS_PN122_ARBOL_PTX=1`. Si el PTX no aplica, cae a Triton con el motivo en el log.
+
+**Pendiente**
+- Con 4 pedidos quedan 3,1 µs de copias por capa: identificar de dónde salen.
+- `perfil_idiotsavant.sh` se reescribió: un solo arranque para las fases de decode y el oráculo (`ORACULO=1`),
+  `/health` cada 5 s. Un brazo del A/B pasa de ~12 a ~5 min.
 
 ### P1 · Recurrencia del árbol GDN: `_k_escribir`, `_k_salidas`, `_k_spec_arbol` — **−7% / −7%, costo bajo**
 
