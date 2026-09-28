@@ -881,9 +881,9 @@
           <tr><td class="n">8</td><td class="k">in_proj_a/b en int8, dentro de in_proj_qkvz<small>un solo Marlin</small></td>
             <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−1%</td><td class="n">−1%</td>
             <td class="porq">Se va el cutlass fp16 + split-K de cada capa GDN. Son las compuertas: primero la sensibilidad por capa.</td></tr>
-          <tr><td class="n">9</td><td class="k">Árbol y verificación en 1–2 kernels</td>
-            <td><span class="chip ch-lat">código</span></td><td class="n">−5%</td><td class="n">−2,5%</td>
-            <td class="porq">~110 kernels chicos y la GPU esperando a Python. Después del paso 3, que cambia la verificación.</td></tr>
+          <tr class="nuevo"><td class="n">9</td><td class="k">Python a la GPU<small>PN150 borrador en grafo · PN151 metadata GDN en un kernel</small></td>
+            <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n mejor">−5,1%</td><td class="n mejor">−2,2%</td>
+            <td class="porq">Medido. PN150: el fc y la proyección de contexto del borrador, que vLLM corría en eager, en grafos CUDA por forma (−3,1% / −1,6%). PN151: el builder de metadata del GDN (~35 ops de torch por grupo y paso, el mayor consumidor según la pila de Python) en un kernel Triton, verificado en 3000 llamadas sin diferencias (−2,0% / −0,6%). GPU ociosa en huecos: 1.719 → 442 µs por paso. Mismo texto en el oráculo.</td></tr>
           <tr><td class="n">10</td><td class="k">Borrador<small>GEMM W4A8, atención partida, vocab podado</small></td>
             <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−3%</td><td class="n">−3%</td>
             <td class="porq">Todo el borrador en una tanda: se valida con la aceptación y, si baja, se re-ajusta con dflash2.sh.</td></tr>
