@@ -87,6 +87,16 @@ elif fase == "prefill":
     post("/start_profile"); t = time.time(); r = chat(corto, 1)
     print("prefill", r["usage"]["prompt_tokens"], "tokens", round(time.time() - t, 2), "s")
     post("/stop_profile", t=900)
+elif fase == "ttft":
+    # prefill frio SIN profiler: 3 prompts distintos de ~15k (no comparten prefijo), max_tokens 1
+    ts = []
+    for i in range(3):
+        # nonce al PRINCIPIO: el tier de KV en disco sobrevive entre arranques y sin esto la segunda
+        # corrida acertaria el prefijo (TTFT falso; ver la memoria offload-kv-envenenado-por-cambio-de-config)
+        p = f"[{os.urandom(8).hex()}-{i}] " + txt[400000 + i * 70000: 400000 + i * 70000 + 56000] + "\n\nDeci solo OK."
+        t = time.time(); r = chat(p, 1); ts.append(round(time.time() - t, 3))
+        print("ttft", r["usage"]["prompt_tokens"], "tokens", ts[-1], "s")
+    print("TTFT_JSON " + json.dumps(ts))
 elif fase == "oraculo":
     # Dos corridas con cambios bit a bit exactos tienen que dar el MISMO texto; con cambios que reordenan
     # sumas el texto diverge y lo que tiene que quedar igual es la aceptacion del borrador (delta de los
@@ -120,6 +130,14 @@ if [ -n "$DECODE" ] || [ "${ORACULO:-0}" = 1 ]; then
     echo "$(date +%T) [$LABEL] oraculo: $(python3 -c "import json;d=json.load(open('$MED/oraculo/$LABEL.json'));print(round(d['aceptados_por_borrador'],3),'aceptados por borrador')")"
     guardar_avisos oraculo
   fi
+fi
+if echo " $FASES " | grep -q ' ttft '; then
+  docker rm -f $N >/dev/null 2>&1
+  docker compose $C up -d --force-recreate >/dev/null 2>&1
+  t0=$(date +%s); until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do sleep 5; done
+  echo "$(date +%T) [$LABEL] servidor (sin profiler) listo en $(( $(date +%s) - t0 )) s"
+  cargar ttft | tee /dev/stderr | grep '^TTFT_JSON ' | sed 's/^TTFT_JSON //' > $MED/analisis_perfil/${LABEL}_ttft.json
+  guardar_avisos ttft
 fi
 if echo " $FASES " | grep -q ' prefill '; then
   arrancar /traces/${LABEL}_tmp 0 12

@@ -551,7 +551,70 @@ def forward(impl, layer, query, kv_cache, md, output):
                 _decode_uniforme(impl, query, kv_cache, md, output, nreq, L, capturando)
                 _diag(impl, layer, query, kv_cache, md, output, nreq, L, capturando)
                 return output
+        if _MIXTO and nreq > 1 and _mixto(impl, layer, query, kv_cache, md, output, qsl, qlen, nreq):
+            return output
     return _prefill_decuant(impl, layer, query, kv_cache, md, output)
+
+
+# ─────────────────────── pasos mixtos: decode por SK-18h, prefill aparte ───────────────────────
+# En un paso con prefill, el lote entero iba por _prefill_decuant: descuantizar a fp16 las paginas de
+# TODOS los pedidos (tambien de los que solo decodifican, con todo su contexto) + FlashInfer para todos.
+# Medido en is25_decode4 (27-09): sk18h_decuant 0,6-1,3 ms por capa de atencion, 10-20 ms por paso mixto.
+# vLLM ordena el lote con los decodes primero: el prefijo uniforme (mismos L tokens por pedido) va por
+# el decode entero SK-18h, sin descuantizar, y solo el resto por descuantizar + FlashInfer (con SUS paginas).
+_MIXTO = os.environ.get("GENESIS_PN131_MIXTO", "0").strip().lower() in ("1", "true", "yes", "on")
+_MIXTO_VERIF = int(os.environ.get("GENESIS_PN131_MIXTO_VERIFICAR", "0") or 0)
+_mixto_n = {"n": 0, "aviso": False}
+
+
+class _Sub:
+    """Vista de la metadata de atencion para un tramo de pedidos; lo demas pasa al original."""
+
+    def __init__(self, md, **kw):
+        self._md = md
+        self.__dict__.update(kw)
+
+    def __getattr__(self, n):
+        return getattr(self._md, n)
+
+
+def _mixto(impl, layer, query, kv_cache, md, output, qsl, qlen, nreq) -> bool:
+    L = int(qlen[0])
+    if L < 1 or L > _max_tok_decode():
+        return False
+    nd = 0
+    while nd < nreq and int(qlen[nd]) == L:
+        nd += 1
+    if nd == 0 or nd == nreq:
+        return False
+    nt = nd * L
+    q0 = int(qsl[nd])
+    if q0 != nt:
+        return False
+    nact = int(md.num_actual_tokens)
+    mdd = _Sub(md, seq_lens=md.seq_lens[:nd], block_table=md.block_table[:nd])
+    qp = qsl[nd:nreq + 1] - q0
+    mdp = _Sub(md, seq_lens=md.seq_lens[nd:nreq], block_table=md.block_table[nd:nreq],
+               query_start_loc=md.query_start_loc[nd:nreq + 1] - q0,
+               genesis_qsl_cpu=torch.from_numpy(np.ascontiguousarray(qp)),
+               num_actual_tokens=nact - nt, genesis_clave=(id(md), "mixto", nd))
+    _decode_uniforme(impl, query, kv_cache, mdd, output, nd, L, False)
+    _prefill_decuant(impl, layer, query[nt:], kv_cache, mdp, output[nt:])
+    if not _mixto_n["aviso"]:
+        _mixto_n["aviso"] = True
+        log.warning("[PN131 mixto] paso mixto partido: %d pedidos por SK-18h (L=%d) + %d por prefill", nd, L, nreq - nd)
+    # solo pasos reales (el calentamiento de vLLM trae lotes de relleno que dan diferencia 0 exacta)
+    if _MIXTO_VERIF and _mixto_n["n"] < _MIXTO_VERIF and int(md.max_seq_len) >= 870:
+        _mixto_n["n"] += 1
+        ref = torch.zeros_like(output)
+        _prefill_decuant(impl, layer, query, kv_cache, md, ref)
+        def rel(a, b):
+            a, b = a.float().reshape(a.shape[0], -1), b.float().reshape(b.shape[0], -1)
+            return ((a - b).norm(dim=-1) / b.norm(dim=-1).clamp_min(1e-6)).max().item()
+        log.warning("[PN131 mixto] verif %d %s: decode (%d pedidos x %d) dif_rel_max=%.2e | prefill (%d tok) dif_rel_max=%.2e",
+                    _mixto_n["n"], getattr(layer, "layer_name", "?"), nd, L, rel(output[:nt], ref[:nt]),
+                    nact - nt, rel(output[nt:nact], ref[nt:nact]))
+    return True
 
 
 _DIAG = os.environ.get("GENESIS_PN131_DIAG", "layers.3.self_attn.attn")
@@ -711,7 +774,7 @@ def _prefill_flashinfer(impl, layer, query, kv_cache, md, output):
     if est is None:
         ws = torch.empty(256 * 1024 * 1024, dtype=torch.uint8, device=dev)
         est = _fi[dev.index] = dict(w=flashinfer.BatchPrefillWithPagedKVCacheWrapper(ws, "NHD"), clave=None)
-    clave = (id(md), md.num_actual_tokens, md.max_seq_len)
+    clave = (getattr(md, "genesis_clave", None) or id(md), md.num_actual_tokens, md.max_seq_len)
     if est["clave"] != clave:
         seq = md.seq_lens[:B].cpu().to(torch.int64)
         qsl = getattr(md, "genesis_qsl_cpu", None)
