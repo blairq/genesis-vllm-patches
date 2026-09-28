@@ -80,6 +80,7 @@ services:
       - GENESIS_PN124_Q_MAX=${GENESIS_PN124_Q_MAX:-16}             # aplanar spec decode al kernel 3D hasta 16 queries por pedido (el borrador verifica 9)
       - GENESIS_PN124_VERIFICAR=${GENESIS_PN124_VERIFICAR:-0}
       - GENESIS_PN124_Q3D=${GENESIS_PN124_Q3D:-16}                 # kernel 3D (KV partida) con hasta N queries por secuencia sin aplanar (el borrador: 9)
+      - GENESIS_PN124_SK31=${GENESIS_PN124_SK31:-0}                         # atencion del borrador en una pasada (SK-31): error 0,06% vs float
       - GENESIS_ENABLE_PN126_ROT_QK=1            # Hadamard de q/k tras RoPE (la KV int8 la necesita)
       - GENESIS_PN126_ROT=hadamard
       # ── TP=2: all-reduce ────────────────────────────────────────────────────

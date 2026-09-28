@@ -38,6 +38,8 @@ import os
 
 import torch
 
+from vllm._genesis import borrador_attn as _sk31
+
 log = logging.getLogger("genesis.pn124")
 
 _ACTIVO = os.environ.get("GENESIS_ENABLE_PN124_TRITON_AMPERE", "0") == "1"
@@ -145,6 +147,8 @@ def _aplanar(kw: dict) -> dict | None:
 def llamar(fn, **kw):
     """Reemplazo de ``unified_attention(**kw)`` en el backend Triton."""
     global _nivel, _nivel_int4
+    if _sk31.ACTIVO and _sk31.intentar(kw):          # SK-31: atencion del borrador en una pasada
+        return None
     if _ACTIVO and _APLANAR:
         plano = _aplanar(kw)
         Qk = int(kw["max_seqlen_q"])
