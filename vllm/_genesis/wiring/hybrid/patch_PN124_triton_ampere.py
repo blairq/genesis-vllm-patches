@@ -119,11 +119,102 @@ I4_LAUNCH_NEW = (
     "    if use_3d:\n"
 )
 
+UA_3D_OLD = (
+    "        or max_seqlen_q > 1\n"
+    "        or num_seqs > seq_threshold_3D\n"
+)
+UA_3D_NEW = (
+    "        # " + MARKER + " el 3D (KV partida en segmentos) tambien con varias queries por secuencia\n"
+    "        # (el borrador DFlash verifica bloques de 9, no causal y con ventana: aplanar no es exacto).\n"
+    "        # Los buffers de segmentos son por TOKEN: el tope es sobre tokens, no sobre secuencias.\n"
+    "        or max_seqlen_q > _g124.q_max_3d()\n"
+    "        or (num_seqs if max_seqlen_q <= 1 else q.shape[0]) > seq_threshold_3D\n"
+)
+
+# El 3D parte [0, seq_len) en segmentos y la ventana poda DENTRO de cada uno: con ventana 2048 y 62k de
+# contexto un solo segmento trabaja y el resto sale vacio (194 us contra 135 del 2D). Con ventana, los
+# segmentos se reparten sobre [inicio de la ventana, seq_len): base en tiles. Lo mismo en la reduccion.
+_W3D_COND = "SLIDING_WINDOW > 0 and not (USE_MM_PREFIX or USE_R_SWA) and CHUNK_LOOKBACK < 0"
+UA_SEGM_OLD = (
+    "    if IS_3D:\n"
+    "        tiles_per_segment = cdiv_fn(seq_len, NUM_SEGMENTS_PER_SEQ * TILE_SIZE)\n"
+    "        if segm_idx * tiles_per_segment * TILE_SIZE >= seq_len:\n"
+    "            return\n"
+    "    else:\n"
+    "        tiles_per_segment = 0\n"
+)
+UA_SEGM_NEW = (
+    "    g124_base = 0  # " + MARKER + " primer tile de la ventana (segmentos sobre la ventana)\n"
+    "    if IS_3D:\n"
+    "        if " + _W3D_COND + ":\n"
+    "            g124_base = tl.maximum(seq_len - cur_batch_query_len - SLIDING_WINDOW + 1, 0) // TILE_SIZE\n"
+    "        tiles_per_segment = cdiv_fn(seq_len - g124_base * TILE_SIZE, NUM_SEGMENTS_PER_SEQ * TILE_SIZE)\n"
+    "        if (g124_base + segm_idx * tiles_per_segment) * TILE_SIZE >= seq_len:\n"
+    "            return\n"
+    "    else:\n"
+    "        tiles_per_segment = 0\n"
+)
+UA_LOOP_OLD = (
+    "    # iterate through tiles (now limited to the sliding window range)\n"
+    "    for j in range(loop_lo, loop_hi):\n"
+)
+UA_LOOP_NEW = (
+    "    if IS_3D:  # " + MARKER + "\n"
+    "        if " + _W3D_COND + ":\n"
+    "            loop_lo, loop_hi, max_seq_prefix_len = compute_tile_loop_bounds(\n"
+    "                context_len, seq_len, cur_batch_query_len, q_block_local_idx, segm_idx, tiles_per_segment,\n"
+    "                TILE_SIZE, BLOCK_M, BLOCK_Q, num_queries_per_kv, SLIDING_WINDOW, USE_MM_PREFIX or USE_R_SWA,\n"
+    "                False, USE_CAUSAL, USE_PER_SEQ_CAUSAL, CHUNK_LOOKBACK, CHUNK_SIZE,\n"
+    "            )\n"
+    "            loop_lo = tl.maximum(loop_lo, g124_base + segm_idx * tiles_per_segment)\n"
+    "            loop_hi = tl.minimum(loop_hi, g124_base + (segm_idx + 1) * tiles_per_segment)\n"
+    + UA_LOOP_OLD
+)
+UA_RED_SIG_OLD = (
+    "    NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int\n"
+    "    USE_FP8: tl.constexpr,  # bool\n"
+)
+UA_RED_SIG_NEW = UA_RED_SIG_OLD + "    G124_VENTANA: tl.constexpr = 0,  # " + MARKER + " SLIDING_WINDOW si los segmentos van sobre la ventana\n"
+UA_RED_OLD = (
+    "    num_segments = NUM_SEGMENTS_PER_SEQ\n"
+    "    tiles_per_segment = cdiv_fn(seq_len, num_segments * TILE_SIZE)\n"
+    "\n"
+    "    # create masks for subsequent loads\n"
+    "    act_num_segments = cdiv_fn(seq_len, tiles_per_segment * TILE_SIZE)\n"
+)
+UA_RED_NEW = (
+    "    num_segments = NUM_SEGMENTS_PER_SEQ\n"
+    "    if G124_VENTANA > 0:  # " + MARKER + " misma particion que el kernel 3D\n"
+    "        g124_ql = tl.load(query_start_len_ptr + seq_idx + 1) - tl.load(query_start_len_ptr + seq_idx)\n"
+    "        seq_len = seq_len - tl.maximum(seq_len - g124_ql - G124_VENTANA + 1, 0) // TILE_SIZE * TILE_SIZE\n"
+    "    tiles_per_segment = cdiv_fn(seq_len, num_segments * TILE_SIZE)\n"
+    "\n"
+    "    # create masks for subsequent loads\n"
+    "    act_num_segments = cdiv_fn(seq_len, tiles_per_segment * TILE_SIZE)\n"
+)
+UA_RED_CALL_OLD = (
+    "            NUM_SEGMENTS_PER_SEQ=num_par_softmax_segments,\n"
+    "            USE_FP8=output_scale is not None,\n"
+    "        )\n"
+)
+UA_RED_CALL_NEW = (
+    "            NUM_SEGMENTS_PER_SEQ=num_par_softmax_segments,\n"
+    "            USE_FP8=output_scale is not None,\n"
+    "            G124_VENTANA=sliding_window_val if not (use_mm_prefix or use_rswa) and chunk_lookback < 0 else 0,  # " + MARKER + "\n"
+    "        )\n"
+)
+
 _PATCHES = [
     ("v1/attention/ops/triton_unified_attention.py", [
         ("pn124_ua_import", UA_IMPORT_OLD, UA_IMPORT_NEW),
         ("pn124_ua_params", UA_PARAMS_OLD, UA_PARAMS_NEW),
         ("pn124_ua_tile", UA_TILE_OLD, UA_TILE_NEW),
+        ("pn124_ua_3d_multi_q", UA_3D_OLD, UA_3D_NEW),
+        ("pn124_ua_3d_segm_ventana", UA_SEGM_OLD, UA_SEGM_NEW),
+        ("pn124_ua_3d_lazo_ventana", UA_LOOP_OLD, UA_LOOP_NEW),
+        ("pn124_ua_red_sig", UA_RED_SIG_OLD, UA_RED_SIG_NEW),
+        ("pn124_ua_red_ventana", UA_RED_OLD, UA_RED_NEW),
+        ("pn124_ua_red_llamada", UA_RED_CALL_OLD, UA_RED_CALL_NEW),
     ]),
     ("v1/attention/ops/int4_per_token_head.py", [
         ("pn124_i4_import", I4_IMPORT_OLD, I4_IMPORT_NEW),
