@@ -6117,6 +6117,24 @@ def apply_patch_B3_custom_ar() -> PatchResult:
         return _skipped(name, reason)
     return _failed(name, reason)
 
+@register_patch("PN156 norma que escribe int8")
+def apply_patch_PN156() -> PatchResult:
+    """PN156: residuo + RMSNorm + int8 (SK-26) directo a Marlin W4A8 en qkv, in_proj_qkvz y gate_up."""
+    name = "PN156 norma que escribe int8"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN156_norma_q8
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN156_norma_q8.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR

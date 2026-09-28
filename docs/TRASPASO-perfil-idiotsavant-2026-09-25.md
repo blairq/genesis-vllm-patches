@@ -337,7 +337,7 @@ La baja del banco greedy de 8 textos era de esos textos. Reajustar el borrador c
 
 **Otros hallazgos del 28-09:**
 - **PN90 no se aplicaba en vLLM 0.29** (anclajes viejos + un marcador que lo daba por obsoleto): toda la KV de todos los pedidos iba al disco (7,9 GB por 3 prompts de 28k) y llenó el disco dos veces. Arreglado; verificado: 16 KB. Tope del tier de disco 40 → 20 GB.
-- **Prefill** (`ab_prefill_2509.sh`, instancia aislada): el checkpoint del 25-09 y el actual dan lo mismo (~2.580 / ~2.180 tok/s a 28k / 57k), pero ~5% menos que lo medido el 25-09 (2.721 / 2.298). Viene de otro cambio del stack o de la placa: **pendiente de bisecar**.
+- **Prefill** (`ab_prefill_2509.sh`, instancia aislada): el checkpoint del 25-09 y el actual dan lo mismo (~2.580 / ~2.180 tok/s a 28k / 57k), ~5% menos que la cifra del 24-09 (2.721 / 2.298). **Resuelto** (`ab_prefill_borrador.sh`, override `compose/ov-sin-borrador.yml`): la cifra del 24-09 se midió SIN borrador; sin DFlash2 el stack actual da 2.715 / 2.289. El −5% es el borrador procesando el contexto del prompt (proyección K/V con GEMM fp16 sin cuantizar): entra en el paso 10.
 - **Medir siempre en la instancia aislada** (8361): en la de por omisión entra tráfico de Hermes.
 
 **Lo que queda en la atención** (diagnóstico para la próxima sesión):

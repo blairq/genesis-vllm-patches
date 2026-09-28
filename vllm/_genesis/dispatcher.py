@@ -1300,6 +1300,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN156": {
+        "title": "Norma del decoder que escribe int8 (SK-26) directo a Marlin W4A8",
+        "env_flag": "GENESIS_ENABLE_PN156_NORMA_Q8",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-09-28. Residuo + GemmaRMSNorm + int8 por token en un kernel (SK-26): reemplaza la norma de inductor, per_token_quant_int8 y la escala por la global antes de qkv/in_proj_qkvz/gate_up. El int8 viaja como salida de una custom op funcional y argumento explicito (_q156), no por data_ptr como PN135. Aislado: 7,3 -> 3,0 us (9 filas), 605 -> 351 us (8192)."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN151": {
         "title": "Metadata del GDN para el decode en arbol en un kernel",
         "env_flag": "GENESIS_ENABLE_PN151_GDN_META",

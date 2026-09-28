@@ -111,6 +111,7 @@ services:
       - GENESIS_ENABLE_PN154_HAD_SALIDAS=${GENESIS_ENABLE_PN154_HAD_SALIDAS:-1}  # Hadamard por cabeza en la entrada de o_proj/out_proj: solo actua si el checkpoint la declara (v2)
       - GENESIS_ENABLE_PN155_BA_EN_QKVZ=${GENESIS_ENABLE_PN155_BA_EN_QKVZ:-1}      # in_proj_b/a (W4 desde el 28-09) dentro del Marlin de in_proj_qkvz (checkpoint del 28-09; con el del 25-09, 0)
       - GENESIS_SK18H_NW=${GENESIS_SK18H_NW:-8}                              # warps por bloque de SK-18h batch2: 8 = un bloque por (secuencia, cabeza), K/V una vez
+      - GENESIS_ENABLE_PN156_NORMA_Q8=${GENESIS_ENABLE_PN156_NORMA_Q8:-0}          # norma que escribe int8 (SK-26) directo a Marlin en qkv, in_proj_qkvz y gate_up
       - GENESIS_PN131_UNION_BLOQUES=${GENESIS_PN131_UNION_BLOQUES:-2400}          # union4: paginas por grupo elegidas para ~2400 bloques (1 pedido CPG 16, 4 pedidos ~60); bit a bit
       - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
       - GENESIS_ENABLE_PN128_GDN_MTP_ASYNC_ORDER=1
