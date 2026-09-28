@@ -65,7 +65,7 @@ sk18h_prep2(
     unsigned mx = 0;
 #pragma unroll
     for (int e = 0; e < 8; ++e) {
-        x[e] = x[e] >> 4;                                   // / sqrt(256)
+        x[e] = (x[e] + 8) >> 4;                             // / sqrt(256), redondeado (el truncado sesga q: b.k cambia con la key)
         const unsigned a = (unsigned)(x[e] < 0 ? -x[e] : x[e]);
         mx = mx > a ? mx : a;
     }

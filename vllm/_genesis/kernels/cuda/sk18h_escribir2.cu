@@ -57,7 +57,7 @@ sk18h_escribir2(
         fwht_lanes(xv, lane);
 #pragma unroll
         for (int e = 0; e < 8; ++e) {
-            xv[e] >>= 4;
+            xv[e] = (xv[e] + 8) >> 4;                        // redondeo, no truncado: el sesgo de >>4 (-1/2 LSB en todas las dims) no se promedia en la salida (O = sum p v) y el error crecia con el largo
             const unsigned a = (unsigned)(xv[e] < 0 ? -xv[e] : xv[e]);
             mv = mv > a ? mv : a;
         }

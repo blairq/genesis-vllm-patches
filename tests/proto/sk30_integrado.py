@@ -20,7 +20,9 @@ K0s, V0s, o = [], [], 0
 for b, n in enumerate(LENS):
     pg = perm[o:o + paginas[b]]; o += paginas[b]; bt[b, :pg.numel()] = pg
     slots = (pg[torch.arange(n) // BS].to(torch.int64) * BS + torch.arange(n) % BS).to(dev)
-    K0 = (torch.randn(n, NH, D, device=dev) * 2).half(); V0 = torch.randn(n, NH, D, device=dev).half()
+    K0 = (torch.randn(n, NH, D, device=dev) * 2).half(); V0 = torch.randn(n, NH, D, device=dev)
+    if os.environ.get("VOUT") == "1": V0[:, :, :4] *= 8                 # canales outlier en V
+    V0 = V0.half()
     for t0 in range(0, n, 8192):
         P.escribir(impl, layer, K0[t0:t0 + 8192], V0[t0:t0 + 8192], kv, slots[t0:t0 + 8192])
     K0s.append(K0); V0s.append(V0)
@@ -42,6 +44,9 @@ for b, n in enumerate(LENS):
     vis = (pos[None, :] < ctx) | (pos[None, :] - ctx <= torch.arange(L, device=dev)[:, None])
     sc = sc.masked_fill(~vis[None, :, None, :], float("-inf"))
     ref = torch.einsum("hjgt,thd->jhgd", sc.softmax(-1), V0s[b].float()).reshape(L, HQ, D)
+    if os.environ.get("REF_ROT") == "1":      # comparar en la base rotada: ref' = (ref * s) Hn
+        H = P._hadamard(torch.device(dev), torch.float32) / 16
+        ref = (ref * P._signos_dev(torch.device(dev)).float()) @ H
     o_ = out[b * L:(b + 1) * L].float()
     errs.append(float((o_ - ref).norm() / ref.norm()))
 def t_grafo(f, it=10):

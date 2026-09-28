@@ -134,6 +134,9 @@ NW8 = int(os.environ.get("GENESIS_SK18H_NW", "8"))
 SK30 = os.environ.get("GENESIS_PN131_SK30", "0") == "1"
 SK30_GMAX = int(os.environ.get("GENESIS_PN131_SK30_GMAX", "128"))
 SK30_NQ = 2
+# V rotada en d al escribir (Hadamard/16 con signos, como K): con canales outlier el error int8 de V baja de
+# 2,0% a 0,64% (tests/proto/sk30_rot_pv.py). Solo con SK-30 (su union des-rota la salida); batch2 no la sabe
+# leer, asi que sin SK-30 queda apagada.
 SH_30 = 2 * 64 * 272 + 2 * 256 * 80 + 64 * 72 * 2 + 2 * 64 * 4 + 2 * SK30_NQ * 64 * 4
 
 
@@ -148,6 +151,7 @@ ROT_PTX = os.environ.get("GENESIS_PN131_ROT", "ptx") == "ptx"
 # y, entre los tokens nuevos, solo a sus ancestros. Solo el camino int8 con rotacion PTX. Apagado
 # el texto de los kernels queda identico al de siempre.
 ARBOL = os.environ.get("GENESIS_ENABLE_ARBOL", "0") == "1"
+ROTV_MAIN = os.environ.get("GENESIS_PN131_ROTV", "0") == "1" and SK30 and ARBOL and ROT_PTX
 _signos = {}
 
 
@@ -265,17 +269,18 @@ def _kernels(md="int8"):
         ks = dict(main=Kernel("sk18h_batch2.cu", "sk18h_batch2", defs=defs + arb, warps=4),
                   main8=Kernel("sk18h_batch2.cu", "sk18h_batch2", defs=defs + arb + [f"-DNWARPS={NW8}"], warps=NW8),
                   escribir=Kernel("sk18h_escribir2.cu" if ROT_PTX else "sk18h_escribir.cu",
-                                  "sk18h_escribir2" if ROT_PTX else "sk18h_escribir", warps=1),
+                                  "sk18h_escribir2" if ROT_PTX else "sk18h_escribir",
+                                  defs=["-DROTV=1"] if (ROTV_MAIN and ROT_PTX) else [], warps=1),
                   prep=Kernel("sk18h_prep2.cu" if ROT_PTX else "sk18h_prep.cu",
                               "sk18h_prep2" if ROT_PTX else "sk18h_prep", defs=arb, warps=1),
                   union=Kernel("sk18h_union4.cu", "sk18h_union4", defs=defs, warps=1),
-                  decuant=Kernel("sk18h_decuant.cu", "sk18h_decuant", warps=1),
+                  decuant=Kernel("sk18h_decuant.cu", "sk18h_decuant", defs=["-DROTV=1"] if ROTV_MAIN else [], warps=1),
                   salida=Kernel("sk18h_salida.cu", "sk18h_salida", warps=1))
         if SK30 and ARBOL and ROT_PTX:
             ks["prep30"] = Kernel("sk18h_prep2.cu", "sk18h_prep2", defs=arb + ["-DQSF=1"], warps=1)
             ks["sk30"] = Kernel("sk30_decode_1pasada.cu", "sk30_decode",
                                 defs=[f"-DNQ={SK30_NQ}", "-DPV8=1", "-DPHL=1"], warps=4 * SK30_NQ)
-            ks["sk30u"] = Kernel("sk30_decode_1pasada.cu", "sk30_union", warps=8)
+            ks["sk30u"] = Kernel("sk30_decode_1pasada.cu", "sk30_union", defs=["-DROTV=1"] if ROTV_MAIN else [], warps=8)
         for x in ks.values():
             x.cargar()
         _k[dev] = ks
@@ -494,7 +499,7 @@ def escribir(impl, layer, key, value, kv_cache, slot_mapping):
             vv_ = value[:n].float()
             if ROT_PTX:   # la referencia de K es la de k ROTADA (el max baja ~2x con Hadamard)
                 kk_ = _rotar_q_prefill(kk_.view(n, -1, QD).to(torch.float32))
-            if md == "int4":   # en int4 tambien la V va rotada
+            if md == "int4" or ROTV_MAIN:   # la V tambien va rotada (int4, o int8 con ROTV)
                 vv_ = _rotar_q_prefill(vv_.view(n, -1, QD).to(torch.float32))
             sk = float(kk_.abs().amax(-1)[ok].max()) / niv
             sv = float(vv_.abs().amax(-1)[ok].max()) / niv
@@ -711,6 +716,8 @@ def _decode_uniforme(impl, query, kv_cache, md, output, B, L, capturando):
             ks["prep8"].lanzar((nt, nh * G), [q16, seq, c.refs8, _signos_dev(dev), bf.Q8[: R * QD],
                                               bf.lim8[:R], bf.mqb8[:R], bf.dcap8[:R],
                                               L, nh, G, MB, ZSH, q16.stride(0)])
+    elif ROTV_MAIN and MB != 64:
+        raise RuntimeError(f"PN131/ROTV: la V rotada solo la lee SK-30 (MB=64); MB={MB}")
     elif ROT_PTX and ARBOL and SK30 and MB == 64:
         # SK-30: prep2 con la escala de fila en float, decode en una pasada y union a la salida
         anc = mascara_arbol(dev, L, bf, capturando)
@@ -721,7 +728,8 @@ def _decode_uniforme(impl, query, kv_cache, md, output, B, L, capturando):
                                                 bf.Op30[: SK30_GMAX * R * QD], bf.Mp30[: SK30_GMAX * R],
                                                 bf.Lp30[: SK30_GMAX * R]], shared=SH_30)
         ks["sk30u"].lanzar((MB, B * nh), [bf.Op30[: SK30_GMAX * R * QD], bf.Mp30[: SK30_GMAX * R],
-                                          bf.Lp30[: SK30_GMAX * R], seq, SK30_GMAX, B, nh, L, G, output[:nt]])
+                                          bf.Lp30[: SK30_GMAX * R], seq, SK30_GMAX, B, nh, L, G, output[:nt],
+                                          _signos_dev(dev)])
         return
     elif ROT_PTX and ARBOL:
         anc = mascara_arbol(dev, L, bf, capturando)

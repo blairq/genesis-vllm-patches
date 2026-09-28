@@ -82,7 +82,7 @@ SH = 2 * 64 * 272 + 2 * 256 * 80 + 64 * 72 * 2 + 2 * 64 * 4 + 2 * NQ * 64 * 4
 def f30():
     fprep()
     k30.lanzar((GMAX, NH), [Qi, qs, kv, bt, bt.stride(0), sl, lim_, abase_, amask_, NH, BS, BLK, c.refs, GMAX, Op, Mp, Lp], shared=SH)
-    ku.lanzar((RB, NH), [Op, Mp, Lp, sl, GMAX, 1, NH, L, G, out30])
+    ku.lanzar((RB, NH), [Op, Mp, Lp, sl, GMAX, 1, NH, L, G, out30, P._signos_dev(torch.device(dev))])
 if ARB:   # referencia con la mascara del arbol
     vis2 = torch.zeros(L, N, dtype=torch.bool, device=dev)
     for j in range(L):
@@ -112,4 +112,4 @@ def t_grafo(f, it=10):
     e1.record(); torch.cuda.synchronize(); return e0.elapsed_time(e1) * 1000 / (5 * it)
 print(f"GRAFO N={N}: SK-18h entero {t_grafo(f18):.1f} us  |  SK-30 (decode+union) {t_grafo(f30):.1f} us", flush=True)
 print(f"GRAFO N={N} GMAX={GMAX} NQ={NQ}: solo decode {t_grafo(lambda: k30.lanzar((GMAX, NH), [Qi, qs, kv, bt, bt.stride(0), sl, lim_, abase_, amask_, NH, BS, BLK, c.refs, GMAX, Op, Mp, Lp], shared=SH)):.1f} us"
-      f"  solo union {t_grafo(lambda: ku.lanzar((RB, NH), [Op, Mp, Lp, sl, GMAX, 1, NH, L, G, out30])):.1f} us", flush=True)
+      f"  solo union {t_grafo(lambda: ku.lanzar((RB, NH), [Op, Mp, Lp, sl, GMAX, 1, NH, L, G, out30, P._signos_dev(torch.device(dev))])):.1f} us", flush=True)

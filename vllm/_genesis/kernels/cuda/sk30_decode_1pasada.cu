@@ -385,9 +385,15 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 
 // Union de los grupos usados: out[b, j, h*G+g, :] = sum_g O_g l_g 2^(m_g - M) / sum_g l_g 2^(m_g - M).
 // 8 warps: cada warp recorre grupos g = w, w+8, ...; cada lane 8 dims (uint4 de halves); suma entre warps en shared.
+// ROTV=1: la V del pool esta ROTADA en d (Hadamard/16 con signos, como K): la salida sale en esa base y se
+// des-rota aca: O = (O' Hn) * s, con una FWHT de 256 en shared (8 etapas).
+#ifndef ROTV
+#define ROTV 0
+#endif
 extern "C" __global__ void __launch_bounds__(256)
 sk30_union(const __half* __restrict__ Op, const float* __restrict__ Mp, const float* __restrict__ Lp,
-           const int* __restrict__ seqlen, int GMAX, int B, int NH, int L, int G, __half* __restrict__ out)
+           const int* __restrict__ seqlen, int GMAX, int B, int NH, int L, int G, __half* __restrict__ out,
+           const int* __restrict__ signos)
 {
     __shared__ float cg[256];
     __shared__ float acc[8][QD];
@@ -435,5 +441,19 @@ sk30_union(const __half* __restrict__ Op, const float* __restrict__ Mp, const fl
 #pragma unroll
     for (int x = 0; x < 8; ++x) num += acc[x][tid];
     const int j = f / G, gq = f % G;
-    out[(((size_t)b * L + j) * (NH * G) + h * G + gq) * QD + tid] = __float2half(den > 0.f ? num / den : 0.f);
+    float y = den > 0.f ? num / den : 0.f;
+#if ROTV
+    __shared__ float xr[QD];
+    xr[tid] = y;
+#pragma unroll
+    for (int s = 1; s < QD; s <<= 1) {
+        __syncthreads();
+        const float a = xr[tid], c = xr[tid ^ s];
+        __syncthreads();
+        xr[tid] = (tid & s) ? c - a : a + c;
+    }
+    __syncthreads();
+    y = xr[tid] * (1.f / 16.f) * (float)signos[tid];
+#endif
+    out[(((size_t)b * L + j) * (NH * G) + h * G + gq) * QD + tid] = __float2half(y);
 }
