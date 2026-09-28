@@ -60,6 +60,10 @@ def inicializar(rank: int, w: int, grupo_cpu) -> None:
     if r != 0:
         raise RuntimeError(f"cudaMalloc -> {r}")
     rt.cudaMemset(base, 0, ctypes.c_size_t(tam))
+    mio = ctypes.c_void_p()                     # mi parte cuantizada (camino int8), local
+    r = rt.cudaMalloc(ctypes.byref(mio), ctypes.c_size_t(_MAX_BYTES))
+    if r != 0:
+        raise RuntimeError(f"cudaMalloc(mio) -> {r}")
     ctl = ctypes.c_void_p()
     r = rt.cudaMalloc(ctypes.byref(ctl), ctypes.c_size_t(64))
     if r != 0:
@@ -70,9 +74,9 @@ def inicializar(rank: int, w: int, grupo_cpu) -> None:
     if r != 0:
         raise RuntimeError(f"cudaIpcGetMemHandle -> {r}")
     crudo = ctypes.string_at(ctypes.byref(h), 64)
-    mio = torch.frombuffer(bytearray(crudo), dtype=torch.uint8).clone()
+    mi_handle = torch.frombuffer(bytearray(crudo), dtype=torch.uint8).clone()
     todos = [torch.zeros(64, dtype=torch.uint8) for _ in range(w)]
-    dist.all_gather(todos, mio, group=grupo_cpu)
+    dist.all_gather(todos, mi_handle, group=grupo_cpu)
     ho = IpcHandle()
     ctypes.memmove(ctypes.byref(ho), bytes(todos[otro].numpy()), 64)
     po = ctypes.c_void_p()
@@ -82,7 +86,8 @@ def inicializar(rank: int, w: int, grupo_cpu) -> None:
     torch.cuda.synchronize()
     dist.barrier(group=grupo_cpu)           # los dos buffers en cero antes de la primera escritura remota
     _estado.update(listo=True, rx_local=base.value, rx_peer=po.value, flag_local=base.value + 2 * _MAX_BYTES,
-                   flag_peer=po.value + 2 * _MAX_BYTES, ctl=ctl.value, dev=dev, kern=None)
+                   flag_peer=po.value + 2 * _MAX_BYTES, ctl=ctl.value, dev=dev, kern=None, kern8=None,
+                   mio=mio.value, rank=rank)
     log.warning("[PN152] all-reduce P2P listo (rank %d, %d KB por ranura, %d bloques)", rank, _MAX_BYTES >> 10, _BLOQUES)
 
 
@@ -121,5 +126,34 @@ def all_reduce(x: torch.Tensor) -> torch.Tensor:
     n16 = x.numel() * x.element_size() // 16
     P = ctypes.c_uint64
     k.lanzar((_BLOQUES, 1), [x, out, n16, P(_estado["rx_local"]), P(_estado["rx_peer"]), _MAX_BYTES // 16,
+                             P(_estado["flag_local"]), P(_estado["flag_peer"]), P(_estado["ctl"])])
+    return out
+
+
+_G = 64
+# bytes fp16 desde los que va en int8 (0 = nunca). Medido 27-09: int8 gana en todos los tamanos (9 filas
+# 13,3 vs 14,9 us; 36 filas 26,7 vs 44,9) y la cuenta es la de PN120, que en el prefill cuesta KL 0,0001
+# (0,0193 vs 0,0192 en respuestas, kl_ar_int8.sh); servido: paso -1,3% (1 pedido) / -3,5% (4). El compose usa 1.
+_MIN_I8 = int(os.environ.get("GENESIS_PN152_MIN_I8", "0"))
+_BLOQUES_I8 = int(os.environ.get("GENESIS_PN152_BLOQUES_I8", "8"))   # barrido 27-09: 8 gana con 36 y 54 filas
+
+
+def sirve_i8(x: torch.Tensor) -> bool:
+    n = x.numel()
+    return (_MIN_I8 > 0 and sirve(x) and x.shape[-1] % _G == 0 and n * 2 >= _MIN_I8
+            and n + (n // _G) * 2 <= _MAX_BYTES)
+
+
+def all_reduce_i8(x: torch.Tensor) -> torch.Tensor:
+    """Como ``all_reduce`` pero los parciales viajan en int8 por grupo de 64 (la cuenta de PN120) y las dos
+    placas suman las dos partes cuantizadas en orden de rango: el resultado es identico en ambas."""
+    k = _estado["kern8"]
+    if k is None:
+        from vllm._genesis.kernels.ptx_lab import Kernel
+        k = _estado["kern8"] = Kernel("sk24_ar_p2p.cu", "sk24_ar_i8", defs=["-DHILOS=256"], warps=8)
+    out = torch.empty_like(x)
+    P = ctypes.c_uint64
+    k.lanzar((_BLOQUES_I8, 1), [x, out, x.numel() // _G, _estado["rank"], P(_estado["rx_local"]),
+                             P(_estado["rx_peer"]), _MAX_BYTES, P(_estado["mio"]),
                              P(_estado["flag_local"]), P(_estado["flag_peer"]), P(_estado["ctl"])])
     return out

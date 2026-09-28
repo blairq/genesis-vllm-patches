@@ -80,7 +80,7 @@ services:
       - GENESIS_PN126_ROT=hadamard
       # ── TP=2: all-reduce ────────────────────────────────────────────────────
       - GENESIS_ENABLE_PN120_AR_INT8=1           # all-reduce int8 en el prefill (+6,5%)
-      - GENESIS_PN120_M_MIN=512
+      - GENESIS_PN120_M_MIN=${GENESIS_PN120_M_MIN:-512}
       - GENESIS_PN120_GRUPO=64
       - GENESIS_ENABLE_B3_CUSTOM_AR=1            # all-reduce propio para TP=2 con fallback
       # ── especulativo: DFlash2 + arbol de 8 nodos ────────────────────────────
@@ -104,6 +104,7 @@ services:
       - GENESIS_PN131_MIXTO=${GENESIS_PN131_MIXTO:-1}                                  # pasos mixtos: decodes por SK-18h y solo el prefill por descuantizar + FlashInfer (descuantizar -63%)
       - GENESIS_PN131_MIXTO_VERIFICAR=${GENESIS_PN131_MIXTO_VERIFICAR:-0}              # N: compara contra el camino completo en las primeras N llamadas
       - GENESIS_ENABLE_PN152_AR_P2P=${GENESIS_ENABLE_PN152_AR_P2P:-1}                  # all-reduce de decode por P2P directo (SK-24): paso -4,9% / -6,4%, bit a bit con NCCL
+      - GENESIS_PN152_MIN_I8=${GENESIS_PN152_MIN_I8:-1}                              # all-reduce P2P de decode en int8 por grupo de 64 desde estos bytes fp16 (1 = siempre, 0 = nunca): paso -1,3% / -3,5%, KL 0,0193 vs 0,0192
       - GENESIS_ENABLE_PN127_MAMBA_DROP_EAGLE=1
       - GENESIS_ENABLE_PN128_GDN_MTP_ASYNC_ORDER=1
       - GENESIS_ENABLE_B5_REJECTION_SAMPLER=1
