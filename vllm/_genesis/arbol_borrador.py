@@ -471,6 +471,7 @@ def reponer_cadena_kernel(anc131, anc_gdn, anc3, num_reqs: int, T: int):
 
 
 _k_comp = None
+_ptrs_cache: dict = {}
 
 
 def compactar_kernel(idx_mapping, camino, nacc, filas_cinta, camino_cinta, ocultos, kv_addrs,
@@ -540,8 +541,23 @@ def compactar_kernel(idx_mapping, camino, nacc, filas_cinta, camino_cinta, ocult
                                  tl.load(bs_ + 2 * KOFF + os_ * NH * 4 + oe, mask=me), mask=me)
         _k_comp = _k
     dev = camino.device
-    ptrs = _t.tensor([h.data_ptr() for h in ocultos], dtype=_t.int64, device=dev)
-    strs = _t.tensor([h.stride(0) for h in ocultos], dtype=_t.int64, device=dev)
+    # Las direcciones y strides de los buffers de estados ocultos, en GPU. ANTES:
+    #     _t.tensor([...], device=dev)
+    # que copia desde memoria no pinned y torch lo hace SINCRONICO: cudaStreamSynchronize, o sea que la CPU
+    # esperaba a que la GPU terminara todo lo encolado (el forward del target, ~20 ms), dos veces por paso.
+    # Con eso el scheduling asincrono no servia y el trabajo eager posterior se lanzaba con la GPU parada
+    # (perfil con pila de Python, 27-09: 19,8 ms por paso de CPU bloqueada). Ahora: una vez por juego de
+    # direcciones (los buffers son persistentes), desde memoria pinned y sin bloquear.
+    clave = tuple((h.data_ptr(), h.stride(0)) for h in ocultos)
+    ent = _ptrs_cache.get(clave)
+    if ent is None:
+        host = _t.tensor([c[0] for c in clave] + [c[1] for c in clave], dtype=_t.int64).pin_memory()
+        ent = _ptrs_cache[clave] = (host.to(dev, non_blocking=True), host)   # el host queda vivo: la copia es async
+        if len(_ptrs_cache) == 33:
+            import logging
+            logging.getLogger("genesis.arbol").warning(
+                "[ARBOL] los buffers de estados ocultos cambian de direccion: %d juegos cacheados", len(_ptrs_cache))
+    ptrs, strs = ent[0][:n_oc], ent[0][n_oc:]
     D = ocultos[0].shape[1]
     _k_comp[(num_reqs, n_oc + kv_addrs.shape[0])](
         idx_mapping, camino, camino.stride(0), nacc, filas_cinta, filas_cinta.stride(0),
