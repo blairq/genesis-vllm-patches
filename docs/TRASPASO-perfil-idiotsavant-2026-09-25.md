@@ -244,6 +244,42 @@ Detalle de `borrador: capas`:
 - **Disco lleno el 27-09:** el tier de KV (40 GB) más 49 GB de capturas del borrador y 6 variantes de 3,6 GB en
   `trazas/`. Se vació el tier de KV. Las capturas son datos de investigación: preguntar antes de borrar.
 
+## 3c. Revisión de bloqueos y Python puro (28-09, perfil con pilas del stack actual)
+
+**Pregunta:** ¿quedan llamadas bloqueantes a la CPU o Python puro en el camino crítico?
+
+**Método:**
+- `PROF_STACK=true` en `perfil_idiotsavant.sh`.
+- `huecos_py.py <dir> <pasos>`: huecos de la GPU atribuidos a la línea de Python. Ahora usa solo los últimos pasos de decode puro.
+- `syncs_py.py <dir> <pasos>` (nuevo): llamadas bloqueantes de la CPU (`cuda*Synchronize`, `cudaMemcpy` a host) atribuidas a la línea de Python.
+
+**Trampa del perfil con pilas:** el worker llega a 10,6 GB y el OOM del cgroup (26 GB) lo mata. Por eso:
+- una fase por arranque (`pila_actual.sh`);
+- `PROF_ITER` ≤10 con 4 pedidos;
+- `PROF_DELAY_DEC=40`, para que la ventana no caiga en el prefill.
+
+**Resultado en decode estable:**
+
+| | 1 pedido | 4 pedidos |
+|---|---|---|
+| GPU ociosa por paso | 149 µs (0,6%) | ~360 µs |
+| Python por `execute_model` | 3,5 ms | 4 ms |
+| Paso | 22–24 ms | ~30 ms |
+
+- **La CPU va adelantada:** el Python queda oculto detrás de la GPU.
+- **Única sync por paso:** `cudaEventSynchronize` en `async_utils.get_output`. Está en el hilo de salida del async scheduling (de diseño, no frena a la GPU).
+- **Resto:** `cudaMemcpyAsync` de host a GPU, de 5–13 µs.
+- **Revisión estática** de nuestros módulos del camino caliente: los `int()`/`bool()` son sobre arrays de numpy; el único `bool(tensor_gpu)` (`sk18_attn.py:752`) corre solo con KV int4.
+
+**Bug arreglado (commit 6072b08):** PN150 grababa grafos también en los pasos mixtos, donde `n` es arbitrario.
+- Cada captura es un `cudaDeviceSynchronize`: ~16 ms de CPU bloqueada y la GPU ociosa en ese paso.
+- Además llenaba el tope de 48 grafos con formas que no se repiten.
+- Ahora solo se graba `n` múltiplo de K+1: 8 grafos en toda una corrida. Mismo texto en el oráculo.
+
+**Queda (pasos mixtos, TTFT con carga):**
+- PN151 vuelve al build original del GDN (~150 µs de huecos por paso).
+- Los huecos lanzados desde Python del prefill GDN de FLA (`chunk_*`, `_forward_core`).
+
 ## 4. Palancas, en el orden sugerido
 
 Ahorro = medido menos el techo del kernel: **es un máximo**. Los porcentajes son del paso (1 pedido / 4 pedidos).
