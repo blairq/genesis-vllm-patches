@@ -938,7 +938,7 @@ def escribir_cinta(A_log, a, b, dt_bias, k, v, cu_seqlens, sidx, slots, cinta, N
             motivo = "A_log/dt_bias sin copia fp32 (primera vez dentro de una captura)"
         elif not (k.dtype == v.dtype == a.dtype == b.dtype == torch.float16 and cinta.dtype == torch.float32):
             motivo = f"dtypes k={k.dtype} v={v.dtype} a={a.dtype} b={b.dtype} cinta={cinta.dtype}"
-        elif not (a.is_contiguous() and b.is_contiguous() and k.stride(-1) == 1 and v.stride(-1) == 1
+        elif not (stride_ab(a, b) is not None and k.stride(-1) == 1 and v.stride(-1) == 1
                   and k.stride(-2) == K and v.stride(-2) == V and k.stride(-3) % 4 == 0 and v.stride(-3) % 4 == 0):
             motivo = f"layout k {tuple(k.stride())} v {tuple(v.stride())} (el PTX lee k/v con stride de token)"
         if motivo is not None:
@@ -947,24 +947,26 @@ def escribir_cinta(A_log, a, b, dt_bias, k, v, cu_seqlens, sidx, slots, cinta, N
         else:
             A_log, dt_bias = A32, db32
     if modo == "ptx":
-        clave = (H, HV, TM)
+        sab = stride_ab(a, b)
+        clave = (H, HV, TM, sab)
         kern = _k_cinta_ptx.get(clave)
         if kern is None:
             from vllm._genesis.kernels.ptx_lab import Kernel
             kern = _k_cinta_ptx[clave] = Kernel("pn122_cinta.cu", "pn122_cinta",
-                                                defs=[f"-DH={H}", f"-DHV={HV}", f"-DTM={TM}"], warps=8)
+                                                defs=[f"-DH={H}", f"-DHV={HV}", f"-DTM={TM}", f"-DSAB={sab}"],
+                                                warps=8)
         import ctypes
         kern.lanzar((N, TM, 1 + (HV * V // 4 + 255) // 256),
                     [A_log, a, b, dt_bias, 1.0, 20.0, k, v, ctypes.c_longlong(k.stride(-3)),
                      ctypes.c_longlong(v.stride(-3)), cu_seqlens, sidx, slots, cinta, N])
     elif modo == "par":
-        k, v = k.contiguous(), v.contiguous()
+        k, v, a, b = k.contiguous(), v.contiguous(), a.contiguous(), b.contiguous()
         _k_escribir_par[(N, TM, H + HV)](
             A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N,
             H=H, HV=HV, K=K, V=V, BK=BK, BV=triton.next_power_of_2(V), TM=TM, ROW=ROW,
             IS_L2=True, num_warps=4, num_stages=1)
     else:
-        k, v = k.contiguous(), v.contiguous()
+        k, v, a, b = k.contiguous(), v.contiguous(), a.contiguous(), b.contiguous()
         _k_escribir[(N,)](
             A_log, a, b, dt_bias, 1.0, 20.0, k, v, cu_seqlens, sidx, slots, cinta, N,
             H=H, HV=HV, K=K, V=V, BK=BK, BHV=triton.next_power_of_2(HV * V),
@@ -1039,18 +1041,27 @@ def _arbol_ptx_motivo(layer, A_log, dt_bias, q, k, v, a, b, h, H, HV, K, V):
     return m
 
 
+def stride_ab(a, b):
+    """Stride de fila comun de a y b [T, HV] si los PTX pueden leerlas asi (ultima dim contigua), si no None."""
+    if a.dim() != 2 or b.dim() != 2 or a.stride(-1) != 1 or b.stride(-1) != 1 or a.stride(0) != b.stride(0):
+        return None
+    return int(a.stride(0)) if a.shape[0] > 1 else int(a.shape[1])
+
+
 def _lanzar_arbol_ptx(layer, A_log, a, b, dt_bias, q, k, v, o, h, cu, sidx, nacc, slots, cinta, N,
                       H, HV, K, V, TM):
     import ctypes
     T1 = layer.num_spec + 1
     hdt = 0 if h.dtype == torch.float16 else 1
-    clave = (H, HV, TM, T1, hdt)
+    sab = stride_ab(a, b) or HV
+    clave = (H, HV, TM, T1, hdt, sab)
     kern = _k_arbol_ptx.get(clave)
     if kern is None:
         from vllm._genesis.kernels.ptx_lab import Kernel
         kern = _k_arbol_ptx[clave] = Kernel(
             "gdn_arbol.cu", "gdn_arbol", warps=4,
-            defs=[f"-DH={H}", f"-DHV={HV}", f"-DTM={TM}", f"-DTMAX={T1}", f"-DHDT={hdt}", f"-DRPW={_ARBOL_RPW}"])
+            defs=[f"-DH={H}", f"-DHV={HV}", f"-DTM={TM}", f"-DTMAX={T1}", f"-DHDT={hdt}", f"-DRPW={_ARBOL_RPW}",
+                  f"-DSAB={sab}"])
     L = ctypes.c_longlong
     kern.lanzar((V // (4 * _ARBOL_RPW), N * HV),
                 [_f32(A_log), a, b, _f32(dt_bias), q, k, v, L(q.stride(-3)), L(k.stride(-3)), L(v.stride(-3)),
@@ -1077,11 +1088,14 @@ def spec_update(layer, A_log, a, b, dt_bias, q, k, v, ssm_state, cu_seqlens,
     sidx = spec_state_indices[:, 0].contiguous() if spec_state_indices.ndim == 2 \
         else spec_state_indices
     nacc = num_accepted_tokens
-    a, b = a.contiguous(), b.contiguous()
     # PTX del arbol (gdn_arbol.cu): lee q/k/v con su stride de token, asi que no hacen falta las tres
     # copias .contiguous() (6,6 us por capa en el perfil del 25-09).
     arbol_ptx = (_ARBOL_PTX and paso_arbol_activo() and _camino_gpu is not None and not _CERRADA
                  and _arbol_ptx_motivo(layer, A_log, dt_bias, q, k, v, a, b, ssm_state, H, HV, K, V) is None)
+    # a y b: con PN164 llegan como vistas de la salida de in_proj (stride de fila > HV). Los dos PTX (arbol y
+    # cinta) las leen con ese stride; cualquier otro camino las quiere contiguas.
+    if not (arbol_ptx and _ESCRIBIR_MODO == "ptx" and stride_ab(a, b) is not None):
+        a, b = a.contiguous(), b.contiguous()
     if not arbol_ptx:
         q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
     _bits = sync_bits()

@@ -6257,6 +6257,24 @@ def apply_patch_PN163() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN164 vistas del GDN")
+def apply_patch_PN164() -> PatchResult:
+    """PN164: entradas del GDN como vistas de in_proj (despues de PN155 y PN50)."""
+    name = "PN164 vistas del GDN"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN164_gdn_vistas
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN164_gdn_vistas.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR

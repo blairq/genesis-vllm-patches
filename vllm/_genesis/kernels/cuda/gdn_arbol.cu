@@ -120,6 +120,9 @@ struct __align__(16) Paso {            // en shared, por paso (cinta a reproduci
     float v[BV];         // v de las 32 filas del tile
 };
 
+#ifndef SAB
+#define SAB HV           // stride de fila de a y b (PN164: vistas de la salida de in_proj, sin copia)
+#endif
 extern "C" __global__ void __launch_bounds__(128)
 gdn_arbol(const float* __restrict__ A_log, const __half* __restrict__ a, const __half* __restrict__ b,
           const float* __restrict__ dt_bias,
@@ -195,8 +198,8 @@ gdn_arbol(const float* __restrict__ A_log, const __half* __restrict__ a, const _
         carga4(k + (size_t)src * sk + i_h * KD + f0, kx[i]);
         carga4(q + (size_t)src * sq + i_h * KD + f0, qx[i]);
         tv[i] = h2f(__half_as_ushort(v[(size_t)src * sv + i_hv * VD + i_v * BV + (l % BV)]));
-        ta[i] = h2f(__half_as_ushort(a[(size_t)src * HV + i_hv]));
-        tb[i] = h2f(__half_as_ushort(b[(size_t)src * HV + i_hv]));
+        ta[i] = h2f(__half_as_ushort(a[(size_t)src * SAB + i_hv]));
+        tb[i] = h2f(__half_as_ushort(b[(size_t)src * SAB + i_hv]));
     }
     if (w == 0 && l < (unsigned)TT) msk[l] = __ldg(anc + bos + l);
 #pragma unroll

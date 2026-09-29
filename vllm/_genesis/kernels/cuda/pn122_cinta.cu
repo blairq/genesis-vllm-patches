@@ -95,6 +95,9 @@ __device__ __forceinline__ float logf_nv(float x) {
     return r;
 }
 
+#ifndef SAB
+#define SAB HV           // stride de fila de a y b (PN164: vistas de la salida de in_proj, sin copia)
+#endif
 extern "C" __global__ void __launch_bounds__(NW * 32)
 pn122_cinta(const float* __restrict__ A_log, const __half* __restrict__ a, const __half* __restrict__ b,
             const float* __restrict__ dt_bias, float beta_sp, float threshold,
@@ -156,7 +159,7 @@ pn122_cinta(const float* __restrict__ A_log, const __half* __restrict__ a, const
     // ---- g (warp 0) y beta (warp 1): un hilo por cabeza v ----
     if (w == 0 && l < HV) {
         const unsigned hv = l;
-        const float x = add_rn(h2f(__half_as_ushort(a[(size_t)src * HV + hv])), __ldg(dt_bias + hv));
+        const float x = add_rn(h2f(__half_as_ushort(a[(size_t)src * SAB + hv])), __ldg(dt_bias + hv));
         const float bx = mul_rn(beta_sp, x);
         const float ib = div_full(1.0f, beta_sp);
         const float lg = logf_nv(add_rn(ex2_ap(mul_rn(bx, LOG2E)), 1.0f));
@@ -165,7 +168,7 @@ pn122_cinta(const float* __restrict__ A_log, const __half* __restrict__ a, const
         row[H * KD + HV * VD + hv] = mul_rn(sub_rn(0.0f, eA), sp);
     } else if (w == 1 && l < HV) {
         const unsigned hv = l;
-        const float bh = h2f(__half_as_ushort(b[(size_t)src * HV + hv]));
+        const float bh = h2f(__half_as_ushort(b[(size_t)src * SAB + hv]));
         const float e = ex2_ap(mul_rn(sub_rn(0.0f, bh), LOG2E));
         row[H * KD + HV * VD + HV + hv] = div_full(1.0f, add_rn(e, 1.0f));
     }

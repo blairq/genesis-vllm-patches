@@ -1300,6 +1300,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN164": {
+        "title": "GDN: entradas como vistas de in_proj, sin la copia por capa (con PN155)",
+        "env_flag": "GENESIS_ENABLE_PN164_GDN_VISTAS",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-09-29. Con PN155 la entrada de PN50 ya no es contigua y cae al camino de PyTorch: mixed_qkv, z, b y a se copiaban en un kernel de inductor por capa (~1,5 us x 48). arbol_conv, SK-25, gdn_arbol y pn122_cinta las leen con stride; en los demas pasos el op las vuelve contiguas."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN163": {
         "title": "GDN: sin relleno de ceros ni copia de core_attn_out en los pasos solo-spec",
         "env_flag": "GENESIS_ENABLE_PN163_GDN_SALIDA",
