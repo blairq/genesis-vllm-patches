@@ -33,15 +33,6 @@
 #ifndef PHL
 #define PHL 1            // con PV8: P' en 16 bits = hi*256 + lo (dos planos int8, dos mma): el error de P desaparece
 #endif
-#ifndef PFIJA
-#define PFIJA 2          // con PV8+PHL: P' a escala FIJA (p <= 1, svf <= 2^VSH), sin maximo de P' por tile ni su barrera.
-#endif                   // 1: acumuladores int persistentes, volcados a o solo si cambia el maximo (255 regs, derrama);
-                         // 2: acumuladores int por tile, como sin PFIJA
-#if !(PV8 && PHL)
-#undef PFIJA
-#define PFIJA 0
-#endif
-#define KFIJ (32639.f / 2048.f)
 #ifndef ACC16
 #define ACC16 1          // P.V con acumulador fp16 por tile (Sage)
 #endif
@@ -115,31 +106,19 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 #pragma unroll
     for (int i = 0; i < DPQ / 8; ++i) o[i][0] = o[i][1] = o[i][2] = o[i][3] = 0.f;
     float m0 = NEG, m1 = NEG, l0 = 0.f, l1 = 0.f;
-#if PFIJA == 1
-    int t32[DPQ / 8][4], u32[DPQ / 8][4];                    // P'.V en int: hi*256 + lo, toda la pasada
-#pragma unroll
-    for (int i = 0; i < DPQ / 8; ++i) { t32[i][0] = t32[i][1] = t32[i][2] = t32[i][3] = 0; u32[i][0] = u32[i][1] = u32[i][2] = u32[i][3] = 0; }
-#endif
     const size_t KOFF = (size_t)BS * NH * QD, EOFF = 2 * KOFF;
 
     // carga de un tile: 64 keys = 4 trozos de 16 (880 = 55*16: un trozo nunca cruza pagina)
-    // Carga de un tile: 64 keys = 4 trozos de 16 (880 = 55*16: un trozo nunca cruza pagina). La pagina se
-    // calcula UNA vez por tile (un tile toca a lo sumo 2): antes cada copia dividia por BS en 64 bits.
-    const int* tb = tabla + (size_t)b * tstride;
     auto cargar = [&](int st, int k0) {
-        const int p0 = k0 / BS, off0 = k0 - p0 * BS;
-        const bool cruza = off0 + TK > BS;
-        const signed char* base0 = pool + (long long)tb[p0] * BLK;
-        const signed char* base1 = cruza ? pool + (long long)tb[p0 + 1] * BLK : base0;
         // K: 64 keys x 256 B = 1024 copias de 16 B
 #pragma unroll
         for (int c = 0; c < 1024 / (NWK * 32); ++c) {
             const int e = tid + c * NT, key = e >> 4, seg = e & 15, kk = k0 + key;
             const int ok = kk < k_fin;
-            int off = off0 + (ok ? key : 0);
-            const bool p1 = off >= BS;
-            off -= p1 ? BS : 0;
-            const signed char* src = (p1 ? base1 : base0) + ((off * NH + h) * QD + seg * 16);
+            const int kc = ok ? kk : k0;
+            const long long blk = tabla[(size_t)b * tstride + kc / BS];
+            const int off = kc % BS;
+            const signed char* src = pool + blk * BLK + ((size_t)off * NH + h) * QD + seg * 16;
             asm volatile("cp.async.cg.shared.global [%0], [%1], 16, %2;\n"
                          :: "r"(sdir(sK + (st * TK + key) * KST + seg * 16)), "l"(src), "r"(ok ? 16 : 0));
         }
@@ -148,21 +127,20 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
         for (int c = 0; c < 1024 / (NWK * 32); ++c) {
             const int e = tid + c * NT, d = e >> 2, tr = e & 3, kk = k0 + tr * 16;
             const int ok = kk < k_fin;
-            int off = off0 + (ok ? tr * 16 : 0);
-            const bool p1 = off >= BS;
-            off -= p1 ? BS : 0;
-            const signed char* src = (p1 ? base1 : base0) + (KOFF + (size_t)(h * QD + d) * BS + off);
+            const int kc = ok ? kk : k0;
+            const long long blk = tabla[(size_t)b * tstride + kc / BS];
+            const int off = kc % BS;
+            const signed char* src = pool + blk * BLK + KOFF + ((size_t)h * QD + d) * BS + off;
             const int bytes = ok ? min(16, k_fin - kk) : 0;
             asm volatile("cp.async.ca.shared.global [%0], [%1], 16, %2;\n"
                          :: "r"(sdir(sV + (st * QD + d) * VST + tr * 16)), "l"(src), "r"(bytes));
         }
         // escalas: 64 keys x (skf, svf) de la cabeza h
         if (tid < TK) {
-            const int kk = k0 + tid, ok = kk < k_fin;
-            int off = off0 + (ok ? (int)tid : 0);
-            const bool p1 = off >= BS;
-            off -= p1 ? BS : 0;
-            const signed char* src = (p1 ? base1 : base0) + (EOFF + (size_t)(off * NH + h) * 4);
+            const int kk = k0 + tid, ok = kk < k_fin, kc = ok ? kk : k0;
+            const long long blk = tabla[(size_t)b * tstride + kc / BS];
+            const int off = kc % BS;
+            const signed char* src = pool + blk * BLK + EOFF + ((size_t)off * NH + h) * 4;
             asm volatile("cp.async.ca.shared.global [%0], [%1], 4, %2;\n"
                          :: "r"(sdir(sE + (st * TK + tid) * 2)), "l"(src), "r"(ok ? 4 : 0));
         }
@@ -183,29 +161,20 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
         for (int t = 0; t < KPQ / 8; ++t) sacc[t][0] = sacc[t][1] = sacc[t][2] = sacc[t][3] = 0;
 #pragma unroll
         for (int t = 0; t < KPQ / 8; ++t) {
-            // ldmatrix.x4: matrices (k 0-15 | 16-31) de los pasos s y s+1 -> b0, b1 de dos pasos por instruccion
-            const unsigned char* kr = K_ + (hh * KPQ + t * 8 + (lane & 7)) * KST + (lane >> 3) * 16;
+            const unsigned char* kr = K_ + (hh * KPQ + t * 8 + gid) * KST + tig * 4;
 #pragma unroll
-            for (int s = 0; s < 8; s += 2) {
-                unsigned b0, b1, b2, b3;
-                asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                             : "=r"(b0), "=r"(b1), "=r"(b2), "=r"(b3) : "r"(sdir(kr + s * 32)));
+            for (int s = 0; s < 8; ++s) {
+                const unsigned b0 = *reinterpret_cast<const unsigned*>(kr + s * 32);
+                const unsigned b1 = *reinterpret_cast<const unsigned*>(kr + s * 32 + 16);
                 asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
                              "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
                              : "+r"(sacc[t][0]), "+r"(sacc[t][1]), "+r"(sacc[t][2]), "+r"(sacc[t][3])
                              : "r"(qa[s][0]), "r"(qa[s][1]), "r"(qa[s][2]), "r"(qa[s][3]), "r"(b0), "r"(b1));
-                asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
-                             "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
-                             : "+r"(sacc[t][0]), "+r"(sacc[t][1]), "+r"(sacc[t][2]), "+r"(sacc[t][3])
-                             : "r"(qa[s + 1][0]), "r"(qa[s + 1][1]), "r"(qa[s + 1][2]), "r"(qa[s + 1][3]), "r"(b2), "r"(b3));
             }
         }
         // ── escala, mascara y maximo de la mitad
         float sf[KPQ / 8][4];
         float mx0 = NEG, mx1 = NEG;
-        // tile entero visible para las dos filas de este hilo (casi todos: el contexto): sin mascara por elemento
-        const int ult = k0 + TK - 1;
-        const bool entero = ult < k_fin && ult <= min(min(lm0, lm1), min(lb0, lb1));
 #pragma unroll
         for (int t = 0; t < KPQ / 8; ++t)
 #pragma unroll
@@ -215,8 +184,8 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
                 const bool fila1 = e >= 2;
                 const int lm = fila1 ? lm1 : lm0, lb = fila1 ? lb1 : lb0;
                 const unsigned am = fila1 ? am1 : am0;
-                const bool vis = entero || (kk < k_fin && kk <= lm &&
-                                 (kk <= lb || ((unsigned)(kk - lb - 1) < 31u && ((am >> ((kk - lb - 1) & 31)) & 1u))));
+                const bool vis = kk < k_fin && kk <= lm &&
+                                 (kk <= lb || ((unsigned)(kk - lb - 1) < 31u && ((am >> ((kk - lb - 1) & 31)) & 1u)));
                 const float v = vis ? (float)sacc[t][e] * (fila1 ? qs1 : qs0) * ks : NEG;
                 sf[t][e] = v;
                 if (fila1) mx1 = fmaxf(mx1, v); else mx0 = fmaxf(mx0, v);
@@ -239,11 +208,7 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 #pragma unroll
         for (int t = 0; t < KPQ / 8; ++t) {
             const int col = hh * KPQ + t * 8 + tig * 2;
-#if PFIJA
-            const float vs0 = (float)E_[col * 2 + 1], vs1 = (float)E_[(col + 1) * 2 + 1];      // svf crudo
-#else
             const float vs0 = (float)E_[col * 2 + 1] * vsc, vs1 = (float)E_[(col + 1) * 2 + 1] * vsc;
-#endif
             const float p00 = sf[t][0] > 0.5f * NEG ? exp2f(sf[t][0] - m0) : 0.f;
             const float p01 = sf[t][1] > 0.5f * NEG ? exp2f(sf[t][1] - m0) : 0.f;
             const float p10 = sf[t][2] > 0.5f * NEG ? exp2f(sf[t][2] - m1) : 0.f;
@@ -258,13 +223,6 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 #endif
         }
 #if PV8
-#if PFIJA
-        const float r0 = KFIJ, r1 = KFIJ;
-        (void)px0; (void)px1;
-#if PFIJA == 2
-        const float e0 = vsc / KFIJ, e1 = e0;
-#endif
-#else
         px0 = fmaxf(px0, __shfl_xor_sync(0xffffffffu, px0, 1)); px0 = fmaxf(px0, __shfl_xor_sync(0xffffffffu, px0, 2));
         px1 = fmaxf(px1, __shfl_xor_sync(0xffffffffu, px1, 1)); px1 = fmaxf(px1, __shfl_xor_sync(0xffffffffu, px1, 2));
         float* sX = sM + NQ * RB;                                // [NQ][RB] maximos de P' por cuarto
@@ -280,7 +238,6 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 #endif
         const float r0 = qx0 > 0.f ? NIV / qx0 : 0.f, r1 = qx1 > 0.f ? NIV / qx1 : 0.f;
         const float e0 = qx0 / NIV, e1 = qx1 / NIV;              // escala de fila de este tile
-#endif
         signed char* sP8 = reinterpret_cast<signed char*>(sP);   // [RB][PST*2 bytes]: plano hi, y lo a +64
 #pragma unroll
         for (int t = 0; t < KPQ / 8; ++t) {
@@ -302,29 +259,14 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 #endif
         l0 = l0 * a0 + ps0; l1 = l1 * a1 + ps1;              // parcial de esta mitad de keys
         // O *= a (filas f0 / f1)
-        if (a0 != 1.f || a1 != 1.f) {            // el maximo casi nunca cambia pasados los primeros tiles
-#if PFIJA == 1
-            // volcado: lo acumulado en int con el maximo viejo pasa a o (float) y se reescala; los int vuelven a 0
-            const float Ef = vsc / KFIJ;
 #pragma unroll
-            for (int i = 0; i < DPQ / 8; ++i)
-#pragma unroll
-                for (int e = 0; e < 4; ++e) {
-                    o[i][e] = (o[i][e] + ((float)t32[i][e] * 256.f + (float)u32[i][e]) * Ef) * (e < 2 ? a0 : a1);
-                    t32[i][e] = 0; u32[i][e] = 0;
-                }
-#else
-#pragma unroll
-            for (int i = 0; i < DPQ / 8; ++i) { o[i][0] *= a0; o[i][1] *= a0; o[i][2] *= a1; o[i][3] *= a1; }
-#endif
-        }
+        for (int i = 0; i < DPQ / 8; ++i) { o[i][0] *= a0; o[i][1] *= a0; o[i][2] *= a1; o[i][3] *= a1; }
         __syncthreads();
         // ── O += P'.V : 16 filas x DPQ dims (cuarto hh) x 64 keys
         const unsigned char* V_ = sV + st * QD * VST;
 #if PV8
         {
             const signed char* sP8 = reinterpret_cast<const signed char*>(sP);
-#if PFIJA != 1
             int t32[DPQ / 8][4];
 #pragma unroll
             for (int i = 0; i < DPQ / 8; ++i) t32[i][0] = t32[i][1] = t32[i][2] = t32[i][3] = 0;
@@ -333,42 +275,37 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 #pragma unroll
             for (int i = 0; i < DPQ / 8; ++i) u32[i][0] = u32[i][1] = u32[i][2] = u32[i][3] = 0;
 #endif
-#endif
 #pragma unroll
             for (int kk = 0; kk < TK; kk += 32) {
-                // A de P con ldmatrix.x4: (filas 0-7 | 8-15) x (keys kk..+15 | kk+16..+31) -> a0..a3
-                const int prow = rt * 16 + ((lane >> 3) & 1) * 8 + (lane & 7), pcol = kk + (lane >> 4) * 16;
                 unsigned pa[4];
-                asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                             : "=r"(pa[0]), "=r"(pa[1]), "=r"(pa[2]), "=r"(pa[3]) : "r"(sdir(sP8 + prow * PST * 2 + pcol)));
+                pa[0] = *reinterpret_cast<const unsigned*>(sP8 + f0 * PST * 2 + kk + tig * 4);
+                pa[1] = *reinterpret_cast<const unsigned*>(sP8 + f1 * PST * 2 + kk + tig * 4);
+                pa[2] = *reinterpret_cast<const unsigned*>(sP8 + f0 * PST * 2 + kk + 16 + tig * 4);
+                pa[3] = *reinterpret_cast<const unsigned*>(sP8 + f1 * PST * 2 + kk + 16 + tig * 4);
 #if PHL
                 unsigned pl[4];
-                asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                             : "=r"(pl[0]), "=r"(pl[1]), "=r"(pl[2]), "=r"(pl[3]) : "r"(sdir(sP8 + prow * PST * 2 + 64 + pcol)));
+                pl[0] = *reinterpret_cast<const unsigned*>(sP8 + f0 * PST * 2 + 64 + kk + tig * 4);
+                pl[1] = *reinterpret_cast<const unsigned*>(sP8 + f1 * PST * 2 + 64 + kk + tig * 4);
+                pl[2] = *reinterpret_cast<const unsigned*>(sP8 + f0 * PST * 2 + 64 + kk + 16 + tig * 4);
+                pl[3] = *reinterpret_cast<const unsigned*>(sP8 + f1 * PST * 2 + 64 + kk + 16 + tig * 4);
 #endif
 #pragma unroll
-                for (int i = 0; i < DPQ / 8; i += 2) {
-                    // B de V con ldmatrix.x4: (d de la tile i | i+1) x (keys kk..+15 | kk+16..+31)
-                    const unsigned char* vr = V_ + (hh * DPQ + i * 8 + (lane >> 4) * 8 + (lane & 7)) * VST + kk + ((lane >> 3) & 1) * 16;
-                    unsigned vb[4];
-                    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                                 : "=r"(vb[0]), "=r"(vb[1]), "=r"(vb[2]), "=r"(vb[3]) : "r"(sdir(vr)));
-#pragma unroll
-                    for (int u = 0; u < 2; ++u) {
-                        asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
-                                     "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
-                                     : "+r"(t32[i + u][0]), "+r"(t32[i + u][1]), "+r"(t32[i + u][2]), "+r"(t32[i + u][3])
-                                     : "r"(pa[0]), "r"(pa[1]), "r"(pa[2]), "r"(pa[3]), "r"(vb[2 * u]), "r"(vb[2 * u + 1]));
+                for (int i = 0; i < DPQ / 8; ++i) {
+                    const unsigned char* vr = V_ + (hh * DPQ + i * 8 + gid) * VST + kk + tig * 4;
+                    const unsigned vb0 = *reinterpret_cast<const unsigned*>(vr);
+                    const unsigned vb1 = *reinterpret_cast<const unsigned*>(vr + 16);
+                    asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
+                                 "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
+                                 : "+r"(t32[i][0]), "+r"(t32[i][1]), "+r"(t32[i][2]), "+r"(t32[i][3])
+                                 : "r"(pa[0]), "r"(pa[1]), "r"(pa[2]), "r"(pa[3]), "r"(vb0), "r"(vb1));
 #if PHL
-                        asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
-                                     "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
-                                     : "+r"(u32[i + u][0]), "+r"(u32[i + u][1]), "+r"(u32[i + u][2]), "+r"(u32[i + u][3])
-                                     : "r"(pl[0]), "r"(pl[1]), "r"(pl[2]), "r"(pl[3]), "r"(vb[2 * u]), "r"(vb[2 * u + 1]));
+                    asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
+                                 "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
+                                 : "+r"(u32[i][0]), "+r"(u32[i][1]), "+r"(u32[i][2]), "+r"(u32[i][3])
+                                 : "r"(pl[0]), "r"(pl[1]), "r"(pl[2]), "r"(pl[3]), "r"(vb0), "r"(vb1));
 #endif
-                    }
                 }
             }
-#if PFIJA != 1
 #pragma unroll
             for (int i = 0; i < DPQ / 8; ++i) {
 #if PHL
@@ -379,7 +316,6 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
                 o[i][2] += (float)t32[i][2] * e1; o[i][3] += (float)t32[i][3] * e1;
 #endif
             }
-#endif
         }
 #else
 #if ACC16
@@ -435,13 +371,6 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 #pragma unroll
     for (int x = 0; x < NQ; ++x) { lt0 += sM[x * RB + f0]; lt1 += sM[x * RB + f1]; }
     const float i0 = lt0 > 0.f ? 1.f / lt0 : 0.f, i1 = lt1 > 0.f ? 1.f / lt1 : 0.f;
-#if PFIJA == 1
-    const float Ef = vsc / KFIJ;                             // P'q = p * svf * KFIJ  ->  p * vs = P'q * vsc / KFIJ
-#pragma unroll
-    for (int i = 0; i < DPQ / 8; ++i)
-#pragma unroll
-        for (int e = 0; e < 4; ++e) o[i][e] += ((float)t32[i][e] * 256.f + (float)u32[i][e]) * Ef;
-#endif
     __half* ob = Op + so * QD;
 #pragma unroll
     for (int i = 0; i < DPQ / 8; ++i) {
