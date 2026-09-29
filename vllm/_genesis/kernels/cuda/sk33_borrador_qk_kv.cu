@@ -5,8 +5,10 @@
 //   cabezas q:  norma -> rope -> FWHT -> q_out (fp16)
 //   cabezas kv: norma -> rope -> FWHT de k -> int8 + escala a la cache; v -> int8 + escala a la cache
 // Numerica de cada paso igual a la de vLLM/PN126:
-//   norma  y = fp16(x * rsqrt(mean(x^2) + eps) * w)                (RMSNorm de 0.29: (x*w).to(dtype))
-//   rope   o1 = fp16(x1*cos - x2*sin), o2 = fp16(x2*cos + x1*sin)  (neox; la pareja de d esta en la lane ^ 16)
+//   norma + rope, como las compila inductor (norma y rope en un kernel, los .to(fp16) intermedios elididos):
+//          y = x * rsqrt(mean(x^2) + eps) * w  en fp32, sin redondear
+//          o1 = fp16(y1*cos - y2*sin), o2 = fp16(y2*cos + y1*sin)  (neox; la pareja de d esta en la lane ^ 16;
+//          cos/sin en fp32: la tabla del servidor es fp16 y se pasa a float, exacto)
 //   FWHT   la entera de sk_fwht128_f16 (Q14, mariposas en int32, 1/sqrt(128) en Q20)
 //   cache  s = max(absmax/127, 1e-6), q = clamp(redondeo alejado del cero de x/s)   (IS_INT_QUANT de vLLM)
 #include <cuda_fp16.h>
@@ -15,6 +17,7 @@
 #ifndef ROT
 #define ROT 1
 #endif
+
 #define LLENO 0xffffffffu
 
 __device__ __forceinline__ float suma_warp(float v) {
@@ -50,12 +53,12 @@ __device__ __forceinline__ void cabeza(float* x, const __half* __restrict__ w, f
     float wv[4];
     cargar4(w + lane * 4, wv);
 #pragma unroll
-    for (int e = 0; e < 4; ++e) x[e] = r16(x[e] * r * wv[e]);
+    for (int e = 0; e < 4; ++e) x[e] = x[e] * r * wv[e];           // sin redondear: inductor funde norma y rope
     const bool alto = lane >= 16;                         // dims 64..127: x2
 #pragma unroll
     for (int e = 0; e < 4; ++e) {
         const float p = __shfl_xor_sync(LLENO, x[e], 16);
-        x[e] = alto ? r16(x[e] * c[e] + p * s[e]) : r16(x[e] * c[e] - p * s[e]);
+        x[e] = alto ? r16(x[e] * c[e] + p * s[e]) : r16(x[e] * c[e] - p * s[e]);   // un redondeo, al final
     }
 #if ROT
     int xi[4];
@@ -109,7 +112,7 @@ extern "C" __global__ void __launch_bounds__(128)
 sk33_qk_kv(const __half* __restrict__ qkv, int sq,              // [T, NHQ*128 + 2*NKV*128]
            const int64_t* __restrict__ pos,                     // [T]
            const __half* __restrict__ wq, const __half* __restrict__ wk, float eps,
-           const __half* __restrict__ cs,                       // cos_sin_cache [P, 128] fp16: cos 0..63 | sin 64..127
+           const float* __restrict__ cs,                        // cos_sin_cache [P, 128] en float: cos 0..63 | sin 64..127
            const int* __restrict__ signos,
            int NHQ, int NKV,
            __half* __restrict__ qo, int so,                     // [T, NHQ*128]
@@ -126,10 +129,10 @@ sk33_qk_kv(const __half* __restrict__ qkv, int sq,              // [T, NHQ*128 +
     const __half* fila = qkv + (size_t)t * sq;
 
     // cos/sin de las dims de esta lane: indice d mod 64
-    const __half* cp = cs + (size_t)pos[t] * 128;
-    float c[4], s[4];
-    cargar4(cp + (lane & 15) * 4, c);
-    cargar4(cp + 64 + (lane & 15) * 4, s);
+    const float* cp = cs + (size_t)pos[t] * 128;
+    const float4 c4 = *reinterpret_cast<const float4*>(cp + (lane & 15) * 4);
+    const float4 s4 = *reinterpret_cast<const float4*>(cp + 64 + (lane & 15) * 4);
+    float c[4] = {c4.x, c4.y, c4.z, c4.w}, s[4] = {s4.x, s4.y, s4.z, s4.w};
 
     float x[4];
     if (u < NHQ) {

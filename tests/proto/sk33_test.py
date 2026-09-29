@@ -14,7 +14,7 @@ dev = "cuda"; NHQ, NKV, D, BS, NB = 16, 4, 128, 16, 64
 torch.manual_seed(0)
 with set_current_vllm_config(VllmConfig()):
     re = get_rope(D, max_position=262144, is_neox_style=True, rope_parameters={"rope_theta": 10000000, "rope_type": "default"}).to(dev)
-cs16 = re.cos_sin_cache.to(dev, torch.float16).contiguous()
+cs16 = re.cos_sin_cache.to(dev, torch.float16).float().contiguous()   # la del servidor es fp16
 signos = g126._signos_dev(D, torch.device(dev))
 k33 = Kernel("sk33_borrador_qk_kv.cu", "sk33_qk_kv", defs=["-DROT=1"], warps=4); k33.cargar()
 
@@ -29,14 +29,14 @@ def caches():
     return kv, kc, vc, ks, vs
 
 
-def rms(x, w, eps=1e-6):
+def rms(x, w, eps=1e-6):                                                  # fp32 sin redondear (inductor)
     xf = x.float()
-    return (xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + eps) * w.float()).half()
+    return xf * torch.rsqrt(xf.pow(2).mean(-1, keepdim=True) + eps) * w.float()
 
 
 def rope_f32(pos, x):                                                     # como inductor: fp32 y un redondeo
     cos, sin = cs16.index_select(0, pos).float().chunk(2, dim=-1)
-    x = x.float(); x1, x2 = x[..., :64], x[..., 64:]
+    x1, x2 = x[..., :64], x[..., 64:]
     c, s = cos[:, None], sin[:, None]
     return torch.cat((x1 * c - x2 * s, x2 * c + x1 * s), -1).half()
 

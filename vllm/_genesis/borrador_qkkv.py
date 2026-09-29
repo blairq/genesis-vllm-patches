@@ -56,7 +56,7 @@ def aplicable(attn) -> bool:
 def _cos_sin(cs: torch.Tensor) -> torch.Tensor:
     clave = (cs.data_ptr(), cs.device)
     if clave not in _cs:
-        _cs[clave] = cs.to(dtype=torch.float16).contiguous()
+        _cs[clave] = cs.to(dtype=torch.float32).contiguous()          # fp16 -> fp32 es exacto
     return _cs[clave]
 
 

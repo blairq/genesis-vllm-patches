@@ -6221,6 +6221,24 @@ def apply_patch_PN161() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN162 normas del borrador")
+def apply_patch_PN162() -> PatchResult:
+    """PN162: cierre de conv + residuo + RMSNorm del borrador con SK-34."""
+    name = "PN162 normas del borrador"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_PN162_borrador_norma
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN162_borrador_norma.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR

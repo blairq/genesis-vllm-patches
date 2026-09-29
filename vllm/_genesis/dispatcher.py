@@ -1300,6 +1300,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN162": {
+        "title": "Borrador DFlash2: cierre de la conv + residuo + RMSNorm en un kernel (SK-34)",
+        "env_flag": "GENESIS_ENABLE_PN162_BORRADOR_NORMA",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis-original 2026-09-29. Cada cierre de conv del borrador va seguido de una RMSNorm con residuo; inductor los funde en un kernel por norma con una CTA chica por fila (~4,4 us, 11 por paso). SK-34 usa un bloque de 640 hilos por fila y una pasada en registros (3,5 us), con la misma numerica que inductor (sin redondeos intermedios)."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN161": {
         "title": "Borrador DFlash2: norma q/k + rope + FWHT + escritura KV int8 en un kernel (SK-33)",
         "env_flag": "GENESIS_ENABLE_PN161_BORRADOR_QKKV",
