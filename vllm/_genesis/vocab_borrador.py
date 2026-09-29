@@ -238,6 +238,37 @@ def _anillo_fake(h, vs, is_):
 
 _SK28 = os.environ.get("GENESIS_PN159_SK28", "0") == "1"      # apagado hasta validarlo en el servidor
 _k28: dict = {}
+# GENESIS_PN159_VERIFICAR=1: con SK-28/29 corre tambien la rama de flashinfer y cuenta en la GPU las filas cuyo
+# conjunto de ids difiere. Vale dentro del grafo: el contador se copia a memoria fijada del host en cada paso y
+# un hilo lo registra cada 30 s (grep "PN159 verificar" en los logs del worker).
+_VERIF = os.environ.get("GENESIS_PN159_VERIFICAR", "0") == "1"
+_ver: dict = {}
+
+
+def _verificar(values, ids, ref_values, ref_ids):
+    if "cuenta" not in _ver:
+        import threading, time
+        _ver["cuenta"] = torch.zeros(3, dtype=torch.int64, device=ids.device)   # filas, ids distintos, valores distintos
+        _ver["host"] = torch.zeros(3, dtype=torch.int64).pin_memory()
+
+        def _registrar():
+            ultimo = None
+            while True:
+                time.sleep(30)
+                v = tuple(int(x) for x in _ver["host"])
+                if v != ultimo:
+                    log.warning("PN159 verificar: filas %d, ids distintos %d, valores distintos %d", *v)
+                    ultimo = v
+        threading.Thread(target=_registrar, daemon=True).start()
+    a, _ = ids.sort(dim=-1)
+    b, _ = ref_ids.sort(dim=-1)
+    va, _ = values.float().sort(dim=-1)
+    vb, _ = ref_values.float().sort(dim=-1)
+    c = _ver["cuenta"]
+    c[0] += ids.shape[0]
+    c[1] += (a != b).any(-1).sum()
+    c[2] += (va != vb).any(-1).sum()
+    _ver["host"].copy_(c, non_blocking=True)
 
 
 def _kern28(nombre: str, k: int, mt: int = 1):
@@ -262,8 +293,12 @@ def topk_cuda(logits: torch.Tensor, h: torch.Tensor, ids_fijo: torch.Tensor):
     if d is not None:
         x = h.reshape(M, -1).to(torch.float16).contiguous()
         ld = torch.empty(M, Dn, dtype=torch.float32, device=dev)
-        assert M <= 64, "sk28_anillo: MT=4 tiles de 16"
-        _kern28("sk28_anillo", x.shape[-1], -(-M // 16)).lanzar((-(-Dn // 8), 1), [x, M, d["filas"], d["ids"], ld, Dn])
+        # sk28_anillo toma hasta 64 filas (MT <= 4 tiles de 16); el perfilado de memoria de vLLM trae lotes mucho
+        # mas grandes: por trozos de 64 (la forma es fija en cada grafo)
+        for m0 in range(0, M, 64):
+            mm = min(64, M - m0)
+            _kern28("sk28_anillo", x.shape[-1], -(-mm // 16)).lanzar((-(-Dn // 8), 1), [x[m0:m0 + mm], mm, d["filas"], d["ids"],
+                                                                                          ld[m0:m0 + mm], Dn])
         din_ids = d["ids"]
     else:
         ld, din_ids = vo, ids_fijo                                   # no se leen con D = 0
@@ -308,6 +343,12 @@ def top_k(proc, lm_head, hidden_states: torch.Tensor, k: int):
     if k == 16 and _SK28:
         # SK-28: top-k del fijo (+ anillo de la fase 2) con los ids ya mapeados, sin flashinfer ni casts
         values, ids = torch.ops.genesis.pn159_topk(logits, hidden_states, lm_head.pn159_ids)
+        if _VERIF:
+            rv, ri = _topk(logits, k)
+            ri = lm_head.pn159_ids[ri.to(torch.int64)]
+            if getattr(lm_head, "pn159_din", None) is not None:
+                rv, ri = torch.ops.genesis.pn159_anillo(hidden_states, rv, ri)
+            _verificar(values, ids, rv, ri)
     else:
         values, idx = _topk(logits, k)
         ids = lm_head.pn159_ids[idx.to(torch.int64)]
