@@ -6203,6 +6203,24 @@ def apply_patch_PN160() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN161 qk y KV del borrador")
+def apply_patch_PN161() -> PatchResult:
+    """PN161: norma q/k + rope + FWHT + KV int8 del borrador con SK-33."""
+    name = "PN161 qk y KV del borrador"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_PN161_borrador_qkkv
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN161_borrador_qkkv.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR

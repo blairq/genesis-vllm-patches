@@ -1300,6 +1300,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN161": {
+        "title": "Borrador DFlash2: norma q/k + rope + FWHT + escritura KV int8 en un kernel (SK-33)",
+        "env_flag": "GENESIS_ENABLE_PN161_BORRADOR_QKKV",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis-original 2026-09-29. Entre el GEMM de qkv y la atencion del borrador corrian 4 kernels por capa (~7,8 us): q_norm + k_norm + rope de inductor, la FWHT de PN126 sobre q y sobre k, y la escritura de la KV int8 por token-cabeza de vLLM. SK-33 los hace en uno (3,2 us), bit a bit, y la atencion se llama directo por el op de vLLM, sin el paso que escribe la KV."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN160": {
         "title": "Borrador DFlash2: cuantizacion y SiluAndMul fusionados (SK-32)",
         "env_flag": "GENESIS_ENABLE_PN160_BORRADOR_FUSION",
