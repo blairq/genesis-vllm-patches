@@ -1058,10 +1058,11 @@ def _lanzar_arbol_ptx(layer, A_log, a, b, dt_bias, q, k, v, o, h, cu, sidx, nacc
 
 
 def spec_update(layer, A_log, a, b, dt_bias, q, k, v, ssm_state, cu_seqlens,
-                spec_state_indices, num_accepted_tokens, slots):
+                spec_state_indices, num_accepted_tokens, slots, o_dest=None):
     """Reemplazo de ``fused_sigmoid_gating_delta_rule_update`` en el camino spec.
 
-    Devuelve lo mismo que upstream: ``(o [1, T, HV, V], ssm_state)``.
+    Devuelve lo mismo que upstream: ``(o [1, T, HV, V], ssm_state)``. Con ``o_dest`` (PN163) la salida se
+    escribe ahi (una vista de core_attn_out) y vLLM saltea la copia.
     """
     if _DIAG_CRESTA:
         _diag_cresta(layer, ssm_state, spec_state_indices[:, 0]
@@ -1090,7 +1091,11 @@ def spec_update(layer, A_log, a, b, dt_bias, q, k, v, ssm_state, cu_seqlens,
     sombra = (_bits & 32) and any(f".layers.{i}." in _pref for i in (0, 1, 2, 44))
     if sombra:
         _sombra_antes(layer, ssm_state, sidx, nacc, slots, N)
-    o = q.new_empty(1, Ttot, HV, V)
+    if (o_dest is not None and tuple(o_dest.shape) == (1, Ttot, HV, V) and o_dest.dtype == q.dtype
+            and o_dest.is_contiguous()):
+        o = o_dest
+    else:
+        o = q.new_empty(1, Ttot, HV, V)
     if paso_arbol_activo() and _camino_gpu is not None and _CERRADA:
         # Contrato: solo se llega aca si el runner ya verifico que el lote es UNIFORME de T = K+1
         # tokens (lo exige la mascara de arbol de PN131). El kernel igual lo comprueba y se saltea

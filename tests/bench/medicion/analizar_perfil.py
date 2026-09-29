@@ -117,9 +117,11 @@ def cortar(ker, nom, a, b, fw):
     q = next(x for x in range(g1, b + 1) if "_per_token_quant_int8" in nom[x])
     reg["verificación"] = (g1 + 1, q - 1)
     # lm_head del borrador: el Marlin seguido del top-k (fp16 o I8 segun PN139_A8)
-    m2 = next(x for x in range(q, b) if "Marlin<" in nom[x] and "TopK" in nom[x + 1])
+    # el top-k puede ser el de flashinfer (TopK...) o los propios de PN159 (sk28_anillo, sk29_topk)
+    es_topk = lambda n: "TopK" in n or "sk29_topk" in n or "sk28_" in n
+    m2 = next(x for x in range(q, b) if "Marlin<" in nom[x] and es_topk(nom[x + 1]))
     f2 = m2
-    while f2 + 1 <= b and ("TopK" in nom[f2 + 1] or "AllGather" in nom[f2 + 1] or "copy" in nom[f2 + 1] or "add" in nom[f2 + 1]):
+    while f2 + 1 <= b and (es_topk(nom[f2 + 1]) or "AllGather" in nom[f2 + 1] or "copy" in nom[f2 + 1] or "add" in nom[f2 + 1]):
         f2 += 1
     reg["borrador: capas"] = (q, m2 - 1)
     reg["borrador: lm_head + top-k"] = (m2, f2)

@@ -6239,6 +6239,24 @@ def apply_patch_PN162() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN163 salida del GDN")
+def apply_patch_PN163() -> PatchResult:
+    """PN163: GDN sin cero ni copia de core_attn_out en pasos solo-spec (despues de P28 y PN122)."""
+    name = "PN163 salida del GDN"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN163_gdn_salida
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN163_gdn_salida.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR

@@ -92,11 +92,15 @@ services:
       - GENESIS_ENABLE_PN142_DFLASH2=1           # DFlash2 usable en v0.29.0
       - GENESIS_ENABLE_PN157_BORRADOR_MARLIN=${GENESIS_ENABLE_PN157_BORRADOR_MARLIN:-1}   # K/V de contexto del borrador en Marlin W4A16 (mismos int4 del checkpoint): 70 -> 25 us
       - GENESIS_PN157_BITS_CONV=${GENESIS_PN157_BITS_CONV:-0}               # 8 = kernel_projection en int8 por canal: -0,9% de aceptacion en el banco de agente, neto cero; 0 = densa
+      - GENESIS_PN157_GRUPO_CONV=${GENESIS_PN157_GRUPO_CONV:--1}            # grupo del int8 de la conv: -1 por canal, 64 = mitad de error (A/B en ab_pn157_g64.sh)
       - GENESIS_ENABLE_PN160_BORRADOR_FUSION=${GENESIS_ENABLE_PN160_BORRADOR_FUSION:-0}   # lineales del borrador: cuantizacion y SiluAndMul en un kernel (SK-32)
+      - GENESIS_ENABLE_PN161_BORRADOR_QKKV=${GENESIS_ENABLE_PN161_BORRADOR_QKKV:-0}   # norma q/k + rope + FWHT + KV int8 del borrador en un kernel (SK-33)
+      - GENESIS_ENABLE_PN162_BORRADOR_NORMA=${GENESIS_ENABLE_PN162_BORRADOR_NORMA:-0}   # cierre de conv + residuo + RMSNorm del borrador en un kernel (SK-34)
       - GENESIS_ENABLE_PN159_VOCAB_BORRADOR=${GENESIS_ENABLE_PN159_VOCAB_BORRADOR:-1}   # candidatos del borrador sobre los tokens frecuentes de la carga real (FR-Spec): paso -2,1%, aceptacion igual con 64k
       - GENESIS_PN159_VOCAB=${GENESIS_PN159_VOCAB:-65536}                     # 32768: -3,5% de aceptacion
       - GENESIS_PN159_SK28=${GENESIS_PN159_SK28:-0}                         # top-k de los candidatos en PTX (SK-28/29): sin flashinfer ni casts
       - GENESIS_PN159_DINAMICO=${GENESIS_PN159_DINAMICO:-0}                 # fase 2: anillo de N filas con los tokens del prompt y lo aceptado (SK-27, NanoSpec)
+      - GENESIS_PN159_VERIFICAR=${GENESIS_PN159_VERIFICAR:-0}               # diagnostico: SK-29 contra flashinfer en cada paso, contador en el log
       - GENESIS_PN144_ESCALA_RESIDUAL=32         # el residual del borrador desborda fp16 sin esto
       - GENESIS_ENABLE_ARBOL=1                   # arbol de borrador (+10-11% prosa)
       - GENESIS_ARBOL_CERRADA=0
@@ -110,6 +114,7 @@ services:
       - GENESIS_PN122_ARBOL_PTX=${GENESIS_PN122_ARBOL_PTX:-1}            # recurrencia del arbol en PTX (gdn_arbol.cu): 19,7 -> 11,7 us por capa, lee q/k/v con stride (sin las 3 copias de PN54)
       - GENESIS_ENABLE_PN150_GRAFO_BORRADOR=${GENESIS_ENABLE_PN150_GRAFO_BORRADOR:-1}   # fc y contexto del borrador en grafos CUDA (eran eager): paso -3,1% / -1,6%, mismo texto
       - GENESIS_ENABLE_PN151_GDN_META=${GENESIS_ENABLE_PN151_GDN_META:-1}             # metadata del GDN del decode en arbol en un kernel (eran ~35 ops por grupo): verificado 3000 llamadas, 0 distintas
+      - GENESIS_ENABLE_PN163_GDN_SALIDA=${GENESIS_ENABLE_PN163_GDN_SALIDA:-0}       # GDN: sin cero ni copia de core_attn_out en pasos solo-spec (~2 us x 48 capas)
       - GENESIS_PN151_VERIFICAR=${GENESIS_PN151_VERIFICAR:-0}                         # N: compara contra el builder original en las primeras N llamadas
       - GENESIS_ENABLE_PN135_NORM_QUANT=${GENESIS_ENABLE_PN135_NORM_QUANT:-0}          # residuo + RMSNorm + int8 en un kernel (SK-20); con noon dio +0,4%/+0,7%: re-medir
       - GENESIS_ENABLE_PN136_MLP_SOLAPADO=${GENESIS_ENABLE_PN136_MLP_SOLAPADO:-0}      # all-reduce del MLP solapado por DMA P2P (prefill); con noon dio 0%: re-medir

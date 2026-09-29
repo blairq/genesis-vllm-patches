@@ -1300,6 +1300,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN163": {
+        "title": "GDN: sin relleno de ceros ni copia de core_attn_out en los pasos solo-spec",
+        "env_flag": "GENESIS_ENABLE_PN163_GDN_SALIDA",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-09-29. Por capa GDN y paso corrian el .zero_() de core_attn_out (buffer de P28) y la copia de la salida de spec_update (memcpy32_post): ~2 us x 48. En pasos solo-spec spec_update escribe directo en core_attn_out y el cero se hace solo en los demas pasos (dentro del op, donde se sabe el tipo de paso)."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN162": {
         "title": "Borrador DFlash2: cierre de la conv + residuo + RMSNorm en un kernel (SK-34)",
         "env_flag": "GENESIS_ENABLE_PN162_BORRADOR_NORMA",
