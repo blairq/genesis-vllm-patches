@@ -24,6 +24,9 @@ import torch
 log = logging.getLogger("genesis.pn157")
 ACTIVO = os.environ.get("GENESIS_ENABLE_PN157_BORRADOR_MARLIN", "0").strip().lower() in ("1", "true", "yes", "on")
 BITS_CONV = int(os.environ.get("GENESIS_PN157_BITS_CONV", "0"))     # 8, 4, o 0 (densa: int8 por canal cuesta ~1% de aceptacion)
+# grupo del int8 de la conv: -1 por canal (lo que vio la destilacion con --conv_int8), 64 = la mitad de error en el
+# kernel de la conv (0,54% contra 0,95%, tests/proto/pn163_kp_conv.py) a igual tiempo (11,8 contra 21,6 us en fp16)
+GRUPO_CONV = int(os.environ.get("GENESIS_PN157_GRUPO_CONV", "-1"))
 
 
 def _empacar_gptq(q: torch.Tensor, bits: int) -> torch.Tensor:
@@ -108,10 +111,12 @@ def preparar(modelo, layers_attn) -> None:
                     kp = getattr(conv, "kernel_projection", None)
                     if kp is None or getattr(kp, "bias", None) is not None:
                         continue
-                    q, s = _rtn(kp.weight.data, BITS_CONV, 128 if BITS_CONV == 4 else -1)
-                    kp._g157 = _Marlin(q, s, BITS_CONV, 128 if BITS_CONV == 4 else -1)
+                    g = 128 if BITS_CONV == 4 else GRUPO_CONV
+                    q, s = _rtn(kp.weight.data, BITS_CONV, g)
+                    kp._g157 = _Marlin(q, s, BITS_CONV, g)
                     n += 1
-            log.info("PN157: %d kernel_projection en Marlin W%dA16", n, BITS_CONV)
+            log.info("PN157: %d kernel_projection en Marlin W%dA16 (grupo %s)", n, BITS_CONV,
+                     128 if BITS_CONV == 4 else (GRUPO_CONV if GRUPO_CONV > 0 else "canal"))
     except Exception as e:  # sin Marlin armado todo sigue por el camino denso
         log.warning("PN157: no se armo (%s: %s); camino denso", type(e).__name__, e)
         for a in ("_g157_kv",):

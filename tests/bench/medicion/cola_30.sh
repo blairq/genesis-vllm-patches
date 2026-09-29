@@ -5,3 +5,5 @@ while pgrep -f "ab_sk30_rep.sh" >/dev/null; do sleep 60; done
 echo "$(date +%T) ===== ab_pn159_verif"; ./ab_pn159_verif.sh
 echo "$(date +%T) ===== ab_pn161"; ./ab_pn161.sh
 echo "$(date +%T) COLA 30 LISTA"
+echo "$(date +%T) ===== ab_pn157_g64"; ./ab_pn157_g64.sh
+echo "$(date +%T) COLA 30b LISTA"

@@ -147,9 +147,10 @@ class FalsoQ8(nn.Module):
     int8 simetrico por canal de salida, s = max|w| / 127, redondeo al mas cercano. Paso directo (STE):
     adelante ve el peso cuantizado, atras el gradiente pasa como si no lo estuviera."""
 
-    def __init__(self, lin: nn.Linear):
+    def __init__(self, lin: nn.Linear, grupo: int = -1):
         super().__init__()
         self.lin = lin
+        self.grupo = grupo                                   # -1 por canal; 64 = GENESIS_PN157_GRUPO_CONV=64
 
     @property
     def weight(self):
@@ -157,15 +158,18 @@ class FalsoQ8(nn.Module):
 
     def forward(self, x):
         w = self.lin.weight.float()
-        s = w.detach().abs().amax(1, keepdim=True).clamp_min(1e-8) / 127
-        wq = (w.detach() / s).round().clamp(-128, 127) * s
+        n, k = w.shape
+        g = k if self.grupo <= 0 else self.grupo
+        wd = w.detach().view(n, k // g, g)
+        s = wd.abs().amax(-1, keepdim=True).clamp_min(1e-8) / 127
+        wq = ((wd / s).round().clamp(-128, 127) * s).view(n, k)
         return F.linear(x, (w + (wq - w.detach())).to(x.dtype))
 
 
-def poner_conv_int8(m):
+def poner_conv_int8(m, grupo: int = -1):
     for capa in m.layers:
         for nom in ("attention_conv_proj", "mlp_conv_proj"):
-            setattr(capa, nom, FalsoQ8(getattr(capa, nom)))
+            setattr(capa, nom, FalsoQ8(getattr(capa, nom), grupo))
 
 
 def recortar_vocab(m, orden_npy, n, dev):
@@ -264,6 +268,7 @@ def main():
     ap.add_argument("--dispositivo", default="cuda")
     ap.add_argument("--max_pasos", type=int, default=0, help="corta el entrenamiento (pruebas)")
     ap.add_argument("--conv_int8", action="store_true", help="kernel_projection con la cuantizacion int8 de PN157 (STE)")
+    ap.add_argument("--conv_grupo", type=int, default=-1, help="grupo del int8 de la conv (-1 por canal; igual a GENESIS_PN157_GRUPO_CONV)")
     ap.add_argument("--vocab", type=int, default=0, help="candidatos sobre los N tokens mas frecuentes (PN159)")
     ap.add_argument("--vocab_orden", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                                           "vllm", "_genesis", "datos", "pn159_orden.npy"))
@@ -289,7 +294,7 @@ def main():
     for q in m.parameters():
         q.requires_grad_(False)
     if a.conv_int8:
-        poner_conv_int8(m)
+        poner_conv_int8(m, a.conv_grupo)
         print("conv: kernel_projection en int8 por canal (como PN157)", flush=True)
     if a.vocab:
         recortar_vocab(m, a.vocab_orden, a.vocab, dev)
