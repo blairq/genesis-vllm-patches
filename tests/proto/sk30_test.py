@@ -73,12 +73,15 @@ def fprep():
 fprep(); torch.cuda.synchronize()
 BLK = kv.stride(0)                                                                 # bytes por bloque (int8)
 NQ = int(os.environ.get("NQ", "2"))
-k30 = Kernel("sk30_decode_1pasada.cu", "sk30_decode", defs=[f"-DNQ={NQ}", f"-DACC16={os.environ.get('ACC16', '1')}", f"-DPV8={os.environ.get('PV8', '1')}", f"-DPHL={os.environ.get('PHL', '1')}", f"-DPFIJA={os.environ.get('PFIJA', '2')}"], warps=4 * NQ); k30.cargar()
+k30 = Kernel("sk30_decode_1pasada.cu", "sk30_decode", defs=[f"-DNQ={NQ}", f"-DACC16={os.environ.get('ACC16', '1')}", f"-DPV8={os.environ.get('PV8', '1')}", f"-DPHL={os.environ.get('PHL', '1')}", f"-DPFIJA={os.environ.get('PFIJA', '2')}", f"-DPING={os.environ.get('PING', '0')}"], warps=4 * NQ); k30.cargar()
 ku = Kernel("sk30_decode_1pasada.cu", "sk30_union", warps=8); ku.cargar()
 Op = torch.empty(GMAX, 1, NH, RB, D, dtype=torch.float16, device=dev)
 Mp = torch.empty(GMAX, 1, NH, RB, device=dev); Lp = torch.empty_like(Mp)
 out30 = torch.empty(1, L, HQ, D, dtype=torch.float16, device=dev)
 SH = 2 * 64 * 272 + 2 * 256 * 80 + 64 * 72 * 2 + 2 * 64 * 4 + 2 * NQ * 64 * 4
+PING = int(os.environ.get("PING", "0"))
+if PING:      # K en anillo de 3, P en el buffer de K consumido
+    SH = 3 * 64 * 272 + 2 * 256 * 80 + 2 * 64 * 4 + 2 * NQ * 64 * 4
 def f30():
     fprep()
     k30.lanzar((GMAX, NH), [Qi, qs, kv, bt, bt.stride(0), sl, lim_, abase_, amask_, NH, BS, BLK, c.refs, GMAX, Op, Mp, Lp], shared=SH)

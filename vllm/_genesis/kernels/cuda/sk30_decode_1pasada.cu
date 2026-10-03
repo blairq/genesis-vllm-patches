@@ -65,6 +65,14 @@ __device__ __forceinline__ unsigned i8x2_a_h2(unsigned short u) {
 #ifndef BAL
 #define BAL 1
 #endif
+#ifndef PING
+#define PING 0           // ping-pong (FA3 traducido a SM86: sin TMA ni wgmma): Q.K del tile i+1 emitido junto al softmax
+#endif                   // del tile i; K con un anillo de 3 (un tile adelantada a V), P en el buffer de K ya consumido
+#if PING
+#define NKB 3
+#else
+#define NKB 2
+#endif
 __device__ __forceinline__ int paso_grupo(const int* __restrict__ seqlen, int b, int B, int GMAX) {
 #if BAL
     int tot = 0;
@@ -95,10 +103,15 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
             __half* __restrict__ Op, float* __restrict__ Mp, float* __restrict__ Lp)  // [GMAX, B, NH, RB, (256)]
 {
     extern __shared__ __align__(16) unsigned char sm[];
-    unsigned char* sK = sm;                                  // [2][TK][KST]
-    unsigned char* sV = sK + 2 * TK * KST;                   // [2][256][VST]
+    unsigned char* sK = sm;                                  // [NKB][TK][KST]
+    unsigned char* sV = sK + NKB * TK * KST;                 // [2][256][VST]
+#if PING
+    __half* sP = reinterpret_cast<__half*>(sK);              // se reasigna por tile: el buffer de K ya consumido
+    short* sE = reinterpret_cast<short*>(sV + 2 * QD * VST); // [2][TK][2]
+#else
     __half* sP = reinterpret_cast<__half*>(sV + 2 * QD * VST);   // [RB][PST]
     short* sE = reinterpret_cast<short*>(sP + RB * PST);     // [2][TK][2]
+#endif
     float* sM = reinterpret_cast<float*>(sE + 2 * TK * 2);   // [NQ][RB] maximos / sumas parciales por cuarto
 
     const int grp = blockIdx.x, bh = blockIdx.y, b = bh / NH, h = bh % NH;
@@ -148,12 +161,13 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
     // Carga de un tile: 64 keys = 4 trozos de 16 (880 = 55*16: un trozo nunca cruza pagina). La pagina se
     // calcula UNA vez por tile (un tile toca a lo sumo 2): antes cada copia dividia por BS en 64 bits.
     const int* tb = tabla + (size_t)b * tstride;
-    auto cargar = [&](int st, int k0) {
+    auto cargar = [&](int st, int k0, int kst, bool hacerK, bool hacerVE) {
         const int p0 = k0 / BS, off0 = k0 - p0 * BS;
         const bool cruza = off0 + TK > BS;
         const signed char* base0 = pool + (long long)tb[p0] * BLK;
         const signed char* base1 = cruza ? pool + (long long)tb[p0 + 1] * BLK : base0;
         // K: 64 keys x 256 B = 1024 copias de 16 B
+        if (hacerK)
 #pragma unroll
         for (int c = 0; c < 1024 / (NWK * 32); ++c) {
             const int e = tid + c * NT, key = e >> 4, seg = e & 15, kk = k0 + key;
@@ -163,9 +177,10 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
             off -= p1 ? BS : 0;
             const signed char* src = (p1 ? base1 : base0) + ((off * NH + h) * QD + seg * 16);
             asm volatile("cp.async.cg.shared.global [%0], [%1], 16, %2;\n"
-                         :: "r"(sdir(sK + (st * TK + key) * KST + seg * 16)), "l"(src), "r"(ok ? 16 : 0));
+                         :: "r"(sdir(sK + (kst * TK + key) * KST + seg * 16)), "l"(src), "r"(ok ? 16 : 0));
         }
         // V^T: 256 dims x 64 keys = 256 filas x 4 trozos de 16 keys -> 1024 copias
+        if (hacerVE)
 #pragma unroll
         for (int c = 0; c < 1024 / (NWK * 32); ++c) {
             const int e = tid + c * NT, d = e >> 2, tr = e & 3, kk = k0 + tr * 16;
@@ -179,7 +194,7 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
                          :: "r"(sdir(sV + (st * QD + d) * VST + tr * 16)), "l"(src), "r"(bytes));
         }
         // escalas: 64 keys x (skf, svf) de la cabeza h
-        if (tid < TK) {
+        if (hacerVE && tid < TK) {
             const int kk = k0 + tid, ok = kk < k_fin;
             int off = off0 + (ok ? (int)tid : 0);
             const bool p1 = off >= BS;
@@ -188,40 +203,69 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
             asm volatile("cp.async.ca.shared.global [%0], [%1], 4, %2;\n"
                          :: "r"(sdir(sE + (st * TK + tid) * 2)), "l"(src), "r"(ok ? 4 : 0));
         }
-        __pipeline_commit();
     };
 
+#define QK_TILE(KPTR, ACC) \
+_Pragma("unroll") \
+        for (int t = 0; t < KPQ / 8; ++t) { \
+            const unsigned char* kr = KPTR + (hh * KPQ + t * 8 + (lane & 7)) * KST + (lane >> 3) * 16; \
+_Pragma("unroll") \
+            for (int s = 0; s < 8; s += 2) { \
+                unsigned b0, b1, b2, b3; \
+                asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n" \
+                             : "=r"(b0), "=r"(b1), "=r"(b2), "=r"(b3) : "r"(sdir(kr + s * 32))); \
+                asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 " \
+                             "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n" \
+                             : "+r"(ACC[t][0]), "+r"(ACC[t][1]), "+r"(ACC[t][2]), "+r"(ACC[t][3]) \
+                             : "r"(qa[s][0]), "r"(qa[s][1]), "r"(qa[s][2]), "r"(qa[s][3]), "r"(b0), "r"(b1)); \
+                asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 " \
+                             "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n" \
+                             : "+r"(ACC[t][0]), "+r"(ACC[t][1]), "+r"(ACC[t][2]), "+r"(ACC[t][3]) \
+                             : "r"(qa[s + 1][0]), "r"(qa[s + 1][1]), "r"(qa[s + 1][2]), "r"(qa[s + 1][3]), "r"(b2), "r"(b3)); \
+            } \
+        }
+
     int st = 0;
-    cargar(0, k_ini);
+#if PING
+    int sacc[KPQ / 8][4];
+    int ki = 0;                                              // indice del tile: K en el slot ki % 3
+    cargar(0, k_ini, 0, true, true); __pipeline_commit();    // grupo: K0, V0, E0
+    if (k_ini + TK < k_fin) cargar(0, k_ini + TK, 1, true, false);
+    __pipeline_commit();                                     // grupo: K1
+    __pipeline_wait_prior(1);
+    __syncthreads();
+#pragma unroll
+    for (int t = 0; t < KPQ / 8; ++t) sacc[t][0] = sacc[t][1] = sacc[t][2] = sacc[t][3] = 0;
+    { const unsigned char* K0p = sK; QK_TILE(K0p, sacc) }
+    for (int k0 = k_ini; k0 < k_fin; k0 += TK, ++ki) {
+        // grupo de este tile: K_{i+2} (slot (i+2)%3, el del tile i-1, libre) y V/E_{i+1} (slot st^1)
+        const bool hayK2 = k0 + 2 * TK < k_fin, hayV1 = k0 + TK < k_fin;
+        if (hayK2) cargar(0, k0 + 2 * TK, (ki + 2) % 3, true, false);
+        if (hayV1) cargar(st ^ 1, k0 + TK, 0, false, true);
+        __pipeline_commit();
+        __pipeline_wait_prior(1);
+        __syncthreads();
+        const short* E_ = sE + st * TK * 2;
+        sP = reinterpret_cast<__half*>(sK + (ki % 3) * TK * KST);   // K del tile i: ya consumida
+        // Q.K del tile siguiente: sus IMMA corren mientras se hace mascara/maximo/softmax de este
+        int sacn[KPQ / 8][4];
+#pragma unroll
+        for (int t = 0; t < KPQ / 8; ++t) sacn[t][0] = sacn[t][1] = sacn[t][2] = sacn[t][3] = 0;
+        if (hayV1) { const unsigned char* Kn = sK + ((ki + 1) % 3) * TK * KST; QK_TILE(Kn, sacn) }
+#else
+    cargar(0, k_ini, 0, true, true); __pipeline_commit();
     for (int k0 = k_ini; k0 < k_fin; k0 += TK) {
-        if (k0 + TK < k_fin) cargar(st ^ 1, k0 + TK); else __pipeline_commit();
+        if (k0 + TK < k_fin) cargar(st ^ 1, k0 + TK, st ^ 1, true, true);
+        __pipeline_commit();
         __pipeline_wait_prior(1);
         __syncthreads();
         const unsigned char* K_ = sK + st * TK * KST;
         const short* E_ = sE + st * TK * 2;
-        // ── S = Q.K para 16 filas x KPQ keys (cuarto hh): KPQ/8 tiles de n=8
         int sacc[KPQ / 8][4];
 #pragma unroll
         for (int t = 0; t < KPQ / 8; ++t) sacc[t][0] = sacc[t][1] = sacc[t][2] = sacc[t][3] = 0;
-#pragma unroll
-        for (int t = 0; t < KPQ / 8; ++t) {
-            // ldmatrix.x4: matrices (k 0-15 | 16-31) de los pasos s y s+1 -> b0, b1 de dos pasos por instruccion
-            const unsigned char* kr = K_ + (hh * KPQ + t * 8 + (lane & 7)) * KST + (lane >> 3) * 16;
-#pragma unroll
-            for (int s = 0; s < 8; s += 2) {
-                unsigned b0, b1, b2, b3;
-                asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0,%1,%2,%3}, [%4];\n"
-                             : "=r"(b0), "=r"(b1), "=r"(b2), "=r"(b3) : "r"(sdir(kr + s * 32)));
-                asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
-                             "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
-                             : "+r"(sacc[t][0]), "+r"(sacc[t][1]), "+r"(sacc[t][2]), "+r"(sacc[t][3])
-                             : "r"(qa[s][0]), "r"(qa[s][1]), "r"(qa[s][2]), "r"(qa[s][3]), "r"(b0), "r"(b1));
-                asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.s8.s8.s32 "
-                             "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
-                             : "+r"(sacc[t][0]), "+r"(sacc[t][1]), "+r"(sacc[t][2]), "+r"(sacc[t][3])
-                             : "r"(qa[s + 1][0]), "r"(qa[s + 1][1]), "r"(qa[s + 1][2]), "r"(qa[s + 1][3]), "r"(b2), "r"(b3));
-            }
-        }
+        QK_TILE(K_, sacc)
+#endif
         // ── escala, mascara y maximo de la mitad
         float sf[KPQ / 8][4];
         float mx0 = NEG, mx1 = NEG;
@@ -447,6 +491,10 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
 #endif
         __syncthreads();
         st ^= 1;
+#if PING
+#pragma unroll
+        for (int t = 0; t < KPQ / 8; ++t) { sacc[t][0] = sacn[t][0]; sacc[t][1] = sacn[t][1]; sacc[t][2] = sacn[t][2]; sacc[t][3] = sacn[t][3]; }
+#endif
     }
     __pipeline_wait_prior(0);
     // l total por fila = suma de las 4 lanes (tig) y de las dos mitades
