@@ -130,6 +130,7 @@ services:
       - GENESIS_ENABLE_PN155_BA_EN_QKVZ=${GENESIS_ENABLE_PN155_BA_EN_QKVZ:-1}      # in_proj_b/a (W4 desde el 28-09) dentro del Marlin de in_proj_qkvz (checkpoint del 28-09; con el del 25-09, 0)
       - GENESIS_SK18H_NW=${GENESIS_SK18H_NW:-8}                              # warps por bloque de SK-18h batch2: 8 = un bloque por (secuencia, cabeza), K/V una vez
       - GENESIS_PN131_SK30=${GENESIS_PN131_SK30:-1}                         # atencion de decode en UNA pasada: paso -4,8%/-2,3% (1/4 pedidos), aceptacion igual (29-09)
+      - GENESIS_PN131_SK30_GMAX=${GENESIS_PN131_SK30_GMAX:-41}               # grupos de keys por (secuencia, cabeza): 41 = una ola en 82 SMs (03-10: -11 a -31% contra 128)
       - GENESIS_PN131_ROTV=${GENESIS_PN131_ROTV:-0}                         # V rotada en d al escribir (solo con SK-30). CAMBIA EL FORMATO DE LA KV: vaciar kv-offload al cambiarlo
       - GENESIS_ENABLE_PN156_NORMA_Q8=${GENESIS_ENABLE_PN156_NORMA_Q8:-1}          # norma que escribe int8 (SK-26) directo a Marlin en qkv, in_proj_qkvz y gate_up: paso -1,6% (1 pedido), KL igual
       - GENESIS_PN131_UNION_BLOQUES=${GENESIS_PN131_UNION_BLOQUES:-2400}          # union4: paginas por grupo elegidas para ~2400 bloques (1 pedido CPG 16, 4 pedidos ~60); bit a bit
