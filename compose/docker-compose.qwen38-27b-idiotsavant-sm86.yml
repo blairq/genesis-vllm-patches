@@ -114,8 +114,8 @@ services:
       - GENESIS_PN122_ARBOL_PTX=${GENESIS_PN122_ARBOL_PTX:-1}            # recurrencia del arbol en PTX (gdn_arbol.cu): 19,7 -> 11,7 us por capa, lee q/k/v con stride (sin las 3 copias de PN54)
       - GENESIS_ENABLE_PN150_GRAFO_BORRADOR=${GENESIS_ENABLE_PN150_GRAFO_BORRADOR:-1}   # fc y contexto del borrador en grafos CUDA (eran eager): paso -3,1% / -1,6%, mismo texto
       - GENESIS_ENABLE_PN151_GDN_META=${GENESIS_ENABLE_PN151_GDN_META:-1}             # metadata del GDN del decode en arbol en un kernel (eran ~35 ops por grupo): verificado 3000 llamadas, 0 distintas
-      - GENESIS_ENABLE_PN163_GDN_SALIDA=${GENESIS_ENABLE_PN163_GDN_SALIDA:-0}       # GDN: sin cero ni copia de core_attn_out en pasos solo-spec (~2 us x 48 capas)
-      - GENESIS_ENABLE_PN164_GDN_VISTAS=${GENESIS_ENABLE_PN164_GDN_VISTAS:-0}       # GDN: mixed_qkv/z/b/a como vistas de in_proj, sin la copia por capa (~1,5 us x 48)
+      - GENESIS_ENABLE_PN163_GDN_SALIDA=${GENESIS_ENABLE_PN163_GDN_SALIDA:-1}       # GDN: sin cero ni copia de core_attn_out en pasos solo-spec: oraculo identico, GDN -1%
+      - GENESIS_ENABLE_PN164_GDN_VISTAS=${GENESIS_ENABLE_PN164_GDN_VISTAS:-1}       # GDN: mixed_qkv/z/b/a como vistas de in_proj, sin la copia por capa: con PN163 oraculo identico, GDN -2,3%
       - GENESIS_PN151_VERIFICAR=${GENESIS_PN151_VERIFICAR:-0}                         # N: compara contra el builder original en las primeras N llamadas
       - GENESIS_ENABLE_PN135_NORM_QUANT=${GENESIS_ENABLE_PN135_NORM_QUANT:-0}          # residuo + RMSNorm + int8 en un kernel (SK-20); con noon dio +0,4%/+0,7%: re-medir
       - GENESIS_ENABLE_PN136_MLP_SOLAPADO=${GENESIS_ENABLE_PN136_MLP_SOLAPADO:-0}      # all-reduce del MLP solapado por DMA P2P (prefill); con noon dio 0%: re-medir
@@ -129,7 +129,7 @@ services:
       - GENESIS_ENABLE_PN154_HAD_SALIDAS=${GENESIS_ENABLE_PN154_HAD_SALIDAS:-1}  # Hadamard por cabeza en la entrada de o_proj/out_proj: solo actua si el checkpoint la declara (v2)
       - GENESIS_ENABLE_PN155_BA_EN_QKVZ=${GENESIS_ENABLE_PN155_BA_EN_QKVZ:-1}      # in_proj_b/a (W4 desde el 28-09) dentro del Marlin de in_proj_qkvz (checkpoint del 28-09; con el del 25-09, 0)
       - GENESIS_SK18H_NW=${GENESIS_SK18H_NW:-8}                              # warps por bloque de SK-18h batch2: 8 = un bloque por (secuencia, cabeza), K/V una vez
-      - GENESIS_PN131_SK30=${GENESIS_PN131_SK30:-0}                         # atencion de decode en UNA pasada (softmax fp32 en linea, K leida una vez): -21/-36% por capa offline
+      - GENESIS_PN131_SK30=${GENESIS_PN131_SK30:-1}                         # atencion de decode en UNA pasada: paso -4,8%/-2,3% (1/4 pedidos), aceptacion igual (29-09)
       - GENESIS_PN131_ROTV=${GENESIS_PN131_ROTV:-0}                         # V rotada en d al escribir (solo con SK-30). CAMBIA EL FORMATO DE LA KV: vaciar kv-offload al cambiarlo
       - GENESIS_ENABLE_PN156_NORMA_Q8=${GENESIS_ENABLE_PN156_NORMA_Q8:-1}          # norma que escribe int8 (SK-26) directo a Marlin en qkv, in_proj_qkvz y gate_up: paso -1,6% (1 pedido), KL igual
       - GENESIS_PN131_UNION_BLOQUES=${GENESIS_PN131_UNION_BLOQUES:-2400}          # union4: paginas por grupo elegidas para ~2400 bloques (1 pedido CPG 16, 4 pedidos ~60); bit a bit
