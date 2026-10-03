@@ -132,7 +132,7 @@ NW8 = int(os.environ.get("GENESIS_SK18H_NW", "8"))
 # keys segun el seq_len real). Offline, reloj fijo: 272 -> 198 us por capa a 62k, 139 -> 91 a 20k, 125 -> 39 a
 # 4k; mas preciso que batch2 contra float. P.V con P' en 16 bits (hi/lo, dos mma int8).
 SK30 = os.environ.get("GENESIS_PN131_SK30", "0") == "1"
-SK30_GMAX = int(os.environ.get("GENESIS_PN131_SK30_GMAX", "128"))
+SK30_GMAX = int(os.environ.get("GENESIS_PN131_SK30_GMAX", "41"))   # 82 SMs / NH=2: una ola con 1 bloque por SM (03-10: -11 a -31% contra 128)
 SK30_NQ = 2
 # V rotada en d al escribir (Hadamard/16 con signos, como K): con canales outlier el error int8 de V baja de
 # 2,0% a 0,64% (tests/proto/sk30_rot_pv.py). Solo con SK-30 (su union des-rota la salida); batch2 no la sabe

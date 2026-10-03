@@ -7,8 +7,11 @@
 //   s = S * qs[fila] * ks[key]                     (en log2: qs ya trae scale*log2(e) y 2^(ek-15))
 //   m' = max(m, max_k s); a = 2^(m-m'); p = 2^(s-m')
 //   O = a*O + (p*vs[key]) . V   mma m16n8k16 f16 -> f32 (V int8 -> fp16 exacto al armar el fragmento)
-// Reparto: cada (secuencia, cabeza KV) se parte en GMAX grupos de keys; el tamano del grupo sale del
-// seq_len REAL en la GPU (vale dentro del grafo). Salida por grupo: O/l en fp16, m y l en fp32.
+// Reparto: cada (secuencia, cabeza KV) se parte en grupos de keys; el tamano del grupo sale de los seq_len REALES
+// en la GPU (vale dentro del grafo). Con BAL (default) el tamano es el mismo para todo el lote: total de keys /
+// (GMAX - B), redondeado a 16 (880 = 55*16: un trozo de 16 nunca cruza pagina), asi cada bloque tiene ~las mismas
+// keys aunque los largos sean muy distintos, y cada secuencia usa ceil(n / paso) <= GMAX grupos. Con GMAX = 41
+// (82 SMs / NH = 2) y 1 bloque por SM es una sola ola. Salida por grupo: O/l en fp16, m y l en fp32.
 //
 // Layout del bloque de KV (el de SK-18h): K [BS][NH][256] | V [NH][256][BS] | escalas int16 [BS][NH][2].
 // Filas: r = j * G + g (token nuevo j, cabeza Q g del grupo de la cabeza KV); 64 filas (L*G <= 64).
@@ -59,6 +62,25 @@ __device__ __forceinline__ unsigned i8x2_a_h2(unsigned short u) {
     return *reinterpret_cast<const unsigned*>(&h);
 }
 
+#ifndef BAL
+#define BAL 1
+#endif
+__device__ __forceinline__ int paso_grupo(const int* __restrict__ seqlen, int b, int B, int GMAX) {
+#if BAL
+    int tot = 0;
+    for (int i = 0; i < B; ++i) tot += seqlen[i];
+    const int den = max(GMAX - B, 1);
+    int paso = (tot + den - 1) / den;
+    paso = max((paso + 15) / 16 * 16, 16);
+    // garantia: ceil(n_b / paso) <= GMAX (si B >= GMAX el den = 1 lo asegura igual: paso >= tot)
+    return paso;
+#else
+    const int n = seqlen[b];
+    int paso = (n + GMAX - 1) / GMAX;
+    return (paso + TK - 1) / TK * TK;
+#endif
+}
+
 extern "C" __global__ void __launch_bounds__(NWK * 32)
 sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q rotada)
             const float* __restrict__ qs,           // [B, NH, RB] escala de fila (log2, con scale y 2^(ek-15))
@@ -85,7 +107,7 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
     const int rt = w & 3, hh = w >> 2;                       // tile de 16 filas, cuarto hh (keys en S, dims en O)
     const unsigned NT = NWK * 32;
     const int n = seqlen[b];
-    int paso = (n + GMAX - 1) / GMAX; paso = (paso + TK - 1) / TK * TK;
+    const int paso = paso_grupo(seqlen, b, B, GMAX);
     const int k_ini = grp * paso, k_fin = min(n, k_ini + paso);
     const size_t so = (((size_t)grp * B + b) * NH + h) * RB;
     const float vsc = exp2f((float)(refs[1] - 15));
@@ -473,7 +495,7 @@ sk30_union(const __half* __restrict__ Op, const float* __restrict__ Mp, const fl
     if (f >= L * G) return;
     const unsigned tid = threadIdx.x, lane = tid & 31, w = tid >> 5;
     const int n = seqlen[b];
-    int paso = (n + GMAX - 1) / GMAX; paso = (paso + TK - 1) / TK * TK;
+    const int paso = paso_grupo(seqlen, b, B, GMAX);
     const int ng = min(GMAX, (n + paso - 1) / paso);
     // maximo y pesos de cada grupo
     float mg = NEG;
