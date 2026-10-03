@@ -273,11 +273,15 @@ _Pragma("unroll") \
         const int ult = k0 + TK - 1;
         const bool entero = ult < k_fin && ult <= min(min(lm0, lm1), min(lb0, lb1));
 #pragma unroll
-        for (int t = 0; t < KPQ / 8; ++t)
+        for (int t = 0; t < KPQ / 8; ++t) {
+            // escala de K de las dos columnas de este hilo, UNA vez (el SASS la cargaba por fila: 24 LDS en vez de 16,
+            // las STS de P en el medio no le dejaban al compilador reusarla)
+            const int c0 = hh * KPQ + t * 8 + tig * 2;
+            const float ksc0 = (float)E_[c0 * 2], ksc1 = (float)E_[(c0 + 1) * 2];
 #pragma unroll
             for (int e = 0; e < 4; ++e) {
-                const int col = hh * KPQ + t * 8 + tig * 2 + (e & 1), kk = k0 + col;
-                const float ks = (float)E_[col * 2];
+                const int col = c0 + (e & 1), kk = k0 + col;
+                const float ks = (e & 1) ? ksc1 : ksc0;
                 const bool fila1 = e >= 2;
                 const int lm = fila1 ? lm1 : lm0, lb = fila1 ? lb1 : lb0;
                 const unsigned am = fila1 ? am1 : am0;
@@ -288,6 +292,7 @@ _Pragma("unroll") \
                 sf[t][e] = v;
                 if (fila1) mx1 = fmaxf(mx1, v); else mx0 = fmaxf(mx0, v);
             }
+        }
         mx0 = fmaxf(mx0, __shfl_xor_sync(0xffffffffu, mx0, 1)); mx0 = fmaxf(mx0, __shfl_xor_sync(0xffffffffu, mx0, 2));
         mx1 = fmaxf(mx1, __shfl_xor_sync(0xffffffffu, mx1, 1)); mx1 = fmaxf(mx1, __shfl_xor_sync(0xffffffffu, mx1, 2));
         if (tig == 0) { sM[hh * RB + f0] = mx0; sM[hh * RB + f1] = mx1; }
