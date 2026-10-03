@@ -11,10 +11,10 @@ for r in 1 2; do for s in 0 1; do
   docker rm -f genesis-27b-pruebas >/dev/null 2>&1
   docker run --rm -v /home/usuario/Proyectos/kv-offload:/k alpine sh -c 'rm -rf /k/*'
   (cd $R/compose && GENESIS_ENABLE_PN160_BORRADOR_FUSION=$s docker compose $C up -d --force-recreate >/dev/null 2>&1)
-  t0=$(date +%s); until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
+  t0=$(date +%s); until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
   echo "$(date +%T) == PN160=$s r$r listo en $(( $(date +%s) - t0 )) s"
   docker logs genesis-27b-pruebas 2>&1 | grep -E "Worker_TP0.*(PN160|Traceback)" | cut -c40-200 | head -2
-  docker exec genesis-27b-pruebas python3 /traces/banco/correr_banco.py /traces/banco/codigo40.jsonl coder $out 4 1536 > /dev/null 2>&1
+  docker exec genesis-27b-pruebas python3 /traces/banco/correr_banco.py /traces/banco/codigo40.jsonl coder ${out/$T\/banco\//\/traces\/banco\/} 4 1536 > /dev/null 2>&1
 done; done
 docker rm -f genesis-27b-pruebas >/dev/null 2>&1
 cd $M; export FASES="decode1 decode4" ORACULO=0

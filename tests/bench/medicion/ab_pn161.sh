@@ -2,7 +2,7 @@
 # PN161 (norma q/k + rope + FWHT + KV int8 del borrador en un kernel, SK-33): aceptacion (banco de agente,
 # 2 arranques) y paso (perfil de decode, dos replicas en orden opuesto). Brazos: base, PN161, PN160+PN161 y
 # PN160+PN161+PN162 (normas del borrador, SK-34).
-R=/home/usuario/Proyectos/genesis-vllm-patches; M=$R/tests/bench/medicion; T=$M/trazas; P=${PUERTO:-8361}
+R=/home/usuario/Proyectos/genesis-vllm-patches; M=$R/tests/bench/medicion; T=$M/trazas; P=${PUERTO:-8391}
 echo "$(date +%T) arranca"
 docker stop genesis-27b-idiotsavant >/dev/null 2>&1
 C="-f $R/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml -f $R/compose/ov-aislado.yml"

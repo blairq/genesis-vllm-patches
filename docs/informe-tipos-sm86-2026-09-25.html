@@ -845,7 +845,7 @@
           <tr class="grupo"><td colspan="6">Decode</td></tr>
           <tr><td class="k">1 · Atención de decode<small>SK-18h: ocupación y salida</small></td>
             <td class="porq">batch2 al 35% de DRAM con 4 warps por SM; salida con bloques de 1 warp (84 µs con 4 pedidos). <b>Queda:</b> batch2 al ~44%, limitado por 254 registros y 1,7 olas con páginas de 880 tokens</td>
-            <td class="n">−2,8 ms · 9%</td><td class="n">−4,1 ms · 10%</td><td class="n">—</td><td><span class="chip ch-abierto">en parte: −6% / −10%</span></td></tr>
+            <td class="n">−2,8 ms · 9%</td><td class="n">−4,1 ms · 10%</td><td class="n">—</td><td><span class="chip ch-abierto">en parte: −6% / −10%; SK-30 en A/B</span></td></tr>
           <tr><td class="k">2 · All-reduce de decode<small>P2P crudo de una pasada</small></td>
             <td class="porq">NCCL LL: 26 µs por 92 KB, 61 µs por 369 KB, ×128 por paso. El kernel P2P propio llegó a 11,4 GB/s</td>
             <td class="n">−1,8 ms · 6%</td><td class="n">−4,6 ms · 11%</td><td class="n">—</td><td><span class="chip ch-hecho">hecho: −6,1% / −9,7%</span></td></tr>
@@ -857,7 +857,7 @@
             <td class="n">−1,5 ms · 5%</td><td class="n">−1,0 ms · 2,5%</td><td class="n">—</td><td><span class="chip ch-hecho">hecho: −6,1% / −1,8%</span></td></tr>
           <tr><td class="k">5 · Borrador<small>atención partida, W4A8, vocab podado</small></td>
             <td class="porq">Atención con 12 bloques (1 ms); GEMM fp16 (0,3 ms); lm_head entero para 16 candidatos (0,4–0,7 ms)</td>
-            <td class="n">−1,0 ms · 3%</td><td class="n">−1,3 ms · 3%</td><td class="n">—</td><td><span class="chip ch-abierto">abierto (paso 10)</span></td></tr>
+            <td class="n">−1,0 ms · 3%</td><td class="n">−1,3 ms · 3%</td><td class="n">—</td><td><span class="chip ch-abierto">en parte: ~−5,5% / ~−3% (paso 10)</span></td></tr>
           <tr><td class="k">6 · Logits sin AllGather<small>gumbel-max local por rango</small></td>
             <td class="porq">Se juntan los logits enteros para muestrear; el máximo de logit + ruido gumbel se puede tomar por rango y juntar solo (valor, índice)</td>
             <td class="n">−0,2 ms · 1%</td><td class="n">−0,8 ms · 2%</td><td class="n">—</td><td><span class="chip ch-hecho">hecho, con lm_head A8: −0,8% / −3,7%</span></td></tr>
@@ -894,6 +894,7 @@
       <div><span>Paso de decode · 1 pedido · 62k</span><b>29,36 → 21,99 ms</b><span class="antes">−25,1% (27/28-09)</span></div>
       <div><span>Paso de decode · 4 pedidos · ~15k</span><b>40,94 → 30,00 ms</b><span class="antes">−26,7% (27/28-09)</span></div>
       <div><span>GPU ociosa entre fases · 1 pedido</span><b>1.719 → 3 µs</b><span class="antes">por paso</span></div>
+      <div><span>Borrador · 28-09 · 1 / 4 pedidos</span><b>~−5,5% / ~−3%</b><span class="antes">suma de tres A/B separados (PN124, PN157/158, PN159)</span></div>
       <div><span>Calidad</span><b>mejor</b><span class="antes">KL 0,0193 → 0,0178; aceptación igual con carga real de agente</span></div>
     </div>
     <div class="tabla-caja">
@@ -921,6 +922,9 @@
           <tr class="nuevo"><td class="n">6</td><td class="k">Hadamard en out_proj<small>PN154 · SK-25 modo GDN</small></td>
             <td><span class="chip ch-hecho">hecho 28-09</span></td><td class="n mejor" colspan="2">con el 8: −10 µs por capa GDN</td>
             <td class="porq">Medido. out_proj = R·W·H<sub>128</sub>; SK-25 hace RMSNormGated + Hadamard por cabeza + int8 por token y Marlin lo toma directo (se van la norma de inductor, la cuantización y la escala × global). Junto con o_proj, el KL servido baja 0,0193 → 0,0178: era el error de A8 de las únicas lineales con la entrada sin rotar.</td></tr>
+          <tr class="nuevo"><td class="n">5b</td><td class="k">Atención de decode en una pasada<small>SK-30 · ROTV · GENESIS_PN131_SK30</small></td>
+            <td><span class="chip ch-abierto">A/B en cola</span></td><td class="n mejor">−2,8% *</td><td class="n mejor">−1,1% *</td>
+            <td class="porq">batch2 lee K dos veces (máximo exacto, después pesos) y trabaja una página por bloque. SK-30 hace flash-decoding sobre la misma KV int8: Q·K con <span class="m">mma m16n8k32 s8</span>, softmax en línea fp32 con exp2 y 128 grupos de keys según el largo real, leído en la GPU (vale dentro del grafo). P·V con HMMA fp16→fp32 va a media tasa en GA102: P' = p·vs en dos bytes (hi/lo) y dos mma int8, a 4× la tasa. Offline, reloj fijo, por capa: 20k 165 → 106 µs, 62k 288 → 215. En el kernel manda la emisión (13 instrucciones comunes por cada una de tensor); ldmatrix.x4 para K, P y V, máscara solo en el borde y sin reescalado si el máximo no cambia: −10% de instrucciones (ncu 203 → 191 µs). Falta la variante con P' a escala fija (acumuladores enteros persistentes). <b>ROTV</b>: V rotada en d al escribir la KV; con canales outlier el error baja de 2,9% a 2,2%, después de arreglar un sesgo de truncado (<span class="m">x&gt;&gt;4</span> deja −½ LSB fijo en V y Q, que crece con el largo). <i>* Primera corrida en el servidor, con el reloj de la GPU1 trabado: no vale, se repite.</i></td></tr>
           <tr><td class="n">7</td><td class="k">Norma que escribe int8<small>SK-20 con g = 1, cableada como SK-23</small></td>
             <td><span class="chip ch-lat">código</span></td><td class="n">−2–4%</td><td class="n">−2–4%</td>
             <td class="porq">Según el paso 2. Con 5–7 hechos, todas las lineales reciben el int8 del kernel anterior.</td></tr>
@@ -930,9 +934,21 @@
           <tr class="nuevo"><td class="n">9</td><td class="k">Python a la GPU<small>PN150 borrador en grafo · PN151 metadata GDN en un kernel · sync oculta</small></td>
             <td><span class="chip ch-hecho">hecho 27-09</span></td><td class="n mejor">−6,1%</td><td class="n mejor">−1,8%</td>
             <td class="porq">Medido. PN150: el fc y la proyección de contexto del borrador en grafos CUDA (−3,1% / −1,6%). PN151: el builder de metadata del GDN (~35 ops de torch por grupo y paso) en un kernel, verificado en 3000 llamadas sin diferencias (−2,0% / −0,6%). Y una sincronización oculta nuestra: <span class="m">torch.tensor(lista, device=cuda)</span> en la compactación del árbol dejaba la CPU bloqueada 19,8 de 26 ms por paso. GPU ociosa en huecos con 1 pedido: 1.719 → 3 µs por paso. Mismo texto en el oráculo.</td></tr>
-          <tr><td class="n">10</td><td class="k">Borrador<small>GEMM W4A8, atención partida, vocab podado</small></td>
-            <td><span class="chip ch-cambio">capa</span> <span class="chip ch-lat">código</span></td><td class="n">−3%</td><td class="n">−3%</td>
-            <td class="porq">Todo el borrador en una tanda: se valida con la aceptación y, si baja, se re-ajusta con dflash2.sh.</td></tr>
+          <tr class="nuevo"><td class="n">10</td><td class="k">Borrador: atención partida<small>PN124 Q3D · segmentos sobre la ventana</small></td>
+            <td><span class="chip ch-hecho">hecho 28-09</span></td><td class="n mejor">−3,1%</td><td class="n mejor">−0,8%</td>
+            <td class="porq">Medido. La atención del borrador (5 capas, 9 queries por pedido, ventana de 2047) iba por el 2D de Triton, ~140 µs por capa. El 3D parte la KV en segmentos, pero la ventana podaba dentro de cada uno y a 62k trabajaba uno solo. Ahora los segmentos cubren solo la ventana: 3,6× offline, capas del borrador −35% / −19%.</td></tr>
+          <tr class="nuevo"><td class="n">10b</td><td class="k">Borrador en Marlin + embedding P2P<small>PN157 · PN158</small></td>
+            <td><span class="chip ch-hecho">hecho 28-09</span></td><td class="n mejor">−0,5%</td><td class="n mejor">−0,4%</td>
+            <td class="porq">Medido. La K/V de contexto se decuantizaba a fp16 en cada paso (69 µs): Marlin W4A16 con los mismos int4, 25 µs, y 52 MB menos. El all-reduce del embedding pasa al P2P de PN152. La conv en int8 resta 0,9% de aceptación: queda apagada hasta la destilación.</td></tr>
+          <tr class="nuevo"><td class="n">10c</td><td class="k">Vocabulario recortado del borrador<small>PN159 · 64k de 248k columnas</small></td>
+            <td><span class="chip ch-hecho">hecho 28-09</span></td><td class="n mejor">−2,0%</td><td class="n mejor">−2,2%</td>
+            <td class="porq">Medido. El borrador solo propone entre los 64k tokens más frecuentes de las capturas (99,3% de lo generado): columnas del int4 GPTQ tomadas antes del repack, sin recuantizar ni rotar. Aceptación 5,61 contra 5,61. Con 32k cae a 5,41. <b>Fase 2</b> (NanoSpec/EvoSpec traducidos a SM86): 32k fijos + un anillo de 512 filas con los tokens del prompt, leídas por UVA desde el host. Primer resultado: 32k + anillo 5,61 contra 64k 5,66, a la mitad del lm_head. El top-k propio (SK-29) resta ~3% y se está revisando.</td></tr>
+          <tr class="nuevo"><td class="n">10d</td><td class="k">Fusiones y atención del borrador<small>PN160 · SK-32 · SK-31</small></td>
+            <td><span class="chip ch-abierto">A/B en cola</span></td><td class="n">—</td><td class="n">—</td>
+            <td class="porq">El borrador no tenía ninguna de las fusiones del target. SK-32 junta conv + cuantización de qkv/gate_up, SiluAndMul + cuantización y la escala × global: de 11 kernels chicos por capa a 4, bit a bit o ±1 LSB contra vLLM. SK-31 hace la atención del borrador en una pasada, con Q·K en fp16 (con Q int8 el error era 1,1%). Falta juntar norma de q/k, rope, FWHT y escritura de la KV.</td></tr>
+          <tr class="nuevo"><td class="n">10e</td><td class="k">Destilar el borrador con los cambios<small>conv int8 · vocabulario recortado</small></td>
+            <td><span class="chip ch-cambio">capa</span></td><td class="n" colspan="2">aceptación</td>
+            <td class="porq">Banco de agente, 2 arranques: producción 5,57 · una época más con la receta de siempre 5,69 (+2%) · conv int8 entrenada + 32k 5,29 · conv int8 entrenada + 64k 5,50. Entrenar la conv con QAT resta; va en cola la conv congelada. El largo greedy offline decía lo contrario para la época extra: el offline no predice el servidor en cambios chicos.</td></tr>
           <tr class="grupo"><td colspan="6">Prefill</td></tr>
           <tr><td class="n">11</td><td class="k">Páginas únicas una vez por paso</td><td><span class="chip ch-lat">código</span></td>
             <td class="n" colspan="2">prefill −1–3%</td><td class="porq">Chico; va en cualquier momento.</td></tr>

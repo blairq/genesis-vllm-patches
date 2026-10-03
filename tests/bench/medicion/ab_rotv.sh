@@ -10,10 +10,10 @@ for r in 1 2; do for v in 0 1; do
   docker rm -f genesis-27b-pruebas >/dev/null 2>&1
   docker run --rm -v /home/usuario/Proyectos/kv-offload:/k alpine sh -c 'rm -rf /k/*'      # el formato de la KV cambia
   (cd $R/compose && GENESIS_PN131_SK30=1 GENESIS_PN131_ROTV=$v VLLM_API_KEY= docker compose $C up -d --force-recreate >/dev/null 2>&1)
-  t0=$(date +%s); until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
+  t0=$(date +%s); until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
   echo "$(date +%T) == ROTV=$v r$r listo en $(( $(date +%s) - t0 )) s"
-  [ -f $TC/fid_rotv_${v}_r$r.json ] || python3 $R/entrenamiento/cuant/fidelidad.py http://127.0.0.1:8361 $TC/ventanas_48x1024.npy $TC/ref_bf16.npz $TC/fid_rotv_${v}_r$r.json rotv$v 2>&1 | tail -2
-  [ -f $T/banco/rotv_${v}_r$r.json ] || docker exec genesis-27b-pruebas python3 /traces/banco/correr_banco.py /traces/banco/codigo40.jsonl coder $T/banco/rotv_${v}_r$r.json 4 1536 > /dev/null 2>&1
+  [ -f $TC/fid_rotv_${v}_r$r.json ] || python3 $R/entrenamiento/cuant/fidelidad.py http://127.0.0.1:8391 $TC/ventanas_48x1024.npy $TC/ref_bf16.npz $TC/fid_rotv_${v}_r$r.json rotv$v 2>&1 | tail -2
+  [ -f $T/banco/rotv_${v}_r$r.json ] || docker exec genesis-27b-pruebas python3 /traces/banco/correr_banco.py /traces/banco/codigo40.jsonl coder /traces/banco/rotv_${v}_r$r.json 4 1536 > /dev/null 2>&1
 done; done
 docker rm -f genesis-27b-pruebas >/dev/null 2>&1
 for v in 0 1; do python3 -c "

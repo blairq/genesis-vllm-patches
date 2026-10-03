@@ -140,7 +140,7 @@ volver() {
 }
 trap volver EXIT
 
-# Instancia AISLADA (puerto 8361, red propia): ni Hermes ni opencode le pegan, asi no contaminan la
+# Instancia AISLADA (puerto 8391, red propia): ni Hermes ni opencode le pegan, asi no contaminan la
 # captura ni los contadores de aceptacion (que son globales del servidor).
 arrancar() {  # $1 = borrador W4A16 (ruta del host), $2.. = overrides extra
   local bor=$1; shift

@@ -3,15 +3,15 @@
 #   docker compose -f docker-compose.qwen38-27b-noon-dflash2-v029.yml -f ov-aislado.yml up -d --force-recreate
 #
 # Cierra las tres vias de trafico ajeno (ver la memoria aislar-el-server-de-pruebas-de-hermes):
-#   1. el puerto del host: 8361 en vez de 8360 (Hermes, opencode y el dashboard apuntan a 8360);
+#   1. el puerto del host: 8391 en vez de 8360 (Hermes, opencode y el dashboard apuntan a 8360);
 #   2. el nombre de servicio en lanbridge: red propia, asi Traefik y el dashboard no lo resuelven;
 #   3. el healthcheck: el de produccion hace una GENERACION cada 60 s; este solo pide /health.
-# Los bancos apuntan a http://localhost:8361. Para volver a produccion, recrear sin este archivo.
+# Los bancos apuntan a http://localhost:8391. Para volver a produccion, recrear sin este archivo.
 services:
   vllm-server:
     container_name: genesis-27b-pruebas
     ports: !override
-      - "8361:8320"
+      - "127.0.0.1:8391:8320"
     networks: !override
       pruebas: {}
     healthcheck:

@@ -2,7 +2,7 @@
 # PN157: proyeccion de la conv del borrador en int8 por grupo de 64 (GENESIS_PN157_GRUPO_CONV=64) contra fp16.
 # 21,6 -> 11,8 us por conv (10 por paso); error del kernel de la conv 0,54% (por canal era 0,95% y restaba ~0,9%).
 # Aceptacion (banco de agente, 2 arranques alternados) y paso (perfil de decode, dos replicas en orden opuesto).
-R=/home/usuario/Proyectos/genesis-vllm-patches; M=$R/tests/bench/medicion; T=$M/trazas; P=${PUERTO:-8361}
+R=/home/usuario/Proyectos/genesis-vllm-patches; M=$R/tests/bench/medicion; T=$M/trazas; P=${PUERTO:-8391}
 echo "$(date +%T) arranca"
 docker stop genesis-27b-idiotsavant >/dev/null 2>&1
 C="-f $R/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml -f $R/compose/ov-aislado.yml"

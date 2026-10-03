@@ -28,7 +28,7 @@ arrancar() {   # $1 = dir de trazas (dentro del contenedor), $2 = delay, $3 = ma
   PROF_KIND='"torch"' PROF_DIR=$1 PROF_DELAY=$2 PROF_MAX=$3 docker compose $C up -d --force-recreate >/dev/null 2>&1
   local t0=$(date +%s)
   # /health cada 5 s: el healthcheck de docker del override es cada 60 s y hacia perder hasta un minuto
-  until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do
+  until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do
     [ $(( $(date +%s) - t0 )) -gt 1800 ] && { echo "no arranco"; docker logs --tail 20 $N; exit 1; }
     sleep 5
   done
@@ -134,7 +134,7 @@ fi
 if echo " $FASES " | grep -q ' ttft '; then
   docker rm -f $N >/dev/null 2>&1
   docker compose $C up -d --force-recreate >/dev/null 2>&1
-  t0=$(date +%s); until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do sleep 5; done
+  t0=$(date +%s); until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do sleep 5; done
   echo "$(date +%T) [$LABEL] servidor (sin profiler) listo en $(( $(date +%s) - t0 )) s"
   cargar ttft | tee /dev/stderr | grep '^TTFT_JSON ' | sed 's/^TTFT_JSON //' > $MED/analisis_perfil/${LABEL}_ttft.json
   guardar_avisos ttft

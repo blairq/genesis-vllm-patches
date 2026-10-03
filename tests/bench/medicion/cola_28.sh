@@ -22,7 +22,7 @@ for r in 1 2; do
   docker rm -f genesis-27b-pruebas >/dev/null 2>&1
   docker run --rm -v /home/usuario/Proyectos/kv-offload:/k alpine sh -c 'rm -rf /k/*'
   (cd $R/compose && GENESIS_PN157_BITS_CONV=8 GENESIS_PN159_VOCAB=65536 docker compose $C -f $OV/D.yml up -d --force-recreate >/dev/null 2>&1)
-  t0=$(date +%s); until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
+  t0=$(date +%s); until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
   echo "$(date +%T) A/B D r$r listo en $(( $(date +%s) - t0 )) s"
   docker exec genesis-27b-pruebas python3 /traces/banco/correr_banco.py /traces/banco/codigo40.jsonl coder $out 4 1536 > /dev/null 2>&1
 done

@@ -10,7 +10,7 @@ for brazo in ${BRAZOS:-off v32 v64 offb v32b v64b}; do
   docker rm -f genesis-27b-pruebas >/dev/null 2>&1
   docker run --rm -v /home/usuario/Proyectos/kv-offload:/k alpine sh -c 'rm -rf /k/*'
   env $E docker compose $C up -d --force-recreate >/dev/null 2>&1
-  t0=$(date +%s); until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
+  t0=$(date +%s); until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
   echo "== $brazo ($E) listo en $(( $(date +%s) - t0 )) s"; docker logs genesis-27b-pruebas 2>&1 | grep -E "PN159: (cand|no se)|Traceback" | head -2
   docker exec genesis-27b-pruebas python3 /traces/banco/correr_banco.py /traces/banco/codigo40.jsonl coder /traces/banco/agente159_$brazo.json 4 1536 2>&1 | tail -1
 done

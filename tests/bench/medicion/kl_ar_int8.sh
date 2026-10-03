@@ -9,10 +9,10 @@ for brazo in ${BRAZOS:-ar8 ar16 ar8b}; do
   case $brazo in ar16*) M=100000000;; *) M=512;; esac
   docker rm -f genesis-27b-pruebas >/dev/null 2>&1
   GENESIS_PN120_M_MIN=$M VLLM_API_KEY= docker compose $C up -d --force-recreate >/dev/null 2>&1
-  t0=$(date +%s); until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do
+  t0=$(date +%s); until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do
     [ $(( $(date +%s) - t0 )) -gt 1800 ] && { echo "no arranco"; exit 1; }; sleep 5; done
   echo "$(date +%T) $brazo (M_MIN=$M) listo en $(( $(date +%s) - t0 )) s"
-  python3 $R/entrenamiento/cuant/fidelidad.py http://127.0.0.1:8361 $T/ventanas_48x1024.npy $T/ref_bf16.npz $T/fid_ar_$brazo.json $brazo 2>&1 | tail -3
+  python3 $R/entrenamiento/cuant/fidelidad.py http://127.0.0.1:8391 $T/ventanas_48x1024.npy $T/ref_bf16.npz $T/fid_ar_$brazo.json $brazo 2>&1 | tail -3
 done
 docker rm -f genesis-27b-pruebas >/dev/null 2>&1
 echo "TODO LISTO"

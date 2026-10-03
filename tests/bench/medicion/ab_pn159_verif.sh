@@ -2,7 +2,7 @@
 # PN159: F1s (SK-29 sin anillo) acepto ~3% menos que F1 en fase 2, pero SK-29 da exacto offline y F2a/F2b (mismo
 # kernel, con anillo) aceptan igual que F1. Dos replicas mas de cada uno, en orden alternado, con
 # GENESIS_PN159_VERIFICAR=1 en F1s: cuenta en el servidor las filas en que SK-29 y flashinfer difieren.
-R=/home/usuario/Proyectos/genesis-vllm-patches; M=$R/tests/bench/medicion; T=$M/trazas; P=${PUERTO:-8361}
+R=/home/usuario/Proyectos/genesis-vllm-patches; M=$R/tests/bench/medicion; T=$M/trazas; P=${PUERTO:-8391}
 echo "$(date +%T) arranca"
 docker stop genesis-27b-idiotsavant >/dev/null 2>&1
 C="-f $R/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml -f $R/compose/ov-aislado.yml"

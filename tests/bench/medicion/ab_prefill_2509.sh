@@ -8,7 +8,7 @@ for brazo in 2509 2809 2509b 2809b; do
   docker rm -f genesis-27b-pruebas >/dev/null 2>&1
   docker run --rm -v /home/usuario/Proyectos/kv-offload:/k alpine sh -c 'rm -rf /k/*'
   env $E VLLM_API_KEY= docker compose $C up -d --force-recreate >/dev/null 2>&1
-  until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do sleep 5; done
+  until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do sleep 5; done
   for r in 622 1266; do echo "== $brazo $r"; docker exec -i genesis-27b-pruebas python3 - p$brazo$r $r < $M/pp.py 2>&1 | tail -3; done
 done
 docker rm -f genesis-27b-pruebas >/dev/null 2>&1

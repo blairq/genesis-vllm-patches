@@ -65,7 +65,7 @@ for r in 1 2; do for b in A B C D; do
   docker rm -f genesis-27b-pruebas >/dev/null 2>&1
   docker run --rm -v /home/usuario/Proyectos/kv-offload:/k alpine sh -c 'rm -rf /k/*'
   (cd $R/compose && env $E docker compose -f docker-compose.qwen38-27b-idiotsavant-sm86.yml -f ov-aislado.yml -f $OV/$b.yml up -d --force-recreate >/dev/null 2>&1)
-  t0=$(date +%s); until curl -sf -m 3 http://localhost:8361/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
+  t0=$(date +%s); until curl -sf -m 3 http://localhost:8391/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
   log "A/B $b r$r ($E) listo en $(( $(date +%s) - t0 )) s"
   docker exec genesis-27b-pruebas python3 /traces/banco/correr_banco.py /traces/banco/codigo40.jsonl coder /traces/banco/destilar_${b}_r$r.json 4 1536 > /dev/null 2>&1
 done; done
