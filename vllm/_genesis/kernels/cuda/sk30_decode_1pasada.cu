@@ -237,8 +237,9 @@ sk30_decode(const signed char* __restrict__ Qi,     // [B, NH, RB, 256] int8 (q 
                 const bool fila1 = e >= 2;
                 const int lm = fila1 ? lm1 : lm0, lb = fila1 ? lb1 : lb0;
                 const unsigned am = fila1 ? am1 : am0;
-                const bool vis = entero || (kk < k_fin && kk <= lm &&
-                                 (kk <= lb || ((unsigned)(kk - lb - 1) < 31u && ((am >> ((kk - lb - 1) & 31)) & 1u))));
+                // sin cortocircuito: con || / && el compilador armaba un salto con BSSY/BSYNC por elemento
+                const unsigned dk = (unsigned)(kk - lb - 1);
+                const bool vis = entero | ((kk < k_fin) & (kk <= lm) & ((kk <= lb) | ((dk < 31u) & (((am >> (dk & 31)) & 1u) != 0))));
                 const float v = vis ? (float)sacc[t][e] * (fila1 ? qs1 : qs0) * ks : NEG;
                 sf[t][e] = v;
                 if (fila1) mx1 = fmaxf(mx1, v); else mx0 = fmaxf(mx0, v);
