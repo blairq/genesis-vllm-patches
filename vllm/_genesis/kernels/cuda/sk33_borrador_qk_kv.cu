@@ -92,7 +92,9 @@ __device__ __forceinline__ void cabeza(float* x, const __half* __restrict__ w, f
 }
 
 // cuantizacion por token-cabeza y escritura de 4 bytes + la escala (lane 0)
-__device__ __forceinline__ void a_cache(const float* x, int8_t* dst, float* esc, unsigned lane) {
+// los shuffles van SIEMPRE (convergentes); "escribe" solo protege los stores: con un return antes, el compilador
+// no podia probar que el warp estaba convergente y llamaba a la subrutina lenta de SHFL con WARPSYNC
+__device__ __forceinline__ void a_cache(const float* x, int8_t* dst, float* esc, unsigned lane, bool escribe) {
     const float am = max_warp(fmaxf(fmaxf(fabsf(x[0]), fabsf(x[1])), fmaxf(fabsf(x[2]), fabsf(x[3]))));
     const float sc = fmaxf(am / 127.f, 1e-6f), inv = 1.f / sc;
     char4 q;
@@ -104,8 +106,10 @@ __device__ __forceinline__ void a_cache(const float* x, int8_t* dst, float* esc,
         v = fminf(fmaxf(v, -128.f), 127.f);
         qb[e] = (int8_t)(int)v;                              // trunca hacia cero, como el store de triton
     }
-    *reinterpret_cast<char4*>(dst + lane * 4) = q;
-    if (lane == 0) *esc = sc;
+    if (escribe) {
+        *reinterpret_cast<char4*>(dst + lane * 4) = q;
+        if (lane == 0) *esc = sc;
+    }
 }
 
 extern "C" __global__ void __launch_bounds__(128)
@@ -124,8 +128,14 @@ sk33_qk_kv(const __half* __restrict__ qkv, int sq,              // [T, NHQ*128 +
 {
     const unsigned lane = threadIdx.x & 31;
     const int t = blockIdx.x;
-    const int u = blockIdx.y * 4 + (threadIdx.x >> 5);
-    if (u >= NHQ + NKV) return;
+    const int u0 = blockIdx.y * 4 + (threadIdx.x >> 5);
+    // SIN ramas alrededor de los shuffles (norma, rope, FWHT, maximo de la cuantizacion): cada warp elige sus punteros
+    // con selects y hace siempre la misma secuencia; solo los stores van condicionados. Con return / if por tipo de
+    // cabeza el compilador no podia probar convergencia y cada SHFL era una llamada con WARPSYNC (68 en el SASS).
+    const bool valido = u0 < NHQ + NKV;
+    const int u = valido ? u0 : 0;
+    const bool esq = u < NHQ;
+    const int h = esq ? 0 : u - NHQ;                         // cabeza KV (las q usan 0: se calcula y no se guarda)
     const __half* fila = qkv + (size_t)t * sq;
 
     // cos/sin de las dims de esta lane: indice d mod 64
@@ -134,22 +144,15 @@ sk33_qk_kv(const __half* __restrict__ qkv, int sq,              // [T, NHQ*128 +
     const float4 s4 = *reinterpret_cast<const float4*>(cp + 64 + (lane & 15) * 4);
     float c[4] = {c4.x, c4.y, c4.z, c4.w}, s[4] = {s4.x, s4.y, s4.z, s4.w};
 
-    float x[4];
-    if (u < NHQ) {
-        cargar4(fila + u * 128 + lane * 4, x);
-        cabeza(x, wq, eps, c, s, signos, lane);
-        guardar4(qo + (size_t)t * so + u * 128 + lane * 4, x);
-        return;
-    }
-    const int h = u - NHQ;
-    cargar4(fila + NHQ * 128 + h * 128 + lane * 4, x);
-    cabeza(x, wk, eps, c, s, signos, lane);
-    float v[4];
+    float x[4], v[4];
+    cargar4(fila + (esq ? u * 128 : NHQ * 128 + h * 128) + lane * 4, x);
     cargar4(fila + (NHQ + NKV) * 128 + h * 128 + lane * 4, v);
-    if (slots == nullptr) return;
-    const int64_t sl = slots[t];
-    if (sl < 0) return;
-    const int64_t b = sl / BS, i = sl % BS;
-    a_cache(x, kc + b * kcb + i * kcs + h * kch, ks + b * ksb + i * kss + h * ksh, lane);
-    a_cache(v, vc + b * vcb + i * vcs + h * vch, vs + b * vsb + i * vss + h * vsh, lane);
+    cabeza(x, esq ? wq : wk, eps, c, s, signos, lane);
+    if (valido && esq) guardar4(qo + (size_t)t * so + u * 128 + lane * 4, x);
+    // slot en 32 bits (bloques * BS << 2^31): la division de 64 bits era una subrutina emulada
+    const int sl = slots != nullptr ? (int)slots[t] : -1;
+    const bool escribe = valido && !esq && sl >= 0;          // uniforme en el warp (un token y una cabeza por warp)
+    const int b = sl >= 0 ? sl / BS : 0, i = sl >= 0 ? sl - b * BS : 0;
+    a_cache(x, kc + (int64_t)b * kcb + (int64_t)i * kcs + h * kch, ks + (int64_t)b * ksb + (int64_t)i * kss + h * ksh, lane, escribe);
+    a_cache(v, vc + (int64_t)b * vcb + (int64_t)i * vcs + h * vch, vs + (int64_t)b * vsb + (int64_t)i * vss + h * vsh, lane, escribe);
 }
