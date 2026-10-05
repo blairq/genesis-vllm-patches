@@ -317,6 +317,12 @@ services:
       - --kv-transfer-config
       - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 2147483648, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload", "n_read_threads": 4, "n_write_threads": 4}]}}'
       - --enable-prefix-caching
+      # Con especulacion (DFlash cuenta como EAGLE) vLLM fuerza checkpoints DENSOS del estado GDN: un bloque de
+      # estado por cada 880 tokens y por grupo GDN. Medido el 05-10 con 2 conversaciones de ~110k: cada pedido
+      # ocupa ~2,2x su largo en KV, se desalojan entre si y cada turno recalcula el prompt entero (0 aciertos).
+      # Un checkpoint cada 16 bloques: ~16x menos bloques GDN; se pierde a lo sumo ~14k tokens de reuso por turno.
+      - --prefix-cache-retention-interval
+      - "14080"
       # profiler apagado salvo PROF_KIND/PROF_DIR en el entorno
       - --profiler-config
       - '{"profiler": ${PROF_KIND:-null}, "torch_profiler_dir": "${PROF_DIR:-}", "torch_profiler_with_stack": ${PROF_STACK:-false}, "torch_profiler_record_shapes": false, "torch_profiler_use_gzip": true, "ignore_frontend": true, "delay_iterations": ${PROF_DELAY:-0}, "max_iterations": ${PROF_MAX:-0}}'
