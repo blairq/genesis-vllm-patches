@@ -126,7 +126,7 @@ services:
       - GENESIS_PN171_SEGMENTO=${GENESIS_RETENCION_GDN:-14080}
       - GENESIS_ENABLE_PN172_DESALOJO_SESION=${GENESIS_ENABLE_PN172_DESALOJO_SESION:-0}   # APAGADO (06-10): con L2 empata (69/70%), sin L2 resta (15 vs 22%)
       - GENESIS_PN172_TTL_S=${GENESIS_PN172_TTL_S:-1200}
-      - GENESIS_ENABLE_PN173_CHUNK_DINAMICO=${GENESIS_ENABLE_PN173_CHUNK_DINAMICO:-0}   # APAGADO (06-10): aislado 31->20 s el decode ajeno; sesion real empata y los primeros turnos +6/+9%
+      - GENESIS_ENABLE_PN173_CHUNK_DINAMICO=${GENESIS_ENABLE_PN173_CHUNK_DINAMICO:-1}   # PRENDIDO (06-10, decision del usuario): decode ajeno 31->~20 s; primeros turnos grandes +6/+9%
       - GENESIS_PN173_CHUNK_SOLO=${GENESIS_PN173_CHUNK_SOLO:-2640}
       - GENESIS_PN173_CHUNK_CON_DECODE=${GENESIS_PN173_CHUNK_CON_DECODE:-880}
       - VLLM_SERVER_DEV_MODE=${VLLM_SERVER_DEV_MODE:-0}                      # 1 SOLO en la instancia aislada: /reset_prefix_cache sin clave (pruebas de L2)
@@ -351,7 +351,7 @@ services:
       - --max-num-batched-tokens
       - "8192"
       - --long-prefill-token-threshold
-      - "${GENESIS_LONG_PREFILL:-1760}"                 # con PN173 prendido conviene 2640 (techo)                         # con PN115: los prompts cortos no esperan detras de uno largo
+      - "${GENESIS_LONG_PREFILL:-2640}"                 # techo; PN173 usa 2640 sin decodes y 880 con decodes                         # con PN115: los prompts cortos no esperan detras de uno largo
       - --performance-mode
       - "throughput"
       - --cudagraph-capture-sizes
