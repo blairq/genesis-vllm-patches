@@ -1300,6 +1300,15 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN173": {
+        "title": "Chunk de prefill dinamico: 2640 sin decodes, 880 con decodes (el decode ajeno va 2x mas rapido)",
+        "env_flag": "GENESIS_ENABLE_PN173_CHUNK_DINAMICO",
+        "default_on": False,
+        "category": "perf_hotfix",
+        "credit": ("Genesis-original 2026-10-06. Turno con cache que genera durante un prefill de 125k: 31 s con chunk 1760, 16 s con 880; prefill solo 74 s con 2640."),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN172": {
         "title": "Prefix cache: un subagente no desaloja bloques de un hilo principal (solo otro principal)",
         "env_flag": "GENESIS_ENABLE_PN172_DESALOJO_SESION",

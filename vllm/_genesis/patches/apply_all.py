@@ -6383,6 +6383,24 @@ def apply_patch_PN172() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN173 chunk de prefill dinamico")
+def apply_patch_PN173() -> PatchResult:
+    """PN173: chunk de prefill chico mientras haya decodes."""
+    name = "PN173 chunk de prefill dinamico"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.perf_hotfix import patch_PN173_chunk_dinamico
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN173_chunk_dinamico.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR
