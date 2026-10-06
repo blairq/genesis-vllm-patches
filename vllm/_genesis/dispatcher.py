@@ -1300,6 +1300,15 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN172": {
+        "title": "Prefix cache: un subagente no desaloja bloques de un hilo principal (solo otro principal)",
+        "env_flag": "GENESIS_ENABLE_PN172_DESALOJO_SESION",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": ("Genesis-original 2026-10-06. Regla del usuario: el hilo principal no se baja para hacerle lugar a subagentes; rol por cabeceras del plugin (PN169) o por la etiqueta del perfil."),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN170": {
         "title": "Offload: el estado GDN (P-3, P-2) se guarda en L2 al terminar el pedido (sin esto L2 no acierta con DFlash)",
         "env_flag": "GENESIS_ENABLE_PN170_L2_GDN",

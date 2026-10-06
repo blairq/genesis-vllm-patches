@@ -124,6 +124,8 @@ services:
       - GENESIS_PN170_SUMAS=${GENESIS_PN170_SUMAS:-0}
       - GENESIS_ENABLE_PN171_BORRADOR_RECORTADO=${GENESIS_ENABLE_PN171_BORRADOR_RECORTADO:-1}   # L2: del borrador solo la cola que pide un lookup (-~18% de L2)
       - GENESIS_PN171_SEGMENTO=${GENESIS_RETENCION_GDN:-14080}
+      - GENESIS_ENABLE_PN172_DESALOJO_SESION=${GENESIS_ENABLE_PN172_DESALOJO_SESION:-0}   # APAGADO (06-10): con L2 empata (69/70%), sin L2 resta (15 vs 22%)
+      - GENESIS_PN172_TTL_S=${GENESIS_PN172_TTL_S:-1200}
       - VLLM_SERVER_DEV_MODE=${VLLM_SERVER_DEV_MODE:-0}                      # 1 SOLO en la instancia aislada: /reset_prefix_cache sin clave (pruebas de L2)
       - GENESIS_ENABLE_PN168_RETENCION_EAGLE=${GENESIS_ENABLE_PN168_RETENCION_EAGLE:-1}   # con retencion rala: el borde de reuso guarda el bloque donde EAGLE deja el estado
       - GENESIS_PN168_DIAG=${GENESIS_PN168_DIAG:-0}                          # 1: loguea la mascara de retencion por pedido y grupo GDN
