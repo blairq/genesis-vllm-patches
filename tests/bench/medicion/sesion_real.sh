@@ -10,7 +10,7 @@ docker run --rm -v /home/usuario/Proyectos/kv-offload:/k alpine sh -c 'rm -rf /k
 t0=$(date +%s); until curl -sf -m 3 http://127.0.0.1:8391/health >/dev/null 2>&1; do sleep 5; [ $(( $(date +%s) - t0 )) -gt 900 ] && break; done
 echo "$(date +%T) == $et ($*): listo en $(( $(date +%s) - t0 )) s"
 F=$(cd $T/banco_pedidos_reales && ls 1*.json | grep -vE "_0011|_0014" | sed 's#^#/traces/banco_pedidos_reales/#' | tr '\n' ' ')
-docker exec genesis-27b-pruebas python3 /traces/banco/reproducir_sesion.py /traces/banco/sesion_$et.json 512 ${ESCALA:-1} $F 2>&1 | tail -16
+docker exec -e PLUGIN=${PLUGIN:-0} genesis-27b-pruebas python3 /traces/banco/reproducir_sesion.py /traces/banco/sesion_$et.json 512 ${ESCALA:-1} $F 2>&1 | tail -16
 docker logs genesis-27b-pruebas 2>&1 | grep -E "Engine 000" | sed -E 's/.*GPU KV cache usage: ([0-9.]+)%.*/\1/' | sort -n | tail -1 | sed 's/^/KV max %: /'
 docker logs genesis-27b-pruebas 2>&1 | grep "PN165 req" | sed -E 's/.*PN165 //' | awk '!s[$1]++' > $T/banco/pn165_$et.log
 echo "SESION $et LISTA"

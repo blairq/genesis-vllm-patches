@@ -19,7 +19,17 @@ def uno(ruta, reg, t0_global):
     body["stream"] = True; body["stream_options"] = {"include_usage": True}
     espera = (reg["t"] - t_ref) * ESC - (time.time() - t0_global)
     if espera > 0: time.sleep(espera)
-    r = urllib.request.Request(BASE + "/v1/chat/completions", data=json.dumps(body).encode(), headers=H)
+    hd = dict(H)
+    if os.environ.get("PLUGIN") == "1":               # las cabeceras que pondria el plugin genesis-sesion de opencode
+        import hashlib
+        g = hilo(reg)
+        if g == "Z":                                  # subagente de Y: una sesion por tarea (su primer mensaje de usuario)
+            u = next((m for m in body["messages"] if m.get("role") == "user"), {})
+            ses = "ses_Z_" + hashlib.sha1(json.dumps(u.get("content"))[:4000].encode()).hexdigest()[:10]
+            hd.update({"X-Genesis-Sesion": ses, "X-Genesis-Padre": "ses_Y", "X-Genesis-Raiz": "ses_Y", "X-Genesis-Agente": "agi_coder"})
+        else:
+            hd.update({"X-Genesis-Sesion": "ses_" + g, "X-Genesis-Padre": "", "X-Genesis-Raiz": "ses_" + g, "X-Genesis-Agente": "build_low"})
+    r = urllib.request.Request(BASE + "/v1/chat/completions", data=json.dumps(body).encode(), headers=hd)
     t0 = time.time(); ttft = None; uso = None
     try:
         with urllib.request.urlopen(r, timeout=3600) as f:
