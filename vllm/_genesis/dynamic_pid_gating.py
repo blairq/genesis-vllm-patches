@@ -248,6 +248,12 @@ class PIDAdmissionController:
         self.short_prompt_tokens = int(
             os.environ.get("GENESIS_PN115_PROMPT_CORTO_TOKENS", "0")
         )
+        # Lo mismo por lo que FALTA calcular (06-10): un turno de 101k con 96% en el prefix cache local tiene ~3,5k
+        # tokens de trabajo, pero por largo total esperaba detras del prefill de otro pedido (15-24 s de TTFT medidos
+        # con 2-4 s de computo). Si lo que falta (prompt menos el acierto local) entra en N tokens, no espera.
+        # Solo exime de la serializacion, como el prompt corto. 0 = desactivado.
+        self.faltan_tokens = int(os.environ.get("GENESIS_PN115_FALTAN_TOKENS", "0"))
+        self.faltan_bypass = 0
 
         # Headroom de seguridad: fracción de bloques GPU que nunca se compromete.
         self.safety_headroom_ratio = float(os.environ.get("GENESIS_PID_HEADROOM_RATIO", "0.10"))
@@ -448,6 +454,7 @@ class PIDAdmissionController:
             "short_prompt_tokens": self.short_prompt_tokens,
             "short_prompt_bypass_total": self.short_bypass,
             "priority_bypass_total": self.bypass_count,
+            "faltan_bypass_total": getattr(self, "faltan_bypass", 0),
             "emergency_preemptions_total": self.preempt_count,
             "bloques_por_request": getattr(self, "bloques_por_request", None),
             "updated_at": round(time.time(), 3),
@@ -639,6 +646,24 @@ class PIDAdmissionController:
             PROM_PID_GATED_TOTAL.inc()
         return True
 
+    def _faltan_pocos(self, request: Any, scheduler: Any) -> bool:
+        """¿Lo que falta calcular (prompt menos el acierto del prefix cache local) entra en faltan_tokens?
+        Lookup puro del coordinador (el mismo que hace el scheduler despues), sin tocar referencias ni metricas."""
+        if self.faltan_tokens <= 0:
+            return False
+        try:
+            kvm = scheduler.kv_cache_manager
+            if not getattr(kvm, "enable_caching", True):
+                return False
+            hashes = getattr(request, "block_hashes", None)
+            if not hashes:
+                return False
+            _, hit, _ = kvm.coordinator.find_longest_cache_hit(hashes, request.num_tokens - 1)
+            return (request.num_tokens - int(hit)) <= self.faltan_tokens
+        except Exception as e:  # nunca rompe el scheduler
+            log.debug("[PN115] lookup de faltantes fallo: %s", e)
+            return False
+
     def should_gate_waiting(self, request: Any, scheduler: Any) -> bool:
         """¿Conviene diferir este request al próximo paso?
 
@@ -685,6 +710,9 @@ class PIDAdmissionController:
                 npt = getattr(request, "num_prompt_tokens", None)
                 corto = (self.short_prompt_tokens > 0 and npt is not None
                          and npt <= self.short_prompt_tokens)
+                if not corto and self._faltan_pocos(request, scheduler):
+                    corto = True
+                    self.faltan_bypass += 1
                 if not corto:
                     self.gated_by_prefill += 1
                     if PROM_PID_GATED_PREFILL:
