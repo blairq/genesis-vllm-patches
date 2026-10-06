@@ -165,10 +165,9 @@
 {%- set _sc = sys_state.content %}
 {%- set _msgs = messages[head.count:] %}
 {%- if _has_tools %}
+    {#- La instruccion de esfuerzo va al FINAL del system (abajo): al principio cambiaba el prefijo por perfil de
+        kwargs (low / medium / xhigh) y un hilo medium no compartia ni las tools con sus subagentes low. -#}
     {{- '<|im_start|>system\n' }}
-    {%- if reasoning_instructions %}
-        {{- reasoning_instructions + '\n\n' }}
-    {%- endif %}
     {{- '# Tools\n\nYou have access to the following functions:\n\n<tools>' }}
     {#- Orden canonico para el prefix cache: primero las tools que son iguales en todos los clientes y agentes,
         despues las que cambian por maquina (bash lleva el OS; MCP), al final las que cambian por agente
@@ -201,10 +200,13 @@
     {%- if _sc %}
         {{- '\n\n' + _sc }}
     {%- endif %}
+    {%- if reasoning_instructions %}
+        {{- '\n\n' + reasoning_instructions }}
+    {%- endif %}
     {{- '<|im_end|>\n' }}
 {%- else %}
     {%- if _sc %}
-        {{- '<|im_start|>system\n' + (reasoning_instructions + '\n\n' if reasoning_instructions else '') + _sc + '<|im_end|>\n' }}
+        {{- '<|im_start|>system\n' + _sc + ('\n\n' + reasoning_instructions if reasoning_instructions else '') + '<|im_end|>\n' }}
     {%- elif reasoning_instructions %}
         {{- '<|im_start|>system\n' + reasoning_instructions + '<|im_end|>\n' }}
     {%- endif %}
