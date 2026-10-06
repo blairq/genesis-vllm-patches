@@ -197,29 +197,38 @@ this rig, and they are settled:
 ## What is running right now
 
 ```
-compose/docker-compose.qwen38-27b-noon-dflash2-v029.yml   →  genesis-27b-dflash2
+compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml   →  genesis-27b-idiotsavant
 ```
 
-This is the container serving today, and the one to copy if you want a
-known-good starting point.
+**This is the compose to copy.** It serves this project's own checkpoint,
+[**idiotSavant**](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86), with its
+[DFlash2 drafter](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2), and every
+setting in it carries a comment with the measurement behind it.
 
 | | |
 |---|---|
-| Model | `noon-at-cgn/Qwen3.8-27B-Uncensored-W4A16-AutoRound` — hybrid GDN, 48 linear-attention + 16 full-attention layers |
-| Engine | vLLM 0.29.0 + Genesis |
-| Hardware | 2× RTX 3090 (sm_86), TP=2, PCIe, no NVLink |
-| Speculative decoding | **DFlash2** W4A16 drafter, `num_speculative_tokens=8` |
-| Weights / activations | int4 weights · **int8 activations** (W4A8 Marlin) |
-| KV cache | **`int8_per_token_head`**, read directly by this project's integer PTX decode kernel |
-| Context | 262 144 tokens · `max-num-seqs 10` · `gpu-memory-utilization 0.92` |
-| `lm_head` | **int4 per group (g128)**, target and drafter — no fp8 tensor left anywhere in the chain |
-| **KV capacity** | **583 790 tokens** — 2.23× concurrency at full context |
-| Address on this host | `172.20.0.228:8320`, alias `vllm-server` |
+| Model | [`BlairQ/qwen3.8_27b_idiotSavant_sm_86`](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86): Qwen3.8-27B uncensored, int4 with the **residual stream rotated** (Hadamard), served as **W4A8**. KL to BF16 **0.0178**, vs 0.0385 for the popular AutoRound int4. Weights of 2026-09-28 |
+| Drafter | [`…_dflash2`](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2): DFlash2 re-tuned against the served target, **8-node tree** speculation, `num_speculative_tokens=8` |
+| Mandatory patches | **PN148** + **PN154** (online Hadamards before `down_proj` / `o_proj` / `out_proj`), **PN155** (int4 GDN gates), **PN149** (drafter on the rotated target). Without them the model outputs garbage |
+| Engine | vLLM 0.29.0 + Genesis, 2× RTX 3090 (sm_86), TP=2, PCIe, no NVLink |
+| KV cache | **`int8_per_token_head`**, read by this project's integer PTX decode kernel (SK-30) |
+| Context | 262 144 tokens · `max-num-seqs 11` · `gpu-memory-utilization 0.95` |
+| **KV capacity** | **653 695 tokens** (2.49× concurrency at full context) |
+| Prefix cache | sparse GDN checkpoints every 14 080 tokens + the reuse boundary (**PN168**) |
+| KV offload | **L2 in RAM, 12 GiB, no disk** (**PN170**/**PN171**): what the GPU evicts comes back over PCIe in seconds |
+| Scheduling | one prefill at a time with priority bypasses (**PN115**), dynamic prefill chunk (**PN173**) |
+| Address on this host | `172.20.0.228:8320` (alias `vllm-server`), published on `:8360` |
 
-A second compose keeps the **MTP** drafter as a fallback path:
-`compose/docker-compose.qwen38-27b-noon-w4a8-v029.yml` → `genesis-27b-v029`.
-The two are mutually exclusive: they share the IP and the `vllm-server` alias,
-so whichever is up owns the endpoint.
+What that buys on a captured real session (two opencode threads of ~100K and ~125K plus a
+sub-agent, 13 requests replayed with their original timing): **70% of prompt tokens served from
+cache, every follow-up turn 93–97% cached**, against 49% before the 2026-10-05/06 prefix-cache
+work. With the GPU KV deliberately cut to 0.82, L2 keeps it at 70% (22% without L2). Details in
+[Tiered KV cache](#tiered-kv-cache-l2-in-ram).
+
+The two `noon` composes (`docker-compose.qwen38-27b-noon-*.yml`) are kept for the record only: that
+checkpoint is no longer on this host. Unless a section says otherwise, the measurements from here
+to *What this fork adds* were taken on it (2026-09); idiotSavant's own numbers are on its
+[model card](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86).
 
 ### Measured performance
 
@@ -400,8 +409,8 @@ configuration is on the list.
 
 ## What this fork adds
 
-The dispatcher holds **192 entries**; **61 are applied** in the production
-container. Everything from PN120 up is this fork's work. ✅ marks what is
+The dispatcher holds **214 entries**; **76 are applied** in the
+idiotSavant container (boot log of 2026-10-06). Everything from PN120 up is this fork's work. ✅ marks what is
 actually running in production, taken from the dispatcher's boot log rather than
 from the code defaults.
 
@@ -428,6 +437,10 @@ from the code defaults.
 | ✅ | **PN122** | Speculative rollback on GDN without speculative blocks. Needs its own hooks in the v2 model runner, which DFlash2 forces — see [open problems](#status-and-open-problems) |
 | ✅ | **PN127** | `MambaManager` honours `drop_eagle_block` (vllm#48375) |
 | ✅ | **PN121** | Preemption-cascade guard with deferred frees |
+| ✅ | **PN168** | Sparse GDN checkpoints that actually work with speculative decoding: the next turn looks for the recurrent state at block P−3, vLLM kept it at P−1. Real session 61% → 70% cached |
+| ✅ | **PN170** | L2 offload hits at all on this hybrid + DFlash model: the GDN groups no longer count as EAGLE groups in the external lookup (they demanded two consecutive states that sparse retention never has, so every lookup returned 0) |
+| ✅ | **PN171** | L2 keeps only the drafter-window chunks a lookup can ask for (−13% of L2 per conversation) |
+| | PN172 | Eviction by role: a sub-agent never evicts a main thread's blocks. Off: ties with L2, loses without it |
 
 PN145 + PN146, giving the drafter int8 KV, and the int4 `lm_head` took capacity from 178 823 to
 **583 790 tokens (+226%)**. The mechanism is counter-intuitive and worth
@@ -450,6 +463,9 @@ the sum, so *smaller* groups yield *more* total blocks.
 | ✅ | **PN143** | Genesis hooks into *every* vLLM process via `load_general_plugins()` |
 | ✅ | **PN83** | The engine explains its own memory layout and risks at boot |
 | ✅ | **PN81/PN88** | Disk quota and Prometheus metrics for the KV tiers — vLLM ships neither |
+| ✅ | **PN169** | Conversation identity per request: session, parent, root and agent from `X-Genesis-*` headers set by an [opencode plugin](#conversation-identity-from-opencode), copied into `kv_transfer_params` so the scheduler sees them |
+| ✅ | **PN165** | Prefix-cache diagnosis per request: common prefix with earlier requests, actual hit, and the exact message/token where it diverged (numbers only, never text) |
+| | PN166 | Captures large chat requests as they arrive, to replay real sessions on the test instance (`tests/bench/medicion/sesion_real.sh`) |
 
 PN143 exists because `apply_all` runs as a separate process and then `exec`s
 `vllm serve`: anything registered in memory is lost across that boundary. This
@@ -460,7 +476,8 @@ kernel anyway. Only a one-time notice inside the kernel's `forward` revealed it.
 
 | | | |
 |---|---|---|
-| ✅ | **PN115** | Admission control in the scheduler: KV-headroom gate, **one prefill at a time**, and two ways past that queue — *forced* priority (the client says so) and *automatic* priority (the prompt is short) |
+| ✅ | **PN115** | Admission control in the scheduler: KV-headroom gate, **one prefill at a time**, and three ways past that queue — *forced* priority (the client says so), a short prompt, or little left to compute after the prefix-cache hit |
+| ✅ | **PN173** | Dynamic prefill chunk: 2 640 tokens while nobody is generating, 880 while someone is, so a turn that is decoding is not slowed to the pace of someone else's long prefill |
 | ✅ | **PN89** | Request tracker and the HTTP endpoints described under [Client-facing controls](#client-facing-controls) |
 
 With an idle server TTFT is simply prefill: 82 ms at 100 tokens, 0.54 s at 1.5K, 2.5 s at 7.4K,
@@ -490,7 +507,7 @@ request that was just let through. Measured, one clean boot per arm
 |---|---|---|---|---|
 | 8192 (before) | 2.49 s · 0 cached | 2.61 s · 15 840 cached | 1 867 tok/s | **26 s** |
 | 3520 | 1.67 s · 3 520 | 1.95 s · 17 600 | not re-measured ² | 3.6–6.6 s ¹ |
-| **1760** ← in production | **0.91 s** · 5 280 | **1.28 s** · 19 360 | 1 861 (−0.3%, noise) ² | **1.6–3.3 s** |
+| **1760** ← in production until 2026-10-06 | **0.91 s** · 5 280 | **1.28 s** · 19 360 | 1 861 (−0.3%, noise) ² | **1.6–3.3 s** |
 
 ¹ measured with forced priority, before the automatic one existed; the 1760 row is with plain,
 unmarked requests. KV capacity is identical in all three arms.
@@ -509,100 +526,97 @@ an admitted short request still waits 7.5–13 s, because the long prefill takes
 It takes both. Long prompts still run one at a time: three 30K prompts launched together get
 their first token at 16 / 28 / 40 s, with short requests in between answered in 0.5–3 s.
 
-Known limit: "short" is judged on the **total** prompt length, because a waiting request's
-cached prefix is not known yet. A 60K-token turn with 59K already cached counts as long.
+"Short" used to be judged on the total prompt length, so a 100K turn with 96K already cached
+counted as long. Since 2026-10-06 PN115 also looks up the local prefix-cache hit at the gate and
+lets a request through when what is **left to compute** fits in one batch
+(`GENESIS_PN115_FALTAN_TOKENS=8192`).
 
-### Tiered KV cache (RAM + NVMe)
+**A decoding turn crawled during someone else's long prefill.** The first token was fine (5 s);
+the rest went at one step per ~1–1.4 s, because every step also carried a prefill chunk. The
+chunk sets the step time, so it trades the long prefill against everyone else's decode — measured
+with a 125K prefill and, during it, a cached turn generating 64 tokens:
 
-When VRAM fills, vLLM **discards** old prefix blocks and recomputes them later.
-This subsystem sinks them to RAM (L2) and NVMe (L3) instead, and brings them
-back over PCIe. Full write-up in
-**[docs/KV-OFFLOADING.md](docs/KV-OFFLOADING.md)**.
+| prefill chunk | 125K prefill alone | the decoding turn |
+|---|---|---|
+| 880 | 83.7 s | **16 s** |
+| 1760 (before) | 76.3 s | 31 s |
+| 2640 | **74.0 s** | 49 s |
+| **dynamic, PN173** ← in production | 74.6 s | ~20 s |
 
-Measured, rescuing a 20K prompt that had been evicted from the GPU:
+PN173 picks 2 640 while nobody is decoding and 880 as soon as someone is (or has only a little
+prefill left). On the replayed real session it ties overall, and the first turns of two big
+threads that start together pay +6–9%; it is on by choice, for responsiveness.
+
+### Tiered KV cache: L2 in RAM
+
+When VRAM fills, vLLM **discards** old prefix blocks and recomputes them later. The offload
+connector copies blocks to RAM (L2) as they are computed and brings them back over PCIe when a
+later turn needs them. **Since 2026-10-06 it runs as L2 only — 12 GiB of RAM, no disk.**
+
+**Until then it never hit on this model, at any size.** Two bugs stacked, both specific to a
+hybrid (GDN + attention) model with speculative decoding:
+
+1. **The reuse point had no state (PN168).** With speculation, the lookup drops one block in
+   attention and another in the GDN manager, so the next turn looks for the recurrent state at
+   block **P−3** (P = full blocks of the previous prompt). With sparse checkpoints vLLM kept it at
+   P−1, and the prefill chunk left P−3 in the middle of a chunk, with no state. This also broke
+   the *GPU* prefix cache, not just L2.
+2. **The GDN groups were treated as draft groups (PN170).** With DFlash and no group marked as the
+   drafter's, the connector declares *every* group EAGLE. For the GDN groups that adds the EAGLE
+   extra window: the lookup demands **two consecutive** states, which sparse retention never has.
+   The GDN group returned 0, and the lookup needs every group to hit, so the external hit was 0
+   every time — with 5 GB of correct attention KV sitting in L2.
+
+Measured after both fixes, on the test instance:
 
 | | |
 |---|---|
-| recompute from scratch | 6.88 s |
-| **rescued from L2/L3** | **1.21 s (−82.5%)** |
-| returned over `CPU_to_GPU` | 612 MiB |
-| reproducibility | 3 runs, clean disk and restart each time |
+| 100K turn, after emptying the GPU prefix cache | **95 920 tokens from L2, TTFT 55.9 s → 4.3 s** |
+| turn resuming the same conversation halfway (segment checkpoint) | 56 320 of 62 813 tokens from L2, 4.2 s |
+| exactness | per-block checksums of all 9 KV groups, both GPUs: what comes back is byte-identical to what was stored |
+| real session, GPU KV cut to 0.82 to force eviction | **without L2: 22% cached, TTFT sum 786 s · with L2: 70%, 66 s** — the same as with the full GPU |
+| partial hits | a turn takes what is still in VRAM and only the rest from L2 (e.g. 5 280 local + 117 040 from L2) |
+| size | ~4.3 GB of L2 per 100K-token conversation (PN171 stores only the drafter chunks a lookup can ask for) |
 
-Getting there required fixing three of this project's own patches, which had
-the read path deadlocked: `PN97` refused every L3→L2 promotion once L2 was
-full; `PN91`'s 0.2 s deferral budget expired before the asynchronous promotions
-resolved, and in strict mode an in-flight block scores as a miss, vetoing the
-whole lookup; and `PN81`'s quota had made L3 smaller than L1.
+Eviction from VRAM is already block by block: a finished request's blocks go back tail first, LRU
+across requests, so the start of a conversation is the last thing to leave.
 
-#### Size L2 relative to L1 — this is the whole game
+Output after an L2 hit is not token-identical to an L1 hit: the prefill that follows is split
+into different chunks, which moves the rounding (an L1 hit differs from a cold run in the same
+way). The bytes are exact; use logprobs or token ids, not streamed tool-call text, to compare.
 
-**L2 is not a cache in front of L3. It is the gateway to it.** Secondary tiers
-cannot touch GPU memory: every L3→L2→GPU promotion has to land in L2 first. So
-L2's size sets three things at once — how much can leave L1 without falling
-straight through to disk, how much of a prefix can be reassembled at once, and
-therefore whether a lookup can hit at all.
+**L3 (NVMe) is off.** It is still in the code (PN81 quota, PN90 per-agent write gating), but on
+this rig every hit came from RAM, and the disk only added writes. Before turning it back on: the
+`persist_disk` flag a client sends overrides the server-side allow-list, and if PN90 ever fails
+to apply on a new vLLM, upstream's default is to write everything through to disk.
 
-The lookup needs a **complete** chunk-aligned prefix across every KV group. A
-partial prefix is not a partial win, it is no win. And you cannot assemble a
-prefix larger than L2.
-
-So the sizing rule is in **tokens**, not bytes, and it is anchored to L1:
-
-```
-cpu_bytes_to_use  ≥  (your GPU KV cache size in tokens)  ×  17.5 KiB
-```
-
-Take the `GPU KV cache size` your engine prints at boot and read across:
-
-| your L1 (GPU KV) | L2 at **1×** — minimum | at 1.5× — comfortable | at 2× — room for concurrency |
-|---|---|---|---|
-| 100 000 tok | 1.7 GiB | 2.5 GiB | 3.3 GiB |
-| 250 000 tok | 4.2 GiB | 6.3 GiB | 8.3 GiB |
-| **583 790 tok** ← this rig | **9.7 GiB** | 14.6 GiB | 19.5 GiB |
-| 1 000 000 tok | 16.7 GiB | 25.0 GiB | 33.4 GiB |
-| 2 000 000 tok | 33.4 GiB | 50.1 GiB | 66.8 GiB |
-
-Below 1× the tier still works, it just cannot hold a whole prefix, so hits
-become partial and partial hits are discarded. This rig runs **2.0 GiB = 0.21×**,
-because the host has 30 GB total and the container already sits at 16.4 GB.
-
-The rule is not theoretical — hit rate tracks L2 size directly. Chunks of the
-attention prefix that hit, out of 20:
-
-```
-L2 = 2 GiB (0.21× L1)   →   0, 8, 12 or 16 of 20, varying run to run
-L2 = 6 GiB (0.64× L1)   →   16 of 20
-complete prefix         →   the 1.21 s rescue above
-```
-
-On this machine L1 is 583 790 tokens, so L2 wants 9.7 GiB. The host has 30 GB
-total with the container already at 16.4 GB, so that is not reachable here —
-which is why this rig runs at 0.21× and why the tier is provisioned to exist
-rather than to pay. **On a machine with RAM to spare, size L2 at or above L1 and
-this becomes a straight win.** On this one it is correctly configured for the
-memory available, and the ceiling is RAM, not the mechanism.
-
-#### When it engages at all
-
-It only pays when the working set **exceeds** L1 — that is the entire premise.
-Under the traffic observed on this rig it does not:
-
-```
-num_preemptions_total     0          ← nothing was ever evicted from L1
-kv_cache_usage_perc       0.0
-prefix tokens seen        395 636    ← against an L1 of 566 314
-```
-
-With no eviction there is nothing to bring back, and the stores you see
-(2.78 GiB written) are the *proactive* copies the design makes while blocks are
-being computed — working exactly as intended. Before concluding anything about
-hit rate, check `num_preemptions_total` first: if it is zero, the tier was never
-asked to do its job.
+The older write-up, from when L2 + L3 were sized for the `noon` checkpoint, is in
+[docs/KV-OFFLOADING.md](docs/KV-OFFLOADING.md); its sizing rule predates the fixes above.
 
 ## Client-facing controls
 
 Everything a client can send, or call, that changes how this server behaves. None of it is
 stock vLLM except the `priority` field itself.
+
+### Conversation identity from opencode
+
+[`clients/opencode/genesis-sesion.ts`](clients/opencode/genesis-sesion.ts) is a ~50-line opencode
+plugin (copy it to `~/.config/opencode/plugin/`). Through opencode's `chat.headers` hook it adds
+four headers to every request sent to a provider whose id matches `GENESIS_PROVEEDORES` (a regex,
+`^llm_saitama` by default) and to no other provider:
+
+| header | value |
+|---|---|
+| `X-Genesis-Sesion` | the opencode session making the request |
+| `X-Genesis-Padre` | the session that launched it (empty for a main thread) |
+| `X-Genesis-Raiz` | the main thread at the root of the tree |
+| `X-Genesis-Agente` | the opencode agent (`build`, `agi_explore`, …) |
+
+PN169 copies them into `kv_transfer_params`, so the scheduler knows which requests belong to the
+same conversation and which are sub-agents. PN165 logs them next to each request's prefix-cache
+diagnosis, PN166 keeps them in captures, and PN172 uses them for its eviction-by-role rule. A
+request without the headers is served exactly as before. The ids are opaque; the chat template
+never renders them, so they do not affect the prefix cache.
 
 ### Request fields
 
@@ -742,10 +756,18 @@ default**: a script run without it fails loudly instead of sending a stale key.
 ### 2. Run
 
 ```bash
+# the model and its drafter (19 + 1.2 GB) into the models cache the compose mounts
+hf download BlairQ/qwen3.8_27b_idiotSavant_sm_86 --local-dir ../models-cache/qwen3.8_27b_idiotSavant_sm_86
+hf download BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2 --local-dir ../models-cache/qwen3.8_27b_idiotSavant_sm_86_dflash2
+
 cd compose
-docker compose -f docker-compose.qwen38-27b-noon-dflash2-v029.yml up -d
-docker inspect genesis-27b-dflash2 --format '{{.State.Health.Status}}'
+docker compose -f docker-compose.qwen38-27b-idiotsavant-sm86.yml up -d
+docker inspect genesis-27b-idiotsavant --format '{{.State.Health.Status}}'
 ```
+
+Boot takes ~4 minutes: patches, `torch.compile` (cached after the first time), CUDA graphs and
+pinning the 12 GiB of L2. Check the volume paths at the top of the compose against your layout.
+For opencode, add the [conversation-identity plugin](#conversation-identity-from-opencode).
 
 The healthcheck **generates a token** rather than pinging `/health`. A server
 that boots but produces garbage is reported unhealthy — that has caught real
@@ -755,13 +777,13 @@ failures here.
 
 ```bash
 # every patch decision, with its reason
-docker logs genesis-27b-dflash2 2>&1 | grep "Genesis Dispatcher"
+docker logs genesis-27b-idiotsavant 2>&1 | grep "Genesis Dispatcher"
 
 # KV capacity actually obtained
-docker logs genesis-27b-dflash2 2>&1 | grep "GPU KV cache size"
+docker logs genesis-27b-idiotsavant 2>&1 | grep "GPU KV cache size"
 
 # the integer attention backend actually took over
-docker logs genesis-27b-dflash2 2>&1 | grep "PN131"
+docker logs genesis-27b-idiotsavant 2>&1 | grep "PN131"
 ```
 
 That third one matters: a patch can report `applied` and still not run. See

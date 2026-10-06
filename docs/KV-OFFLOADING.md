@@ -1,3 +1,10 @@
+> **Note (2026-10-06): this write-up predates two fixes and is partly superseded.** On this hybrid
+> model with speculative decoding the external (L2/L3) lookup never hit: the GDN groups were treated
+> as EAGLE groups and the reuse state sat in the wrong block. PN168 and PN170 fix both. The rig now
+> runs **L2 in RAM only (12 GiB), no L3**. The current numbers and reasoning are in the
+> [README, *Tiered KV cache*](../README.md#tiered-kv-cache-l2-in-ram); the sizing rule below assumed
+> the pre-fix lookup.
+
 # Tiered KV cache (RAM + NVMe)
 
 Keeping a long prefix from being recomputed after subagents evict it from VRAM.

@@ -1,28 +1,35 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # qwen3.8_27b_idiotSavant_sm_86 + qwen3.8_27b_idiotSavant_sm_86_dflash2
-# vLLM v0.29.0 + parches Genesis, 2x RTX 3090 (sm_86), TP=2
+# vLLM v0.29.0 + parches Genesis, 2x RTX 3090 (sm_86), TP=2.  ES EL COMPOSE EN USO.
 #
 # El modelo: Qwen3.8-27B sin censura (orcarouter) en W4 GPTQ con el RESIDUO ROTADO
 # (Hadamard por bloques, estilo QuaRot), servido como W4A8: pesos int4 x activaciones
-# int8 por token en Marlin. KL sobre respuestas vs BF16: 0,0194 (el int4 de AutoRound
-# de noon: 0,0385), misma velocidad. Como se arma y por que: entrenamiento/idiotsavant/
+# int8 por token en Marlin. KL sobre respuestas vs BF16: 0,0178 (pesos del 28-09; el int4 de
+# AutoRound de noon: 0,0385), misma velocidad. Como se arma y por que: entrenamiento/idiotsavant/
 # (README.md y DECISIONES.md).
 #   HF: https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86
 #       https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2
+#   Repo: https://github.com/blairq/genesis-vllm-patches
 #
-# Lo IMPRESCINDIBLE para este checkpoint:
-#   GENESIS_ENABLE_PN148_ROT_DOWN=1      Hadamard 512 antes de down_proj (sin eso: basura)
+# Lo IMPRESCINDIBLE para este checkpoint (sin esto: basura):
+#   GENESIS_ENABLE_PN148_ROT_DOWN=1      Hadamard 512 antes de down_proj
+#   GENESIS_ENABLE_PN154_HAD_SALIDAS=1   Hadamard por cabeza antes de o_proj / out_proj (pesos del 28-09)
+#   GENESIS_ENABLE_PN155_BA_EN_QKVZ=1    compuertas del GDN en int4 dentro del Marlin de in_proj_qkvz
 #   GENESIS_ENABLE_PN149_ROT_BORRADOR=1  el borrador comparte embedding/lm_head rotados
 #   VLLM_MARLIN_INPUT_DTYPE=int8         W4A8 (sin esto corre W4A16: anda, algo mas lento)
-# Todo lo demas es el stack de rendimiento/agente de este rig (medido en la memoria
-# del proyecto); se puede apagar por separado.
+# Todo lo demas es el stack de rendimiento/agente de este rig, cada ajuste con su medicion al lado;
+# se puede apagar por separado.
+#
+# Estado al 06-10: KV en GPU 653 695 tokens (gpu-memory-utilization 0,95); prefix cache con
+# checkpoints GDN ralos + borde de reuso (PN168); L2 en RAM de 12 GiB SIN disco (PN170/PN171);
+# chunk de prefill dinamico (PN173). Sesion real reproducida: 70% del prompt desde cache.
 #
 # Cosas a saber:
-#   * Mismo IP (172.20.0.228) y puerto (8360) que el compose de noon: no corren juntos.
-#   * Al cambiar de checkpoint VACIAR /home/usuario/Proyectos/kv-offload: el directorio
-#     del offload se identifica por el nombre del modelo, no por los pesos.
+#   * Mismo IP (172.20.0.228) y puerto (8360) que los compose de noon: no corren juntos.
+#   * El arranque tarda ~4 min (parches, torch.compile, grafos y fijar los 12 GiB de L2).
 #   * Caches JIT propias (vLLM, torch, Triton, Inductor): el cambio de modelo invalida
 #     torch.compile y los kernels; mezclarlas arrastraria artefactos de otro modelo.
+#   * Instancia de pruebas aislada (127.0.0.1:8391, red propia): -f ov-aislado.yml.
 # ─────────────────────────────────────────────────────────────────────────────
 version: '3.8'
 
@@ -44,7 +51,7 @@ services:
           - vllm-server
     volumes:
       - /home/usuario/Proyectos/models-cache:/root/.cache/huggingface     # modelo y borrador
-      - /home/usuario/Proyectos/kv-offload:/kv-offload                    # tier de disco de la KV
+      - /home/usuario/Proyectos/kv-offload:/kv-offload                    # tier de disco de la KV (L3, apagado desde el 06-10)
       - /home/usuario/.cache/vllm/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/vllm
       - /home/usuario/.cache/torch/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/torch
       - /home/usuario/.cache/triton/qwen38-27b-idiotsavant-sm86-v029:/root/.cache/triton

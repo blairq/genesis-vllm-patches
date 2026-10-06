@@ -9,7 +9,9 @@
 - **`qwen3.8_27b_idiotSavant_sm_86_dflash2`**: su borrador DFlash2.
 
 Publicados en https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86 (con esta carpeta adentro,
-en `reproducir/`) y https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2. El porqué de
+en `reproducir/`) y https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2. Esta carpeta es
+`entrenamiento/idiotsavant/` del repo [genesis-vllm-patches](https://github.com/blairq/genesis-vllm-patches),
+que tiene los parches de vLLM sin los que el modelo no se puede servir. El porqué de
 cada decisión, con sus mediciones: [DECISIONES.md](DECISIONES.md).
 
 ## Qué hace falta
@@ -124,9 +126,11 @@ Parches que hacen falta (el config lo dice en `genesis_rotacion.requiere`):
 - **Desde el 28-09, PN154:** la Hadamard por cabeza en la entrada de `o_proj`/`out_proj`, fusionada en SK-25.
 - **Desde el 28-09, PN155:** `in_proj_a/b` dentro del Marlin de `in_proj_qkvz`.
 
-El compose es `../../compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml`, con cada ajuste explicado.
+Todo vive en el repo de los parches, [genesis-vllm-patches](https://github.com/blairq/genesis-vllm-patches). El compose
+en uso, con cada ajuste explicado, es
+[`compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml`](https://github.com/blairq/genesis-vllm-patches/blob/main/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml).
 Para servir el armado del 25-09: `IDIOTSAVANT_MODELO=qwen3.8_27b_idiotSavant_sm_86_2509 GENESIS_ENABLE_PN155_BA_EN_QKVZ=0`.
-Al cambiar de checkpoint, vaciar el offload de KV.
+El offload de KV va solo a RAM (L2) y se vacía en cada arranque, así que cambiar de checkpoint no deja restos.
 
 ### 7. Del armado del 25-09 al actual, sin recalibrar
 
@@ -163,3 +167,10 @@ por disco), 4 entrenar (~75 min), 5 cuantizar, 6 A/B. Arranca por defecto del DF
 - Lanzar desacoplado y consultar `idiotsavant.py estado --json`. Campos útiles: `cuantizadas`,
   `eta_minutos`, `procesos_vivos`, `marcas`, `recursos`, `capas[i].error_capa`.
 - No correrlo en las mismas GPUs que un servidor vLLM: el dry-run chequea la memoria de GPU libre.
+
+## Publicar una actualización
+
+Los repos de HF se actualizan **en su lugar** (sin "v2"): el commit lleva la fecha de los pesos y el README la anota.
+Para subidas largas, `vigia_subida_hf.sh` relanza la subida si se cuelga: mide los bytes que escribe el proceso de
+subida (`/proc/<pid>/io`), no el tráfico de la placa, que con otros servicios engaña. Prepará antes en `$VIGIA_DIR`
+el staging del borrador y el `README_target.md`.

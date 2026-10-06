@@ -1301,65 +1301,79 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "applies_to": {},
     },
     "PN173": {
-        "title": "Chunk de prefill dinamico: 2640 sin decodes, 880 con decodes (el decode ajeno va 2x mas rapido)",
+        "title": "Chunk de prefill dinamico: 2640 si nadie genera, 880 si alguien genera o le falta poco prefill",
         "env_flag": "GENESIS_ENABLE_PN173_CHUNK_DINAMICO",
         "default_on": False,
         "category": "perf_hotfix",
-        "credit": ("Genesis-original 2026-10-06. Turno con cache que genera durante un prefill de 125k: 31 s con chunk 1760, 16 s con 880; prefill solo 74 s con 2640."),
+        "credit": (
+            "Genesis-original 2026-10-06. El decode de los demas va al ritmo de los pasos, y el paso lo fija el chunk del prefill. Prefill de 125k con un turno cacheado generando: chunk 880 -> 83,7 s / 16 s, 1760 -> 76,3 / 31, 2640 -> 74,0 / 49, dinamico -> 74,6 / ~20. En la sesion real empata y los primeros turnos grandes suben +6/+9% cuando dos hilos se superponen. Prendido por defecto (decision del usuario), techo --long-prefill-token-threshold 2640."
+        ),
         "upstream_pr": None,
         "applies_to": {},
     },
     "PN172": {
-        "title": "Prefix cache: un subagente no desaloja bloques de un hilo principal (solo otro principal)",
+        "title": "Desalojo por rol: un subagente no desaloja bloques de un hilo principal (solo otro principal). APAGADO por defecto",
         "env_flag": "GENESIS_ENABLE_PN172_DESALOJO_SESION",
         "default_on": False,
         "category": "hybrid",
-        "credit": ("Genesis-original 2026-10-06. Regla del usuario: el hilo principal no se baja para hacerle lugar a subagentes; rol por cabeceras del plugin (PN169) o por la etiqueta del perfil."),
+        "credit": (
+            "Genesis-original 2026-10-06. Rol por PN169 o por la etiqueta del perfil (coder/explorer/... = subagente); los bloques que libera un principal quedan protegidos GENESIS_PN172_TTL_S. Medido con la KV recortada: con L2 empata (69 vs 70%, lo desalojado vuelve de RAM) y sin L2 resta (15 vs 22%, con la KV llena de pedidos en ejecucion no hay cache libre que proteger). Queda para cuando L2 se llene."
+        ),
         "upstream_pr": None,
         "applies_to": {},
     },
     "PN170": {
-        "title": "Offload: el estado GDN (P-3, P-2) se guarda en L2 al terminar el pedido (sin esto L2 no acierta con DFlash)",
+        "title": "L2 (offload a RAM) para el hibrido con DFlash: los grupos GDN no cuentan como EAGLE en el lookup (incluye PN171)",
         "env_flag": "GENESIS_ENABLE_PN170_L2_GDN",
         "default_on": False,
         "category": "hybrid",
-        "credit": ("Genesis-original 2026-10-06. En modo align el connector saltea los grupos GDN y solo los guarda por partial tail, apagado con EAGLE: 5 GB en L2 y 0 aciertos."),
+        "credit": (
+            "Genesis-original 2026-10-06. Con DFlash y ningun grupo marcado como borrador, el connector declaraba EAGLE a todos: el GDN pedia 2 estados consecutivos y con retencion rala nunca los hay -> 0 aciertos externos siempre (5 GB en L2, 0 aciertos). Medido despues: rescate de un turno de 100k 55,9 -> 4,3 s con checksums por bloque identicos; con la KV recortada a 0,82, 22%/786 s -> 70%/66 s. PN171 (GENESIS_ENABLE_PN171_BORRADOR_RECORTADO): del borrador solo la cola que puede pedir un lookup, -13% de L2. Diagnosticos: GENESIS_PN170_DIAG, GENESIS_PN170_SUMAS."
+        ),
         "upstream_pr": None,
         "applies_to": {},
     },
     "PN169": {
-        "title": "Conversacion por pedido: cabeceras X-Genesis-* del plugin de opencode a kv_transfer_params",
+        "title": "Conversacion por pedido: sesion, padre, raiz y agente desde las cabeceras X-Genesis-* del plugin de opencode",
         "env_flag": "GENESIS_ENABLE_PN169_SESION",
         "default_on": False,
         "category": "structured_output",
-        "credit": ("Genesis-original 2026-10-05. Base para desalojar y bajar a RAM por conversacion (hilo principal vs subagentes)."),
+        "credit": (
+            "Genesis-original 2026-10-05. El plugin genesis-sesion (~/.config/opencode/plugin) pone X-Genesis-Sesion/-Padre/-Raiz/-Agente en cada pedido a los proveedores propios; esto las copia a kv_transfer_params, que llega intacto al Request del scheduler. Sin plugin el pedido no cambia. Lo usan PN165 (diagnostico) y PN172 (rol)."
+        ),
         "upstream_pr": None,
         "applies_to": {},
     },
     "PN168": {
-        "title": "Retencion rala del estado GDN con EAGLE: el borde de reuso conserva el bloque con estado",
+        "title": "Retencion rala del estado GDN con EAGLE/DFlash: el estado queda donde el turno siguiente lo va a buscar (P-3)",
         "env_flag": "GENESIS_ENABLE_PN168_RETENCION_EAGLE",
         "default_on": False,
         "category": "hybrid",
-        "credit": ("Genesis-original 2026-10-05. reachable_block_mask marcaba el bloque del borde (num_prompt-1) pero con EAGLE el scheduler deja el estado un bloque antes; con retencion 14080 los turnos de 45k reusaban 13200 en vez de 43120."),
+        "credit": (
+            "Genesis-original 2026-10-05. Con especulacion el lookup local descarta un bloque en atencion y otro en Mamba, asi que el turno siguiente busca el estado GDN en P-3; vLLM lo guardaba en P-1 y el chunk dejaba P-3 sin estado. Marca P-1..P-3, corta el chunk en (P-2)*bs (y en la junction compartida) y alarga la cola de la ventana del borrador. Sesion real con retencion 14080: 61% -> 70% cacheado, turnos siguientes 93-97%. GENESIS_PN168_DIAG=1 loguea mascara y lookup."
+        ),
         "upstream_pr": None,
         "applies_to": {},
     },
     "PN166": {
-        "title": "Captura de pedidos de chat grandes tal como llegan (antes de P68/P69), sin cabeceras",
+        "title": "Captura de pedidos de chat grandes tal como llegan, para reproducir sesiones reales en la instancia de pruebas",
         "env_flag": "GENESIS_ENABLE_PN166_CAPTURA_PEDIDOS",
         "default_on": False,
         "category": "structured_output",
-        "credit": ("Genesis-original 2026-10-05. Para reproducir trafico real en la instancia de pruebas y estudiar el prefix cache."),
+        "credit": (
+            "Genesis-original 2026-10-05. Guarda el cuerpo del pedido (antes de P68/P69), la IP de origen y los ids X-Genesis-* del plugin; nunca otras cabeceras ni claves. Solo pedidos de >= 20k caracteres, tope 300 archivos, en /traces/pedidos (fuera de git). Apagado por defecto: es para armar bancos como trazas/banco_pedidos_reales."
+        ),
         "upstream_pr": None,
         "applies_to": {},
     },
     "PN165": {
-        "title": "Diagnostico de prefix cache por pedido (prefijo comun vs acierto, solo numeros)",
+        "title": "Diagnostico del prefix cache por pedido: cuanto coincide con pedidos previos, cuanto acerto y donde diverge",
         "env_flag": "GENESIS_ENABLE_PN165_DIAG_PREFIJO",
         "default_on": False,
         "category": "spec_decode",
-        "credit": ("Genesis-original 2026-10-05. Por pedido: bloques de hash en comun con el pedido anterior mas parecido y acierto local real; separa prompt cambiado de cache perdido."),
+        "credit": (
+            "Genesis-original 2026-10-05. Por pedido loguea el prefijo comun con el pedido previo mas parecido, el acierto local real y el mensaje/token donde diverge; separa 'cambio el prompt' de 'se perdio el cache'. Incluye PN167 (por grupo de KV en el lookup del offload) y la sesion de PN169. Solo numeros e indices, nunca texto."
+        ),
         "upstream_pr": None,
         "applies_to": {},
     },
@@ -1864,7 +1878,7 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "applies_to": {},
     },
     "PN115": {
-        "title": "Admision por headroom de bloques KV + bypass por prioridad",
+        "title": "Admision por headroom de KV, un prefill por vez, y paso libre por prioridad, prompt corto o poco por calcular",
         "env_flag": "GENESIS_ENABLE_PN115_PID_GATING",
         "default_on": False,
         "category": "perf_hotfix",
