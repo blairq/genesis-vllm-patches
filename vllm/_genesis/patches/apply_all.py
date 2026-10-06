@@ -6347,6 +6347,24 @@ def apply_patch_PN169() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN170 L2 con estado GDN")
+def apply_patch_PN170() -> PatchResult:
+    """PN170: el offload guarda el estado GDN del borde de reuso."""
+    name = "PN170 L2 con estado GDN"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN170_l2_gdn
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN170_l2_gdn.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR

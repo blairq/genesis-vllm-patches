@@ -1300,6 +1300,15 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN170": {
+        "title": "Offload: el estado GDN (P-3, P-2) se guarda en L2 al terminar el pedido (sin esto L2 no acierta con DFlash)",
+        "env_flag": "GENESIS_ENABLE_PN170_L2_GDN",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": ("Genesis-original 2026-10-06. En modo align el connector saltea los grupos GDN y solo los guarda por partial tail, apagado con EAGLE: 5 GB en L2 y 0 aciertos."),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN169": {
         "title": "Conversacion por pedido: cabeceras X-Genesis-* del plugin de opencode a kv_transfer_params",
         "env_flag": "GENESIS_ENABLE_PN169_SESION",

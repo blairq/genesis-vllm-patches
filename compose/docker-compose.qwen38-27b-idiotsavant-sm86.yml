@@ -119,6 +119,10 @@ services:
       - GENESIS_ENABLE_PN165_DIAG_PREFIJO=${GENESIS_ENABLE_PN165_DIAG_PREFIJO:-1}   # diagnostico de prefix cache por pedido en el log (solo numeros)
       - GENESIS_ENABLE_PN166_CAPTURA_PEDIDOS=${GENESIS_ENABLE_PN166_CAPTURA_PEDIDOS:-0}   # guarda pedidos grandes en /traces/pedidos (diagnostico)
       - GENESIS_ENABLE_PN169_SESION=${GENESIS_ENABLE_PN169_SESION:-1}                  # cabeceras X-Genesis-* del plugin de opencode -> kv_transfer_params
+      - GENESIS_ENABLE_PN170_L2_GDN=${GENESIS_ENABLE_PN170_L2_GDN:-1}                # el offload guarda el estado GDN (sin esto L2 no acierta nunca con DFlash)
+      - GENESIS_PN170_DIAG=${GENESIS_PN170_DIAG:-0}
+      - GENESIS_PN170_SUMAS=${GENESIS_PN170_SUMAS:-0}
+      - VLLM_SERVER_DEV_MODE=${VLLM_SERVER_DEV_MODE:-0}                      # 1 SOLO en la instancia aislada: /reset_prefix_cache sin clave (pruebas de L2)
       - GENESIS_ENABLE_PN168_RETENCION_EAGLE=${GENESIS_ENABLE_PN168_RETENCION_EAGLE:-1}   # con retencion rala: el borde de reuso guarda el bloque donde EAGLE deja el estado
       - GENESIS_PN168_DIAG=${GENESIS_PN168_DIAG:-0}                          # 1: loguea la mascara de retencion por pedido y grupo GDN
       - GENESIS_PN151_VERIFICAR=${GENESIS_PN151_VERIFICAR:-0}                         # N: compara contra el builder original en las primeras N llamadas
@@ -318,12 +322,12 @@ services:
       - --tool-call-parser
       - qwen3_coder
       - --enable-cumem-allocator
-      # offload de KV: 2 GB de RAM + disco (/kv-offload), con los PN81/PN90/PN91 de arriba
-      # Offload APAGADO por defecto (05-10): con la KV paddeada al grupo mas grande una conversacion de 100k ocupa
-      # ~30 GB y nunca hubo aciertos externos; sesion real identica con y sin el (49%/392 s), y escribia ~65 MB/s
-      # al SSD. GENESIS_KV_FLAG=--kv-transfer-config lo prende (con --additional-config el JSON queda inerte).
-      - ${GENESIS_KV_FLAG:---additional-config}
-      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": ${GENESIS_KV_CPU_BYTES:-2147483648}, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload", "n_read_threads": 4, "n_write_threads": 4}]}}'
+      # offload de KV: solo L2 en RAM (L3 a disco apagado el 06-10; para volver: secondary_tiers con el fs de /kv-offload)
+      # L2 PRENDIDO (06-10): no acertaba nunca porque el connector trataba al GDN como grupo EAGLE (pedia 2 estados
+      # consecutivos); PN168 + PN170 lo arreglan: turno de 100k rescatado de RAM, TTFT 55,9 s -> 4,3 s, bytes exactos.
+      # Una conversacion de 100k ocupa ~5 GB en L2. GENESIS_KV_FLAG=--additional-config lo apaga (JSON inerte).
+      - ${GENESIS_KV_FLAG:---kv-transfer-config}
+      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": ${GENESIS_KV_CPU_BYTES:-12884901888}, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": []}}'                  # L3 (disco) APAGADO desde el 06-10: solo L2 en RAM
       - --enable-prefix-caching
       # Con especulacion (DFlash cuenta como EAGLE) vLLM fuerza checkpoints DENSOS del estado GDN: un bloque de
       # estado por cada 880 tokens y por grupo GDN. Medido el 05-10 con 2 conversaciones de ~110k: cada pedido
