@@ -79,6 +79,23 @@ _S0_NEW = _S0_OLD + (
     "            from vllm._genesis import l2_gdn as _g170  # " + MARKER + "\n"
     "            _g170.al_guardar(job_id, src_spec)\n"
 )
+# PN171 (GENESIS_ENABLE_PN171_BORRADOR_RECORTADO): del grupo del borrador solo los chunks que puede pedir un lookup
+_R_OLD = (
+    "                        group_config.sliding_window_size_in_chunks,\n"
+    "                        group_config.is_eagle_group,\n"
+    "                    ):\n"
+    "                        continue\n"
+    "                    new_offload_keys.append(offload_key)\n"
+)
+_R_NEW = (
+    "                        group_config.sliding_window_size_in_chunks,\n"
+    "                        group_config.is_eagle_group,\n"
+    "                    ):\n"
+    "                        continue\n"
+    "                    if _g170.saltear_ventana(req, group_config, abs_chunk_idx):  # " + MARKER + "\n"
+    "                        continue\n"
+    "                    new_offload_keys.append(offload_key)\n"
+)
 
 
 def apply() -> tuple[str, str]:
@@ -95,7 +112,8 @@ def apply() -> tuple[str, str]:
         TextPatch(name="pn170_imp", anchor=_IMP_OLD, replacement=_IMP_OLD + _IMP, required=True),
         TextPatch(name="pn170_prepare", anchor=_P_OLD, replacement=_P_NEW, required=True),
         TextPatch(name="pn170_eagle", anchor=_E_OLD, replacement=_E_NEW, required=True),
-        TextPatch(name="pn170_handoff", anchor=_H_OLD, replacement=_H_NEW, required=True)],
+        TextPatch(name="pn170_handoff", anchor=_H_OLD, replacement=_H_NEW, required=True),
+        TextPatch(name="pn171_recorte", anchor=_R_OLD, replacement=_R_NEW, required=True)],
         upstream_drift_markers=["_g170"])
     r, fl = p.apply()
     e = result_to_wiring_status(r, fl, applied_message=p.patch_name, patch_name=p.patch_name)

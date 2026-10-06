@@ -95,3 +95,33 @@ def carga_lista(job_id) -> None:
     if SUMAS and job_id in _cargas:
         for g, idx, s in _sumas(_cargas.pop(job_id)):
             log.warning("PN170S cargar g=%d idx=%d suma=%d", g, idx, s)
+
+
+# ---- PN171: del grupo del borrador (ventana deslizante) guardar solo los chunks que un lookup puede pedir ----
+# Un acierto externo solo cae donde hay estado GDN guardado: cortes de segmento de la retencion (16 chunks con 14080),
+# P-2 de cada prompt (el estado de P-3, ver PN168) y la junction compartida. Para un acierto de H chunks el lookup de
+# la ventana pide [H-w-e, H] (w = ventana en chunks, e = 1 por EAGLE). Lo demas del borrador se guardaba de gusto.
+RECORTE = os.environ.get("GENESIS_ENABLE_PN171_BORRADOR_RECORTADO", "0").strip().lower() in ("1", "true", "yes", "on")
+SEGMENTO = int(os.environ.get("GENESIS_PN171_SEGMENTO", "14080") or 0)
+
+
+def saltear_ventana(req, group_config, c: int) -> bool:
+    """True = no guardar el chunk c de un grupo de ventana deslizante (no lo pide ningun lookup).
+    Un acierto de H chunks consulta la ventana en los indices [H-w-e+1, H] (la consulta de EAGLE llega a H); se
+    guarda [H-w-e-1, H] con un chunk de margen. H = multiplos del segmento, P-2 y la junction."""
+    if not RECORTE or group_config.sliding_window_size_in_chunks is None or group_config.requires_cow_source:
+        return False
+    tpc = group_config.tokens_per_chunk
+    margen = group_config.sliding_window_size_in_chunks + int(group_config.is_eagle_group) + 1
+    puntos = [req.num_prompt_tokens // tpc - 2]
+    spb = getattr(req, "shared_prefix_boundary", 0) or 0
+    if spb:
+        puntos.append(spb // tpc - 1)
+    if any(h - margen <= c <= h for h in puntos):
+        return False
+    seg = SEGMENTO // tpc if SEGMENTO else 0
+    if seg > 0:
+        h = (c + margen) // seg * seg                 # el primer multiplo del segmento >= c (si esta a menos de margen)
+        if h >= c and h > 0:
+            return False
+    return True
