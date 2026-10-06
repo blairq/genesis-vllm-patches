@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """PN166 — captura de pedidos de chat TAL COMO LLEGAN (antes de P68/P69), para reproducirlos en la instancia de
 pruebas y estudiar el prefix cache con trafico real. Guarda el cuerpo del pedido (mensajes, herramientas,
-parametros) y la IP de origen; NUNCA cabeceras ni claves. Solo pedidos grandes, con tope de archivos.
+parametros), la IP de origen y los ids X-Genesis-* del plugin; NUNCA otras cabeceras ni claves. Solo pedidos grandes, con tope de archivos.
 """
 from __future__ import annotations
 
@@ -42,6 +42,8 @@ def capturar(request, raw_request) -> None:
         agente = (hd.get("user-agent") or "")[:80]
         reg = {"t": time.time(), "ip": ip, "origen": origen, "agente": agente, "chars_mensajes": tam, "n_mensajes": len(cuerpo.get("messages", [])),
                "n_herramientas": len(cuerpo.get("tools") or []), "pedido": cuerpo}
+        from vllm._genesis import sesion as _g169
+        reg.update(_g169.de_cabeceras(raw_request))           # solo los ids X-Genesis-* del plugin, si vinieron
         ruta = os.path.join(DIR, f"{time.strftime('%m%d_%H%M%S')}_{k:04d}.json")
         with open(ruta, "w") as f:
             json.dump(reg, f, ensure_ascii=False)

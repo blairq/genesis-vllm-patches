@@ -1300,6 +1300,15 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN169": {
+        "title": "Conversacion por pedido: cabeceras X-Genesis-* del plugin de opencode a kv_transfer_params",
+        "env_flag": "GENESIS_ENABLE_PN169_SESION",
+        "default_on": False,
+        "category": "structured_output",
+        "credit": ("Genesis-original 2026-10-05. Base para desalojar y bajar a RAM por conversacion (hilo principal vs subagentes)."),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN168": {
         "title": "Retencion rala del estado GDN con EAGLE: el borde de reuso conserva el bloque con estado",
         "env_flag": "GENESIS_ENABLE_PN168_RETENCION_EAGLE",

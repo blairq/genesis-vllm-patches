@@ -118,6 +118,7 @@ services:
       - GENESIS_ENABLE_PN164_GDN_VISTAS=${GENESIS_ENABLE_PN164_GDN_VISTAS:-1}       # GDN: mixed_qkv/z/b/a como vistas de in_proj, sin la copia por capa: con PN163 oraculo identico, GDN -2,3%
       - GENESIS_ENABLE_PN165_DIAG_PREFIJO=${GENESIS_ENABLE_PN165_DIAG_PREFIJO:-1}   # diagnostico de prefix cache por pedido en el log (solo numeros)
       - GENESIS_ENABLE_PN166_CAPTURA_PEDIDOS=${GENESIS_ENABLE_PN166_CAPTURA_PEDIDOS:-0}   # guarda pedidos grandes en /traces/pedidos (diagnostico)
+      - GENESIS_ENABLE_PN169_SESION=${GENESIS_ENABLE_PN169_SESION:-1}                  # cabeceras X-Genesis-* del plugin de opencode -> kv_transfer_params
       - GENESIS_ENABLE_PN168_RETENCION_EAGLE=${GENESIS_ENABLE_PN168_RETENCION_EAGLE:-1}   # con retencion rala: el borde de reuso guarda el bloque donde EAGLE deja el estado
       - GENESIS_PN168_DIAG=${GENESIS_PN168_DIAG:-0}                          # 1: loguea la mascara de retencion por pedido y grupo GDN
       - GENESIS_PN151_VERIFICAR=${GENESIS_PN151_VERIFICAR:-0}                         # N: compara contra el builder original en las primeras N llamadas

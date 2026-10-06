@@ -6329,6 +6329,24 @@ def apply_patch_PN168() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN169 sesion por pedido")
+def apply_patch_PN169() -> PatchResult:
+    """PN169: conversacion de cada pedido desde las cabeceras X-Genesis-* (antes de P68/P69)."""
+    name = "PN169 sesion por pedido"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.structured_output import patch_PN169_sesion
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN169_sesion.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR

@@ -86,10 +86,14 @@ def registrar(request, acierto_local: int) -> None:
                     f"de {dlen} tok, de hace {dhace:.0f} s")
         else:
             dtxt = "sin pedidos previos"
+        from vllm._genesis import sesion as _g169
+        et = _g169.de_request(request)
+        stxt = (" | %s ses=%s raiz=%s" % (et.get("genesis_agente_oc", "?"), et.get("genesis_sesion", "")[-8:],
+                                          et.get("genesis_raiz", "")[-8:])) if et else ""
         log.warning("PN165 req=%s prompt=%d bloques=%d | comun_max=%d bloques (~%d tok) con req=%s de hace %.0f s | "
-                    "acierto_local=%d tok (%.0f%%) | %s", str(request.request_id)[-10:], n_prompt, len(hs), mejor,
+                    "acierto_local=%d tok (%.0f%%) | %s%s", str(request.request_id)[-10:], n_prompt, len(hs), mejor,
                     mejor * tok_por_bloque, str(quien)[-10:], hace, acierto_local,
-                    100.0 * acierto_local / max(1, n_prompt), dtxt)
+                    100.0 * acierto_local / max(1, n_prompt), dtxt, stxt)
         if not any(rid == request.request_id for rid, _, _ in _previos):
             _previos.append((request.request_id, hs, ahora))
             _ids_previos.append((request.request_id, ids, ahora))
