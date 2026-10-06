@@ -306,7 +306,7 @@ services:
       - --max-model-len
       - "262144"
       - --gpu-memory-utilization
-      - "0.92"
+      - "${GENESIS_GPU_UTIL:-0.95}"                                    # 06-10: 0,92 -> 0,95 = KV 611k -> 654k; sesion real + 10x10k dejan >= 800 MiB libres por placa
       - --limit-mm-per-prompt
       - '{"image":2,"video":0}'
       - --mm-processor-kwargs
