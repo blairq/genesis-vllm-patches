@@ -170,9 +170,27 @@
         {{- reasoning_instructions + '\n\n' }}
     {%- endif %}
     {{- '# Tools\n\nYou have access to the following functions:\n\n<tools>' }}
-    {%- for tool in tools %}
+    {#- Orden canonico para el prefix cache: primero las tools que son iguales en todos los clientes y agentes,
+        despues las que cambian por maquina (bash lleva el OS; MCP), al final las que cambian por agente
+        (los subagentes de opencode no tienen task/todowrite/webfetch). Asi el prefijo comun no se corta en la
+        primera tool distinta por orden alfabetico. -#}
+    {%- set _t_prim = ['edit', 'glob', 'google_search', 'grep', 'read', 'skill', 'write'] %}
+    {%- set _t_ult = ['task', 'todowrite', 'webfetch'] %}
+    {%- for _n in _t_prim %}
+        {%- for tool in tools if (tool.function.name if tool.function is defined else tool.name) == _n %}
+            {{- '\n' }}
+            {{- tool | tojson }}
+        {%- endfor %}
+    {%- endfor %}
+    {%- for tool in tools if (tool.function.name if tool.function is defined else tool.name) not in _t_prim + _t_ult %}
         {{- '\n' }}
         {{- tool | tojson }}
+    {%- endfor %}
+    {%- for _n in _t_ult %}
+        {%- for tool in tools if (tool.function.name if tool.function is defined else tool.name) == _n %}
+            {{- '\n' }}
+            {{- tool | tojson }}
+        {%- endfor %}
     {%- endfor %}
     {{- '\n</tools>' }}
     {%- if _tool_format == 'json' %}

@@ -116,6 +116,10 @@ services:
       - GENESIS_ENABLE_PN151_GDN_META=${GENESIS_ENABLE_PN151_GDN_META:-1}             # metadata del GDN del decode en arbol en un kernel (eran ~35 ops por grupo): verificado 3000 llamadas, 0 distintas
       - GENESIS_ENABLE_PN163_GDN_SALIDA=${GENESIS_ENABLE_PN163_GDN_SALIDA:-1}       # GDN: sin cero ni copia de core_attn_out en pasos solo-spec: oraculo identico, GDN -1%
       - GENESIS_ENABLE_PN164_GDN_VISTAS=${GENESIS_ENABLE_PN164_GDN_VISTAS:-1}       # GDN: mixed_qkv/z/b/a como vistas de in_proj, sin la copia por capa: con PN163 oraculo identico, GDN -2,3%
+      - GENESIS_ENABLE_PN165_DIAG_PREFIJO=${GENESIS_ENABLE_PN165_DIAG_PREFIJO:-1}   # diagnostico de prefix cache por pedido en el log (solo numeros)
+      - GENESIS_ENABLE_PN166_CAPTURA_PEDIDOS=${GENESIS_ENABLE_PN166_CAPTURA_PEDIDOS:-0}   # guarda pedidos grandes en /traces/pedidos (diagnostico)
+      - GENESIS_ENABLE_PN168_RETENCION_EAGLE=${GENESIS_ENABLE_PN168_RETENCION_EAGLE:-1}   # con retencion rala: el borde de reuso guarda el bloque donde EAGLE deja el estado
+      - GENESIS_PN168_DIAG=${GENESIS_PN168_DIAG:-0}                          # 1: loguea la mascara de retencion por pedido y grupo GDN
       - GENESIS_PN151_VERIFICAR=${GENESIS_PN151_VERIFICAR:-0}                         # N: compara contra el builder original en las primeras N llamadas
       - GENESIS_ENABLE_PN135_NORM_QUANT=${GENESIS_ENABLE_PN135_NORM_QUANT:-0}          # residuo + RMSNorm + int8 en un kernel (SK-20); con noon dio +0,4%/+0,7%: re-medir
       - GENESIS_ENABLE_PN136_MLP_SOLAPADO=${GENESIS_ENABLE_PN136_MLP_SOLAPADO:-0}      # all-reduce del MLP solapado por DMA P2P (prefill); con noon dio 0%: re-medir
@@ -314,15 +318,19 @@ services:
       - qwen3_coder
       - --enable-cumem-allocator
       # offload de KV: 2 GB de RAM + disco (/kv-offload), con los PN81/PN90/PN91 de arriba
-      - --kv-transfer-config
-      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": 2147483648, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload", "n_read_threads": 4, "n_write_threads": 4}]}}'
+      # Offload APAGADO por defecto (05-10): con la KV paddeada al grupo mas grande una conversacion de 100k ocupa
+      # ~30 GB y nunca hubo aciertos externos; sesion real identica con y sin el (49%/392 s), y escribia ~65 MB/s
+      # al SSD. GENESIS_KV_FLAG=--kv-transfer-config lo prende (con --additional-config el JSON queda inerte).
+      - ${GENESIS_KV_FLAG:---additional-config}
+      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": ${GENESIS_KV_CPU_BYTES:-2147483648}, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": [{"type": "fs", "root_dir": "/kv-offload", "n_read_threads": 4, "n_write_threads": 4}]}}'
       - --enable-prefix-caching
       # Con especulacion (DFlash cuenta como EAGLE) vLLM fuerza checkpoints DENSOS del estado GDN: un bloque de
       # estado por cada 880 tokens y por grupo GDN. Medido el 05-10 con 2 conversaciones de ~110k: cada pedido
       # ocupa ~2,2x su largo en KV, se desalojan entre si y cada turno recalcula el prompt entero (0 aciertos).
-      # Un checkpoint cada 16 bloques: ~16x menos bloques GDN; se pierde a lo sumo ~14k tokens de reuso por turno.
+      # Un checkpoint cada 16 bloques + el borde de reuso de cada prompt (PN168 lo arregla para EAGLE: vLLM lo
+      # guardaba un bloque donde no hay estado y el turno siguiente solo reusaba el ultimo corte de segmento).
       - --prefix-cache-retention-interval
-      - "14080"
+      - "${GENESIS_RETENCION_GDN:-14080}"                                   # con PN168 (05-10, sesion real): 70% cacheado y TTFT 65 s contra 49%/393 s denso
       # profiler apagado salvo PROF_KIND/PROF_DIR en el entorno
       - --profiler-config
       - '{"profiler": ${PROF_KIND:-null}, "torch_profiler_dir": "${PROF_DIR:-}", "torch_profiler_with_stack": ${PROF_STACK:-false}, "torch_profiler_record_shapes": false, "torch_profiler_use_gzip": true, "ignore_frontend": true, "delay_iterations": ${PROF_DELAY:-0}, "max_iterations": ${PROF_MAX:-0}}'

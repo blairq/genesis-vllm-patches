@@ -352,13 +352,10 @@ class _Bufs:
         self.mqb = z(R, dt=torch.int32)
         self.dcap = z(R, dt=torch.int32)
         self.nx = VENT * SCH if VENT > 0 else 0       # ranuras extra para los trozos del espejo
-        nchx = nchmax + self.nx
-        self.oh = z(nchx * R * QD, dt=torch.int32)
-        self.ol = z(nchx * R * QD, dt=torch.int32)
-        self.om = z(nchx * R, dt=torch.int32)
-        self.os = z(nchx * R, dt=torch.int32)
-        self.Og = z(NG * R * QD, dt=torch.int64)
-        self.Sg = z(NG * R, dt=torch.int64)
+        self._dev, self._nchx, self._R, self._NG = dev, nchmax + self.nx, R, NG
+        self.oh = None                                # acumuladores de batch2: ver acumuladores()
+        if not (ROT_PTX and ARBOL and SK30 and MB == 64):
+            self.acumuladores()
         self.ar = torch.arange(_max_tok_decode(), device=dev, dtype=torch.int32)
         if SK30:
             self.qsf = z(R, dt=torch.float32)
@@ -366,8 +363,25 @@ class _Bufs:
             self.Mp30 = z(SK30_GMAX * R, dt=torch.float32)
             self.Lp30 = z(SK30_GMAX * R, dt=torch.float32)
             log.info("PN131 SK-30: parciales %d grupos (%.0f MiB)", SK30_GMAX, self.Op30.numel() * 2 / 2**20)
-        mb = (self.oh.numel() + self.ol.numel()) * 4 / 2**20
-        log.info("PN131 buffers: bmax=%d nchmax=%d MB=%d (%.0f MiB de acumuladores)", bmax, nchmax, MB, mb)
+        log.info("PN131 buffers: bmax=%d nchmax=%d MB=%d (acumuladores de batch2: %s)", bmax, nchmax, MB,
+                 "%.0f MiB" % ((self.oh.numel() + self.ol.numel()) * 4 / 2**20) if self.oh is not None
+                 else "no, los pide solo el camino sin SK-30")
+
+    def acumuladores(self):
+        """Los de batch2 (~0,9 GB por GPU con 262k): con SK-30 cubriendo el decode no se usan y son KV menos.
+        Se crean en el primer uso; si eso pasa dentro de una captura de grafo, avisa (fuera del perfil de memoria)."""
+        if self.oh is None:
+            if torch.cuda.is_current_stream_capturing():
+                log.warning("PN131: acumuladores de batch2 pedidos durante una captura (camino sin SK-30)")
+            z = lambda *s, dt: torch.zeros(*s, dtype=dt, device=self._dev)
+            nchx, R, NG = self._nchx, self._R, self._NG
+            self.oh = z(nchx * R * QD, dt=torch.int32)
+            self.ol = z(nchx * R * QD, dt=torch.int32)
+            self.om = z(nchx * R, dt=torch.int32)
+            self.os = z(nchx * R, dt=torch.int32)
+            self.Og = z(NG * R * QD, dt=torch.int64)
+            self.Sg = z(NG * R, dt=torch.int64)
+        return self
 
 
 _bufs: dict[int, _Bufs] = {}
@@ -740,6 +754,7 @@ def _decode_uniforme(impl, query, kv_cache, md, output, B, L, capturando):
     else:
         ks["prep"].lanzar((nt, nh * G), [q16, seq, c.refs, Qb, lim, mqb, dcap, L, nh, G, MB, ZSH, q16.stride(0)])
     bt = md.block_table
+    bf.acumuladores()
     NX = bf.nx if (mo == "int4" and VENT > 0) else 0      # ranuras extra del espejo
     oh = bf.oh[: (NCH + NX) * R * QD]
     ol = bf.ol[: (NCH + NX) * R * QD]

@@ -6275,6 +6275,60 @@ def apply_patch_PN164() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN165 diagnostico de prefijo")
+def apply_patch_PN165() -> PatchResult:
+    """PN165: diagnostico de prefix cache por pedido."""
+    name = "PN165 diagnostico de prefijo"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_PN165_diag_prefijo
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN165_diag_prefijo.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN166 captura de pedidos")
+def apply_patch_PN166() -> PatchResult:
+    """PN166: captura de pedidos de chat grandes (despues de P68/P69 en el orden de aplicacion)."""
+    name = "PN166 captura de pedidos"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.structured_output import patch_PN166_captura_pedidos
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN166_captura_pedidos.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
+@register_patch("PN168 retencion con EAGLE")
+def apply_patch_PN168() -> PatchResult:
+    """PN168: retencion rala del estado GDN, borde de reuso con el retroceso de EAGLE."""
+    name = "PN168 retencion con EAGLE"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN168_retencion_eagle
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN168_retencion_eagle.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #                             MAIN ORCHESTRATOR
