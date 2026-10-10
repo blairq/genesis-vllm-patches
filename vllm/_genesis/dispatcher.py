@@ -1300,6 +1300,19 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN174": {
+        "title": "Region de la L2 sin nombre en /dev/shm tras mapearla el scheduler: un motor muerto no deja 12 GB huerfanos",
+        "env_flag": "GENESIS_ENABLE_PN174_UNLINK_L2",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-10-10. vLLM 0.29.0: TieringOffloadingSpec no le pasa barrier= a SharedOffloadRegion (CPUOffloadingSpec si), "
+            "asi que el mmap nunca se desvincula y sobrevive a un OOM o un error de CUDA; el reinicio falla con 'Insufficient space in /dev/shm' "
+            "en bucle (06-10 x2, 10-10 x3). El scheduler abre la region ultimo y por nombre: es el que hace el unlink."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN173": {
         "title": "Chunk de prefill dinamico: 2640 si nadie genera, 880 si alguien genera o le falta poco prefill",
         "env_flag": "GENESIS_ENABLE_PN173_CHUNK_DINAMICO",

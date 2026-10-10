@@ -21,12 +21,12 @@
 # se puede apagar por separado.
 #
 # Estado al 06-10: KV en GPU 653 695 tokens (gpu-memory-utilization 0,95); prefix cache con
-# checkpoints GDN ralos + borde de reuso (PN168); L2 en RAM de 12 GiB SIN disco (PN170/PN171);
+# checkpoints GDN ralos + borde de reuso (PN168); L2 en RAM de 8 GiB SIN disco (12 -> 8 el 10-10: margen del cgroup de 26 GB) (PN170/PN171);
 # chunk de prefill dinamico (PN173). Sesion real reproducida: 70% del prompt desde cache.
 #
 # Cosas a saber:
 #   * Mismo IP (172.20.0.228) y puerto (8360) que los compose de noon: no corren juntos.
-#   * El arranque tarda ~4 min (parches, torch.compile, grafos y fijar los 12 GiB de L2).
+#   * El arranque tarda ~4 min (parches, torch.compile, grafos y fijar los 8 GiB de L2).
 #   * Caches JIT propias (vLLM, torch, Triton, Inductor): el cambio de modelo invalida
 #     torch.compile y los kernels; mezclarlas arrastraria artefactos de otro modelo.
 #   * Instancia de pruebas aislada (127.0.0.1:8391, red propia): -f ov-aislado.yml.
@@ -133,6 +133,7 @@ services:
       - GENESIS_PN171_SEGMENTO=${GENESIS_RETENCION_GDN:-14080}
       - GENESIS_ENABLE_PN172_DESALOJO_SESION=${GENESIS_ENABLE_PN172_DESALOJO_SESION:-0}   # APAGADO (06-10): con L2 empata (69/70%), sin L2 resta (15 vs 22%)
       - GENESIS_PN172_TTL_S=${GENESIS_PN172_TTL_S:-1200}
+      - GENESIS_ENABLE_PN174_UNLINK_L2=${GENESIS_ENABLE_PN174_UNLINK_L2:-1}   # region L2 sin nombre en /dev/shm: un motor muerto no deja 12 GB huerfanos (bucle "Insufficient space", 06-10 y 10-10)
       - GENESIS_ENABLE_PN173_CHUNK_DINAMICO=${GENESIS_ENABLE_PN173_CHUNK_DINAMICO:-1}   # PRENDIDO (06-10, decision del usuario): decode ajeno 31->~20 s; primeros turnos grandes +6/+9%
       - GENESIS_PN173_CHUNK_SOLO=${GENESIS_PN173_CHUNK_SOLO:-2640}
       - GENESIS_PN173_CHUNK_CON_DECODE=${GENESIS_PN173_CHUNK_CON_DECODE:-880}
@@ -229,6 +230,12 @@ services:
       # ── diagnostico ─────────────────────────────────────────────────────────
       - GENESIS_VOLCADO=1                        # si algo revienta, deja los locales del frame
       - GENESIS_VOLCADO_DIR=/root/.cache/vllm/genesis_volcados
+      # Coredump de GPU (10-10): el Xid 31 del 10-10 (escritura de un SM a una direccion sin mapear en TP1) paso
+      # una vez en ~20 h y el traceback de vLLM no dice que kernel fue (el error es asincrono). Con esto, en la
+      # proxima excepcion el driver vuelca kernel, PC e hilo; sin excepcion no cuesta nada. Leer con cuda-gdb 13.
+      - CUDA_ENABLE_COREDUMP_ON_EXCEPTION=${CUDA_ENABLE_COREDUMP_ON_EXCEPTION:-1}
+      - CUDA_ENABLE_LIGHTWEIGHT_COREDUMP=1
+      - CUDA_COREDUMP_FILE=/root/.cache/vllm/genesis_volcados/gpu_core_%p_%t.nvcudmp
       - GENESIS_DIAG_LMHEAD=0
       - VLLM_LOGGING_CONFIG_PATH=/root/.cache/vllm/genesis_logs/logging.json
       - VLLM_LOGGING_LEVEL=INFO
@@ -330,6 +337,11 @@ services:
       - '{"image":2,"video":0}'
       - --mm-processor-kwargs
       - '{"max_pixels":2000000,"min_pixels":65536}'
+      # cache del procesador multimodal: default 4 GiB y DUPLICADO (API server + EngineCore).
+      # Con la L2 (12 GB hasta el 10-10, hoy 8) el cgroup de 26 GB quedaba con ~5 GB de margen, y miles
+      # de imagenes distintas lo llenan: OOM del EngineCore el 10-10 (anon 1,4 -> 4,8 GB).
+      - --mm-processor-cache-gb
+      - "1"
       - --enable-flashinfer-autotune
       - --reasoning-parser
       - qwen3
@@ -342,7 +354,7 @@ services:
       # consecutivos); PN168 + PN170 lo arreglan: turno de 100k rescatado de RAM, TTFT 55,9 s -> 4,3 s, bytes exactos.
       # Una conversacion de 100k ocupa ~5 GB en L2. GENESIS_KV_FLAG=--additional-config lo apaga (JSON inerte).
       - ${GENESIS_KV_FLAG:---kv-transfer-config}
-      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": ${GENESIS_KV_CPU_BYTES:-12884901888}, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": []}}'                  # L3 (disco) APAGADO desde el 06-10: solo L2 en RAM
+      - '{"kv_connector": "OffloadingConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"spec_name": "TieringOffloadingSpec", "cpu_bytes_to_use": ${GENESIS_KV_CPU_BYTES:-8589934592}, "eviction_policy": "arc", "store_threshold": 1, "secondary_tiers": []}}'                  # L3 (disco) APAGADO desde el 06-10: solo L2 en RAM
       - --enable-prefix-caching
       # Con especulacion (DFlash cuenta como EAGLE) vLLM fuerza checkpoints DENSOS del estado GDN: un bloque de
       # estado por cada 880 tokens y por grupo GDN. Medido el 05-10 con 2 conversaciones de ~110k: cada pedido
