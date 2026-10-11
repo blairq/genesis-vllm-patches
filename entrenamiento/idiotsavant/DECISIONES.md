@@ -190,6 +190,34 @@ Velocidad, con todo el stack de la noche (SK-18h de 8 warps, etc.):
   - Si las Hessianas son las de `--conservar_hessianas` o las de la etapa A vieja, esta última guardaba attn_in sobre x = g·n: se pasa a n con `H_n = diag(1/g) H_x diag(1/g)`. Es exacto porque g no tiene ceros en ninguna `input_layernorm`.
   - `realinear_2809.sh` es la corrida que armó el checkpoint actual.
 
+## D3. Evaluación contra el card de Qwen3.8-27B (10-10)
+
+La suite `benchmarks/qwen38_card` del repo Genesis corre contra el modelo servido los benchmarks del
+card que se pueden reproducir. Usa los prompts y calificadores oficiales, el muestreo del card y
+`reasoning_effort=xhigh`. Resultado:
+- **Empata en razonamiento corto:** IFBench 83,0 contra 79,5; GPQA 91,9 contra 89,2; ERQA 67,5 contra
+  65,5.
+- **Razonamiento largo:** con el tope de 81 920 tokens perdía (HLE 21,0 contra 30,8; LiveCodeBench
+  85,5 contra 90,3, toda la diferencia en los difíciles). Con tope de 200k LiveCodeBench empata (90,8)
+  y HLE sube a 23,6.
+- **Pierde en percepción fina:** BabyVision 46,1 contra 65,7.
+
+En el razonamiento largo hay dos síntomas:
+- **Corte por tope:** el 16% de HLE llega al tope de 81 920 tokens pensando. Ese tope lo pone la
+  suite; el card admite hasta 262k de razonamiento, así que parte es del harness.
+- **Sin cierre:** el 12% termina sin cerrar `</think>`, con la respuesta escrita adentro. Pasa más
+  cuanto más se piensa: 0% por debajo de 8k tokens, 25% entre 64k y 82k.
+
+Con tope de 200k el corte casi desaparece (8 de 500) y queda el sin cierre: 81 de 500 (16%). Juzgando
+el final de su razonamiento HLE da 28,2. Cerrarlo a la fuerza (agregar `</think>` y dejar que el modelo
+responda) acierta 23 de esas 81, contra 24 juzgando el razonamiento: es lo que hace Genesis PN175 al
+servir, así que el cliente recibe una respuesta en vez de un contenido vacío.
+
+La calibración (ventanas de 4096) nunca vio un estado de ese largo. Es la primera hipótesis para la
+próxima ronda: recalibrar con trayectorias largas de razonamiento y probar GPTAQ, que ajusta contra
+la salida del modelo completo en vez de la de la capa ya cuantizada. Ninguna de las dos cambia el
+formato ni toca vLLM.
+
 ## E. El borrador DFlash2 (`dflash2.sh`)
 
 **E1. El borrador queda en su base original.** Su k_proj/v_proj se aplica a dos corrientes con normas
@@ -230,6 +258,15 @@ de 64 GB, el disco se llenó en minutos.
 **E7. Resultado** (banco de 40 pedidos de agente, árbol, 3 réplicas, totales): 5,65 / 5,69 / 5,54 →
 **5,63 aceptados por paso**, 218 / 218 / 212 → **~216 tok/s de decode**. Es la misma velocidad que tenía
 el stack anterior (5,67 / 216), sobre un modelo con la mitad de error.
+
+**E8. Actualización del 03-10:** una época más con la misma receta, desde el borrador publicado. El
+largo greedy offline no se movió (6,08 contra 6,09), pero la aceptación servida subió en todas las
+comparaciones pareadas:
+- 40 pedidos, 4 en paralelo, 4 arranques: 5,57 → **5,62**;
+- primeros 20 pedidos, 3 arranques: 6,05 → 6,12, gana en los 3.
+
+Entrenar contra el vocabulario recortado a 64k con el que se sirve el borrador (PN159) restó 6,5%: el
+selector queda calibrado para los logits del vocabulario completo.
 
 ## F. Ejecución
 

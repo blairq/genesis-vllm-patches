@@ -208,6 +208,7 @@ setting in it carries a comment with the measurement behind it.
 | | |
 |---|---|
 | Model | [`BlairQ/qwen3.8_27b_idiotSavant_sm_86`](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86): Qwen3.8-27B uncensored, int4 with the **residual stream rotated** (Hadamard), served as **W4A8**. KL to BF16 **0.0178**, vs 0.0385 for the popular AutoRound int4. Weights of 2026-09-28 |
+| Benchmarks | Against the Qwen3.8-27B BF16 card (2026-10-10, [suite](benchmarks/qwen38_card)): **ties on short reasoning** (IFBench 83.0 / 79.5, GPQA 91.9 / 89.2, ERQA 67.5 / 65.5), **ties LiveCodeBench with a 200k-token cap** (90.8 / 90.3), **loses on HLE** (23.6 / 30.8; 28.2 closing the `</think>` it misses, which PN175 now does at serving time) and on **fine vision** (BabyVision 46.1 / 65.7). [Full table](benchmarks/results/qwen38_card/completa_20261009_180151/summary.md), [200k re-run](benchmarks/results/qwen38_card/tope200k_20261010_194058/summary.md) |
 | Drafter | [`…_dflash2`](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2): DFlash2 re-tuned against the served target, **8-node tree** speculation, `num_speculative_tokens=8` |
 | Mandatory patches | **PN148** + **PN154** (online Hadamards before `down_proj` / `o_proj` / `out_proj`), **PN155** (int4 GDN gates), **PN149** (drafter on the rotated target). Without them the model outputs garbage |
 | Engine | vLLM 0.29.0 + Genesis, 2× RTX 3090 (sm_86), TP=2, PCIe, no NVLink |
@@ -215,7 +216,8 @@ setting in it carries a comment with the measurement behind it.
 | Context | 262 144 tokens · `max-num-seqs 11` · `gpu-memory-utilization 0.95` |
 | **KV capacity** | **653 695 tokens** (2.49× concurrency at full context) |
 | Prefix cache | sparse GDN checkpoints every 14 080 tokens + the reuse boundary (**PN168**) |
-| KV offload | **L2 in RAM, 12 GiB, no disk** (**PN170**/**PN171**): what the GPU evicts comes back over PCIe in seconds |
+| KV offload | **L2 in RAM, 8 GiB, no disk** (**PN170**/**PN171**): what the GPU evicts comes back over PCIe in seconds. 12 → 8 GiB on 2026-10-10 for headroom in the 26 GB container; **PN174** keeps a crashed engine from leaving it in `/dev/shm` |
+| Multimodal | up to 2 images per request, processor cache **1 GiB** (vLLM's 4 GiB default is duplicated in the API server and the engine and caused an OOM) |
 | Scheduling | one prefill at a time with priority bypasses (**PN115**), dynamic prefill chunk (**PN173**) |
 | Address on this host | `172.20.0.228:8320` (alias `vllm-server`), published on `:8360` |
 
@@ -441,6 +443,8 @@ from the code defaults.
 | ✅ | **PN170** | L2 offload hits at all on this hybrid + DFlash model: the GDN groups no longer count as EAGLE groups in the external lookup (they demanded two consecutive states that sparse retention never has, so every lookup returned 0) |
 | ✅ | **PN171** | L2 keeps only the drafter-window chunks a lookup can ask for (−13% of L2 per conversation) |
 | | PN172 | Eviction by role: a sub-agent never evicts a main thread's blocks. Off: ties with L2, loses without it |
+| ✅ | **PN174** | The L2 region in `/dev/shm` is unlinked once the scheduler (the last opener) has mapped it. vLLM 0.29.0's tiering spec never did, so a crashed engine left 12 GB behind and every restart failed with "Insufficient space in /dev/shm" |
+| ✅ | **PN175** | Forced close of the reasoning: a thinking turn that ends (EOS) without `</think>` is not returned with an empty answer. The server appends `</think>\n\n` and continues with prompt + reasoning + close, so the model writes the answer from its own reasoning (prefix cache: only the answer costs). Skipped for tool calls, multimodal, n>1, logprobs, beam search. On the 81 HLE answers that never closed: 23 right, vs 24 grading the reasoning by hand |
 
 PN145 + PN146, giving the drafter int8 KV, and the int4 `lm_head` took capacity from 178 823 to
 **583 790 tokens (+226%)**. The mechanism is counter-intuitive and worth
@@ -551,7 +555,13 @@ threads that start together pay +6–9%; it is on by choice, for responsiveness.
 
 When VRAM fills, vLLM **discards** old prefix blocks and recomputes them later. The offload
 connector copies blocks to RAM (L2) as they are computed and brings them back over PCIe when a
-later turn needs them. **Since 2026-10-06 it runs as L2 only — 12 GiB of RAM, no disk.**
+later turn needs them. **Since 2026-10-06 it runs as L2 only, with no disk: 12 GiB of RAM, 8 GiB since
+2026-10-10.** The cut was for headroom: the L2 lives in `/dev/shm` and counts against the 26 GB
+container, and with 12 GiB plus vLLM's multimodal cache the engine was OOM-killed. In vLLM 0.29.0
+the tiering spec never unlinks that region (the CPU spec does), so a dead engine left its gigabytes
+behind and every automatic restart failed with "Insufficient space in /dev/shm" (twice on 2026-10-06,
+three times on 2026-10-10). **PN174** unlinks it as soon as the scheduler, the last process to
+open it, has mapped it.
 
 **Until then it never hit on this model, at any size.** Two bugs stacked, both specific to a
 hybrid (GDN + attention) model with speculative decoding:
@@ -766,7 +776,7 @@ docker inspect genesis-27b-idiotsavant --format '{{.State.Health.Status}}'
 ```
 
 Boot takes ~4 minutes: patches, `torch.compile` (cached after the first time), CUDA graphs and
-pinning the 12 GiB of L2. Check the volume paths at the top of the compose against your layout.
+pinning the 8 GiB of L2. Check the volume paths at the top of the compose against your layout.
 For opencode, add the [conversation-identity plugin](#conversation-identity-from-opencode).
 
 The healthcheck **generates a token** rather than pinging `/health`. A server
@@ -816,6 +826,19 @@ hard way:
 - **L2 is at 0.21× L1 and wants 9.7 GiB to do its job.** The tiered KV cache
   works and the rescue is reproducible; what limits it here is host RAM, not the
   mechanism. See [Size L2 relative to L1](#size-l2-relative-to-l1--this-is-the-whole-game).
+- **An open crash: Xid 31 on 2026-10-10.** An SM wrote to an unmapped address on TP1 (`FAULT_PDE`,
+  `VIRT_WRITE`), in a step that mixed 8 tree-speculation decodes with a chunked prefill of an image
+  request. It happened once in ~20 h of benchmark load and did not reproduce on the same items. The
+  compose now enables a lightweight GPU coredump (`CUDA_ENABLE_COREDUMP_ON_EXCEPTION`), so the next
+  one names the kernel. Ruled out so far: vLLM's Triton swap kernel, the P2P mailboxes (copy engine)
+  and SK-24 (all writes bounded). The two failures that followed it are fixed: the OOM (multimodal
+  cache) and the restart loop (PN174).
+- **Long reasoning sometimes never closes `</think>`.** On HLE at `xhigh` effort with a 200k-token
+  cap, 16% of answers end without it, and the rate grows with length (0% under 8k, 25% at 64–82k).
+  PN175 now closes it at serving time and the model answers (HLE 23.6 → 28.2 vs the card's 30.8);
+  the cause (calibration never saw states that long) is still open. Truncation was mostly the
+  suite's first 81 920 cap: with 200k LiveCodeBench ties the card. See
+  [the benchmarks](benchmarks/results/qwen38_card/tope200k_20261010_194058/summary.md).
 - **PN122 silently corrupted long generations with DFlash2 — fixed 2026-09-20, and worth
   knowing how it hid.** DFlash2 forces vLLM's v2 model runner, which migrates GDN state across
   block boundaries from `mamba_hybrid.py`; PN122's materialisation hooks lived only on the v1

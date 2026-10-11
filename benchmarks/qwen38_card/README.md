@@ -66,7 +66,7 @@ python3 -m benchmarks.qwen38_card.run_suite --ping
 python3 -m benchmarks.qwen38_card.run_suite --bench all --limit 5      # humo
 python3 -m benchmarks.qwen38_card.run_suite --bench gpqa,ifbench       # completos
 # corrida "practica" (~12-15 h): muestra fija de HLE y MathVision testmini
-python3 -m benchmarks.qwen38_card.run_suite --concurrency 10 --limits hle=500 --mathvision-split testmini
+python3 -m benchmarks.qwen38_card.run_suite --concurrency 6 --limits hle=500 --mathvision-split testmini
 python3 -m benchmarks.qwen38_card.run_suite --resume benchmarks/results/qwen38_card/<dir>
 python3 -m benchmarks.qwen38_card.run_suite --resume <dir> --grade-only  # recalificar
 ```
@@ -84,9 +84,10 @@ Ritmo medido con xhigh a concurrencia 6: IFBench ~200/h (mediana 3k tokens),
 GPQA ~100/h (mediana 8k). HLE completo (2500) solo llevaria ~1 dia: con
 `--limits hle=500` el error queda en ±2 puntos, suficiente contra el 30.8 del card.
 
-`--concurrency` (6 por defecto) deja lugar en el server (`max-num-seqs 11`)
-para opencode/Hermes. Ojo que la medición de calidad no depende de la carga,
-pero el tiempo sí.
+`--concurrency`: **6 como máximo** (es el default). El decode agregado del server no pasa de
+~600 tok/s, así que más pedidos en paralelo no van más rápido: solo alargan cada uno. Con
+`--max-tokens` muy grande hay un segundo límite, la KV (654k tokens): con 200k, 3 en
+paralelo. La calidad medida no depende de la carga; el tiempo sí.
 
 ## Datasets
 

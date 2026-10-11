@@ -6,6 +6,9 @@
   - **Actualizado el 28-09:** además, Hadamard por cabeza en la entrada de `o_proj`/`out_proj` e `in_proj_a/b`
     en W4. KL servido 0,0193 → 0,0178, y 3 kernels menos por capa. Ver
     [DECISIONES.md](DECISIONES.md) §D2.
+  - **Evaluado el 10-10** con los benchmarks del card de Qwen3.8-27B. Empata con el BF16 en
+    razonamiento corto y pierde en razonamiento largo y en percepción visual fina. Ver
+    [DECISIONES.md](DECISIONES.md) §D3.
 - **`qwen3.8_27b_idiotSavant_sm_86_dflash2`**: su borrador DFlash2.
 
 Publicados en https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86 (con esta carpeta adentro,

@@ -6383,6 +6383,24 @@ def apply_patch_PN172() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN175 cierre forzado")
+def apply_patch_PN175() -> PatchResult:
+    """PN175: si el turno termina sin </think>, se cierra el razonamiento y se continua con la respuesta."""
+    name = "PN175 cierre forzado"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN175_cierre_forzado
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN175_cierre_forzado.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN174 unlink de la region L2")
 def apply_patch_PN174() -> PatchResult:
     """PN174: la region de la L2 en /dev/shm queda sin nombre tras mapearla el scheduler."""

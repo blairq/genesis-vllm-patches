@@ -1300,6 +1300,20 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN175": {
+        "title": "Cierre forzado del razonamiento: si el turno termina sin </think>, se cierra y el modelo escribe la respuesta",
+        "env_flag": "GENESIS_ENABLE_PN175_CIERRE_FORZADO",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-10-11. idiotSavant a veces emite EOS sin </think> en razonamientos largos (HLE 12%, "
+            "0% bajo 8k tokens y 25% entre 64k y 82k): la respuesta llega vacia aunque el razonamiento haya llegado. "
+            "Se agrega </think> a lo generado y se continua; sobre 81 casos de HLE acierta 23, igual que juzgar el "
+            "final del razonamiento (24), con una respuesta de verdad en content."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN174": {
         "title": "Region de la L2 sin nombre en /dev/shm tras mapearla el scheduler: un motor muerto no deja 12 GB huerfanos",
         "env_flag": "GENESIS_ENABLE_PN174_UNLINK_L2",

@@ -1,0 +1,41 @@
+ASD-STE100 APPROVED GENERAL WORDS (Issue 9). Use these words. Technical names (nouns of the domain: chemistry, physics, math, code identifiers, units) and technical verbs of the domain are also allowed.
+
+{PALABRAS}
+
+ASD-STE100 WORDS NOT APPROVED, WITH THE APPROVED WORD TO USE (not approved -> approved):
+{RECHAZADAS}
+
+TASK
+You rewrite a reasoning trace into ASD-STE100 Simplified Technical English (STE).
+The trace is the private thinking of a model that solved a problem. The rewritten trace must let the same model reach the same answer.
+
+RULES
+1. Keep every reasoning step that changes the state of the solution: each fact used, each calculation, each intermediate result, each decision between options.
+   Keep every edge case and special input that the trace finds (empty input, zero, one element, equal values, overflow, a tie), and how the solution handles it.
+   Keep every requirement and constraint of the task that the trace lists (counts, forbidden words, format, order), and each check of a requirement.
+   If the trace is not sure between options or facts, keep the doubt. Write the evidence for each option and why the trace chooses one. Do not write a step that the trace doubts as a fact.
+   If the trace counts words, characters, letters or items, keep the counted list (for example "you is 3, scour is 5"), not only the total.
+   If the trace writes a draft of the answer to check a format requirement (indentation, line count, letter or word patterns), keep the last version of that draft once, exactly as written, with its check. Remove the earlier versions.
+2. Keep each error that changes the result, and the correction that follows. Write it as a short sentence, for example: "Check: 2 x 3 is 6, not 5. Use 6."
+   Remove an approach that the trace starts and then stops without a result that it uses later.
+3. Remove only: filler words ("hmm", "okay", "let me think", "wait", "so", "actually"), and a check that repeats an earlier check with the same result. Keep everything else.
+4. This is a rewrite, not a summary. Each paragraph of the trace becomes one or more STE sentences. The rewritten trace is usually 40% to 70% of the length of the original trace. A result much shorter than that has lost steps.
+5. Do not solve the problem again. Do not add new facts or new steps. Do not change any number, name, formula or the final choice.
+6. Copy exactly: math, formulas, numbers, units, chemical names, code, variable names, option letters and option text.
+7. One idea in each sentence. Maximum 20 words in a sentence.
+8. Use the active voice. Use the present tense when possible.
+9. Use approved words. If a general word is not approved, use an approved word with the same meaning. Do not use a general word with a meaning that is not its approved meaning.
+10. Use the same word for the same thing in all the trace.
+11. Keep the order of the steps.
+
+OUTPUT
+Write only the rewritten trace. Do not write an introduction, a title or a comment. Do not use tags.
+Do not write an "ANSWER:" line and do not write the final reply to the user: the trace ends with the last reasoning step. The output is reasoning in STE sentences, also for programming problems. Never write only code. For code, write the algorithm, the data structures, the complexity, the edge cases and each bug that the trace finds, as STE sentences. A code block is permitted only for a short fragment (5 lines or fewer) that the trace contains. Do not write the complete program.
+
+EXAMPLE FOR A PROGRAMMING PROBLEM
+Original: "Hmm, okay so we need the longest substring without repeating characters. Brute force would be O(n^3), too slow for n = 10^5. Let me think... sliding window! Keep a dict of last index. Wait, when we see a repeat we must move left to max(left, last[c] + 1), not just last[c] + 1, otherwise left can move backwards. Let me double check with 'abba'... yes, with max it gives 2. Okay."
+STE: "The task is the longest substring with no repeated character.
+Brute force is O(n^3). This is too slow for n = 10^5.
+Use a sliding window. Keep a map from each character to its last index.
+When a character repeats, set left = max(left, last[c] + 1).
+Check: without max, left can move back. For 'abba' the result with max is 2, which is correct."
