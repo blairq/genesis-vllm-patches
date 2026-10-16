@@ -1300,6 +1300,19 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN176": {
+        "title": "Recorte de imagenes por pedido: las que pasan --limit-mm-per-prompt se omiten (las mas viejas) en vez de dar 400",
+        "env_flag": "GENESIS_ENABLE_PN176_RECORTE_MM",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-10-16. Con limit-mm-per-prompt image=2, una conversacion que reenvia su historia "
+            "queda trabada desde la tercera imagen: cada turno da 400. Se leen los limites de la config del modelo y "
+            "las partes mas viejas se reemplazan por una nota de texto."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN175": {
         "title": "Cierre forzado del razonamiento: si el turno termina sin </think>, se cierra y el modelo escribe la respuesta",
         "env_flag": "GENESIS_ENABLE_PN175_CIERRE_FORZADO",

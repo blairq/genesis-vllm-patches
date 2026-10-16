@@ -6383,6 +6383,24 @@ def apply_patch_PN172() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN176 recorte mm")
+def apply_patch_PN176() -> PatchResult:
+    """PN176: las imagenes que pasan --limit-mm-per-prompt se omiten (las mas viejas) en vez de dar 400."""
+    name = "PN176 recorte mm"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.hybrid import patch_PN176_recorte_mm
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN176_recorte_mm.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN175 cierre forzado")
 def apply_patch_PN175() -> PatchResult:
     """PN175: si el turno termina sin </think>, se cierra el razonamiento y se continua con la respuesta."""

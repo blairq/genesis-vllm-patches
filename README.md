@@ -217,8 +217,9 @@ setting in it carries a comment with the measurement behind it.
 | **KV capacity** | **653 695 tokens** (2.49× concurrency at full context) |
 | Prefix cache | sparse GDN checkpoints every 14 080 tokens + the reuse boundary (**PN168**) |
 | KV offload | **L2 in RAM, 8 GiB, no disk** (**PN170**/**PN171**): what the GPU evicts comes back over PCIe in seconds. 12 → 8 GiB on 2026-10-10 for headroom in the 26 GB container; **PN174** keeps a crashed engine from leaving it in `/dev/shm` |
-| Multimodal | up to 2 images per request, processor cache **1 GiB** (vLLM's 4 GiB default is duplicated in the API server and the engine and caused an OOM) |
+| Multimodal | **2 new images per turn, 32 per conversation** (**PN176**): images from earlier turns stay in the prefix cache and are not re-encoded, so a long conversation with screenshots never hits a 400 and never invalidates its cache. The ceiling of 32 is RAM when everything has to be reprocessed cold (~75 MB per large image). Processor cache **1 GiB** (vLLM's 4 GiB default is duplicated in the API server and the engine and caused an OOM) |
 | Scheduling | one prefill at a time with priority bypasses (**PN115**), dynamic prefill chunk (**PN173**) |
+| Reasoning | a thinking turn that ends without `</think>` is closed by the server and the model writes the answer (**PN175**), instead of returning an empty `content` |
 | Address on this host | `172.20.0.228:8320` (alias `vllm-server`), published on `:8360` |
 
 What that buys on a captured real session (two opencode threads of ~100K and ~125K plus a
@@ -445,6 +446,7 @@ from the code defaults.
 | | PN172 | Eviction by role: a sub-agent never evicts a main thread's blocks. Off: ties with L2, loses without it |
 | ✅ | **PN174** | The L2 region in `/dev/shm` is unlinked once the scheduler (the last opener) has mapped it. vLLM 0.29.0's tiering spec never did, so a crashed engine left 12 GB behind and every restart failed with "Insufficient space in /dev/shm" |
 | ✅ | **PN175** | Forced close of the reasoning: a thinking turn that ends (EOS) without `</think>` is not returned with an empty answer. The server appends `</think>\n\n` and continues with prompt + reasoning + close, so the model writes the answer from its own reasoning (prefix cache: only the answer costs). Skipped for tool calls, multimodal, n>1, logprobs, beam search. On the 81 HLE answers that never closed: 23 right, vs 24 grading the reasoning by hand |
+| ✅ | **PN176** | Image limit per **turn**, not per request. vLLM checks `--limit-mm-per-prompt` against every image in the request, and clients resend the whole conversation, so with a limit of 2 every turn after the third image failed with 400. Images from earlier turns are already in the prefix cache (the encoder only runs on images whose tokens are being computed). PN176 keeps at most `GENESIS_PN176_POR_TURNO` (2) new images per turn and replaces the rest with a text note; each turn's decision depends only on that turn, so the prompt only grows at the end and the prefix cache survives. `--limit-mm-per-prompt` (32) becomes a per-conversation ceiling for RAM when everything must be reprocessed cold; past it, older images are dropped in blocks of half the limit, so the prefix changes once every 16 images |
 
 PN145 + PN146, giving the drafter int8 KV, and the int4 `lm_head` took capacity from 178 823 to
 **583 790 tokens (+226%)**. The mechanism is counter-intuitive and worth
