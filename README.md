@@ -207,7 +207,7 @@ setting in it carries a comment with the measurement behind it.
 
 | | |
 |---|---|
-| Model | [`BlairQ/qwen3.8_27b_idiotSavant_sm_86`](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86): Qwen3.8-27B uncensored, int4 with the **residual stream rotated** (Hadamard), served as **W4A8**. KL to BF16 **0.0178**, vs 0.0385 for the popular AutoRound int4. Weights of 2026-09-28 |
+| Model | [`BlairQ/qwen3.8_27b_idiotSavant_sm_86`](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86): Qwen3.8-27B uncensored, int4 with the **residual stream rotated** (Hadamard), served as **W4A8**. KL to BF16 **0.0178**, vs 0.0385 for the popular AutoRound int4. Weights of 2026-09-28. [Technical report](https://huggingface.co/spaces/BlairQ/idiotSavant-sm86-report) |
 | Benchmarks | Against the Qwen3.8-27B BF16 card (2026-10-10, [suite](benchmarks/qwen38_card)): **ties on short reasoning** (IFBench 83.0 / 79.5, GPQA 91.9 / 89.2, ERQA 67.5 / 65.5), **ties LiveCodeBench with a 200k-token cap** (90.8 / 90.3), **loses on HLE** (23.6 / 30.8; 28.2 closing the `</think>` it misses, which PN175 now does at serving time) and on **fine vision** (BabyVision 46.1 / 65.7). [Full table](benchmarks/results/qwen38_card/completa_20261009_180151/summary.md), [200k re-run](benchmarks/results/qwen38_card/tope200k_20261010_194058/summary.md) |
 | Drafter | [`…_dflash2`](https://huggingface.co/BlairQ/qwen3.8_27b_idiotSavant_sm_86_dflash2): DFlash2 re-tuned against the served target, **8-node tree** speculation, `num_speculative_tokens=8` |
 | Mandatory patches | **PN148** + **PN154** (online Hadamards before `down_proj` / `o_proj` / `out_proj`), **PN155** (int4 GDN gates), **PN149** (drafter on the rotated target). Without them the model outputs garbage |
