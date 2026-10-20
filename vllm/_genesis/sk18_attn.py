@@ -897,15 +897,15 @@ def _pag_query(bs) -> int:
     return (_MAX_TOK_PASO + bs - 1) // bs + 1
 
 
-def _plan(est, i, qo, kvi, idx, last, impl, nh, bs, causal):
-    w = _wrapper(est, i)
-    w.plan(qo, kvi, idx, last, impl.num_heads, nh, QD, bs, causal=causal, pos_encoding_mode="NONE",
-           sm_scale=impl.scale, q_data_type=torch.float16, kv_data_type=torch.float16)
-    return w
+def _plan(qo, kvi, idx, last, impl, nh, bs, causal):
+    """Argumentos del plan de FlashInfer de un tramo (se planea en _prefill_flashinfer)."""
+    return ((qo, kvi, idx, last, impl.num_heads, nh, QD, bs),
+            dict(causal=causal, pos_encoding_mode="NONE", sm_scale=impl.scale,
+                 q_data_type=torch.float16, kv_data_type=torch.float16))
 
 
-def _tramos(est, impl, md, B, nh, bs, dev, tope):
-    """Plan del paso: lista de tramos ``(wrapper, ids, q0, q1, rol)``. ``rol``: "solo" (escribe la
+def _tramos(impl, md, B, nh, bs, dev, tope):
+    """Plan del paso: lista de tramos ``(plan, ids, q0, q1, rol)``. ``rol``: "solo" (escribe la
     salida), "primero"/"sigue"/"ultimo" (un pedido largo partido en tramos que se combinan por LSE).
     Pedidos consecutivos que entran juntos en ``tope`` paginas van en un solo plan, como antes."""
     seq = md.seq_lens[:B].cpu().to(torch.int64)
@@ -913,10 +913,9 @@ def _tramos(est, impl, md, B, nh, bs, dev, tope):
     qsl = (qsl if qsl is not None else md.query_start_loc.cpu()).to(torch.int64)
     npag = (seq + bs - 1) // bs
     bt = md.block_table[:B, : int(npag.max())].to(torch.int64)
-    tramos, k = [], 0
+    tramos = []
 
     def grupo(r0, r1):
-        nonlocal k
         sub = bt[r0:r1]
         valid = (torch.arange(sub.shape[1])[None, :] < npag[r0:r1, None]).to(dev)
         ids, inv = torch.unique(sub[valid], return_inverse=True)
@@ -924,12 +923,10 @@ def _tramos(est, impl, md, B, nh, bs, dev, tope):
         kvi[1:] = torch.cumsum(npag[r0:r1], 0).to(torch.int32)
         last = (seq[r0:r1] - (npag[r0:r1] - 1) * bs).to(torch.int32)
         qo = (qsl[r0:r1 + 1] - qsl[r0]).to(torch.int32)
-        w = _plan(est, k, qo, kvi, inv.to(torch.int32), last, impl, nh, bs, True)
-        tramos.append((w, ids, int(qsl[r0]), int(qsl[r1]), "solo"))
-        k += 1
+        pl = _plan(qo, kvi, inv.to(torch.int32), last, impl, nh, bs, True)
+        tramos.append((pl, ids, int(qsl[r0]), int(qsl[r1]), "solo"))
 
     def largo(r):
-        nonlocal k
         n, q0, q1 = int(npag[r]), int(qsl[r]), int(qsl[r + 1])
         ctx = int(seq[r]) - (q1 - q0)
         ini = max(0, min(ctx // bs, n - tope))       # el ultimo tramo lleva la query entera
@@ -939,13 +936,12 @@ def _tramos(est, impl, md, B, nh, bs, dev, tope):
             m = b - a
             last = int(seq[r]) - (n - 1) * bs if causal else bs
             assert m <= tope, (m, tope)
-            w = _plan(est, k, qo, torch.tensor([0, m], dtype=torch.int32),
-                      torch.arange(m, dtype=torch.int32), torch.tensor([last], dtype=torch.int32),
-                      impl, nh, bs, causal)
+            pl = _plan(qo, torch.tensor([0, m], dtype=torch.int32),
+                       torch.arange(m, dtype=torch.int32), torch.tensor([last], dtype=torch.int32),
+                       impl, nh, bs, causal)
             rol = ("solo" if len(cortes) == 1 else "ultimo" if j == len(cortes) - 1
                    else "primero" if j == 0 else "sigue")
-            tramos.append((w, bt[r, a:b].to(dev), q0, q1, rol))
-            k += 1
+            tramos.append((pl, bt[r, a:b].to(dev), q0, q1, rol))
 
     validas = (torch.arange(bt.shape[1])[None, :] < npag[:, None]).to(dev)
     if int(torch.unique(bt[validas]).numel()) <= tope:
@@ -979,11 +975,24 @@ def _prefill_flashinfer(impl, layer, query, kv_cache, md, output):
     buf = _buffer(est, dev, bs, nh, _pag_query(bs) + 1)
     clave = (getattr(md, "genesis_clave", None) or id(md), md.num_actual_tokens, md.max_seq_len)
     if est["clave"] != clave:
-        est.update(clave=clave, tramos=_tramos(est, impl, md, B, nh, bs, dev, buf.shape[0]))
+        tramos = _tramos(impl, md, B, nh, bs, dev, buf.shape[0])
+        # Hasta FI_WRAPPERS tramos (lo normal) cada uno queda planeado en su wrapper para las 16 capas.
+        # Con mas no se crean wrappers (8 MiB de GPU cada uno, fuera del perfil): se replanean al usarse.
+        if len(tramos) <= FI_WRAPPERS:
+            for j, (pl, *_) in enumerate(tramos):
+                _wrapper(est, j).plan(*pl[0], **pl[1])
+        est.update(clave=clave, tramos=tramos)
+    tramos = est["tramos"]
+    replanear = len(tramos) > FI_WRAPPERS
     q16 = query[:nact].to(torch.float16)
     out = output[:nact].view(nact, impl.num_heads, QD)
     acc = None
-    for w, ids, q0, q1, rol in est["tramos"]:
+    for j, (pl, ids, q0, q1, rol) in enumerate(tramos):
+        w = _wrapper(est, j % FI_WRAPPERS)
+        if replanear:
+            # Sincronico: plan() deja los indices en un buffer pinned del host y los copia a la GPU
+            # en asincronico; replanear el mismo wrapper antes de esa copia la pisaba (Xid 13, 20-10).
+            w.plan(*pl[0], **pl[1], non_blocking=False)
         kv = decuantizar_kv(impl, kv_cache, ids, out=buf[: ids.shape[0]])
         if rol == "solo":
             out[q0:q1].copy_(w.run(q16[q0:q1], kv).view(q1 - q0, impl.num_heads, QD))

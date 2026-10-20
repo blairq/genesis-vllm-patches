@@ -4,8 +4,8 @@
 vLLM dimensiona la KV con lo que queda despues de ``profile_run``, que corre sin atencion
 (``skip_attn``): los transitorios de la atencion y del GDN los cubre solo la holgura de
 ``--gpu-memory-utilization``. Lo que se crea recien en la primera inferencia (buffers de SK-18, el
-workspace de FlashInfer, el pool de salida del GDN de PN59) o al enlazar la KV (la cinta de PN122)
-quedaba fuera de la cuenta y se comia esa holgura: el 20-10, un paso con 8 prefills sobre contexto
+workspace de FlashInfer, el pool de salida del GDN de PN59, el buffer del top-k/top-p del sampler)
+o al enlazar la KV (la cinta de PN122) quedaba fuera de la cuenta y se comia esa holgura: el 20-10, un paso con 8 prefills sobre contexto
 cacheado mas 3 decodes dio OOM por 42 MiB y colgo el motor (con caches de compilacion nuevas; con
 las de produccion pasaba por poco). Aca se crea todo eso antes de medir; lo que necesita la KV (la
 cinta) se aparta con un tensor del mismo tamano que se suelta justo antes de crearla.
@@ -60,6 +60,17 @@ def _reservar(runner) -> None:
         n = sum(gdn_cinta.bytes_cinta(c, sc.max_num_seqs) for c in capas)
         _apartado["cinta"] = torch.empty(n, dtype=torch.uint8, device=dev)
         partes["cinta"] = n
+
+    # El buffer que el top-k/top-p de Triton (upstream) cachea en el primer pedido con top_k/top_p:
+    # num_sm filas x vocabulario. Se crea con la funcion real y logits de prueba.
+    from vllm.v1.sample.ops.topk_topp_triton import apply_top_k_top_p_triton
+    x = torch.cuda.memory_allocated(dev)
+    filas = torch.cuda.get_device_properties(dev).multi_processor_count
+    logits = torch.zeros(filas, mc.get_vocab_size(), dtype=torch.float32, device=dev)
+    apply_top_k_top_p_triton(logits, torch.full((filas,), 20, dtype=torch.int32, device=dev),
+                             torch.full((filas,), 0.95, dtype=torch.float32, device=dev))
+    del logits
+    partes["sampler"] = torch.cuda.memory_allocated(dev) - x
 
     log.info("[PN177] %.0f MiB creados antes del perfil de memoria: %s",
              (torch.cuda.memory_allocated(dev) - antes) / 2**20,

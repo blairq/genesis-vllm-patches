@@ -466,7 +466,14 @@ def _envolver_runner() -> None:
         if st is not None:
             E.aux = st.aux_hidden_states
             E.slots_por_capa = st.slot_mappings_by_layer
-        return tokens0(self, grammar_output)
+        try:
+            return tokens0(self, grammar_output)
+        finally:
+            # Solo los usa _compactar, adentro de este paso. Retenidos, los ocultos auxiliares del
+            # borrador (5 x tokens x hidden: ~390 MiB con un prefill de 8k) seguian vivos durante el
+            # forward siguiente, fuera del perfil de memoria: OOM con varios prefills grandes (20-10).
+            E.aux = None
+            E.slots_por_capa = None
 
     def sample(self, hidden_states, input_batch, grammar_output):
         from vllm._genesis import gdn_cinta, sk18_attn
