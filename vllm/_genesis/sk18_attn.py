@@ -387,14 +387,17 @@ class _Bufs:
 _bufs: dict[int, _Bufs] = {}
 
 
-def _get_bufs(dev, nh, bs, G=6):
+def _get_bufs(dev, nh, bs, G=6, maxlen=None, bmax=None):
     b = _bufs.get(dev.index)
     if b is None:
         try:
-            from vllm.config import get_current_vllm_config
-            cfg = get_current_vllm_config()
-            maxlen = int(cfg.model_config.max_model_len)
-            bmax = int(cfg.scheduler_config.max_num_seqs)
+            if maxlen is not None and bmax is not None:   # desde PN177, con la config del runner
+                maxlen, bmax = int(maxlen), int(bmax)
+            else:
+                from vllm.config import get_current_vllm_config
+                cfg = get_current_vllm_config()
+                maxlen = int(cfg.model_config.max_model_len)
+                bmax = int(cfg.scheduler_config.max_num_seqs)
         except Exception as e:
             # El contexto de configuracion de vLLM no siempre esta activo cuando se arman los
             # buffers (esto corre en la primera inferencia del worker). Caer a un 10 en SILENCIO
@@ -802,16 +805,17 @@ def decuantizar_bloques(impl, kv_cache, ids):
     return kv[:, 0], kv[:, 1]
 
 
-def decuantizar_kv(impl, kv_cache, ids):
-    """Paginas -> fp16 para el prefill. En int4, las paginas que tienen espejo int8 (la ventana
-    reciente, donde vive el prompt que se esta procesando) se decuantizan DESDE el espejo: si no,
-    el prefill ve la version int4 y la calidad de lo estructurado (tool calls) se resiente."""
+def decuantizar_kv(impl, kv_cache, ids, out=None):
+    """Paginas -> fp16 para el prefill (en ``out`` si viene, ``[n, 2, BS, NH, 256]``). En int4, las
+    paginas que tienen espejo int8 (la ventana reciente, donde vive el prompt que se esta procesando)
+    se decuantizan DESDE el espejo: si no, el prefill ve la version int4 y la calidad de lo
+    estructurado (tool calls) se resiente."""
     nb, nh, bs, blk, raw = _geom(kv_cache)
     dev = kv_cache.device
     c = _capa(impl, dev)
     ids = ids.to(torch.int64).contiguous()
     n = ids.shape[0]
-    kv = torch.empty((n, 2, bs, nh, QD), dtype=torch.float16, device=dev)
+    kv = out if out is not None else torch.empty((n, 2, bs, nh, QD), dtype=torch.float16, device=dev)
     mo = modo(impl)
     ks = _kernels(mo)
     if mo != "int4":
@@ -831,43 +835,167 @@ def decuantizar_kv(impl, kv_cache, ids):
     return kv
 
 
+# Prefill con FlashInfer sobre paginas decuantizadas a fp16. La decuantizacion va a UN buffer fijo por
+# GPU de PAG_TOPE paginas: antes se reservaba por paso y crecia con el contexto de TODOS los prefills
+# del paso (8 prefills sobre ~74k de contexto: >1 GB), fuera de la cuenta del perfil de memoria -> OOM.
+# Lo que no entra se hace por tramos y se combina por LSE. Buffer, workspace y los primeros wrappers
+# se crean en reservar(), dentro del perfil de vLLM, asi la KV se dimensiona contandolos.
+PAG_TOPE = 64
+FI_WS = 128 * 1024 * 1024
+FI_WRAPPERS = 4
 _fi = {}
+
+
+def _estado_fi(dev):
+    est = _fi.get(dev.index)
+    if est is None:
+        est = _fi[dev.index] = dict(ws=torch.empty(FI_WS, dtype=torch.uint8, device=dev), w=[],
+                                    buf=None, clave=None, tramos=None)
+    return est
+
+
+def _wrapper(est, i):
+    import flashinfer
+    while len(est["w"]) <= i:
+        est["w"].append(flashinfer.BatchPrefillWithPagedKVCacheWrapper(est["ws"], "NHD"))
+    return est["w"][i]
+
+
+def _buffer(est, dev, bs, nh, pag_min=0):
+    """Vista ``[paginas, 2, BS, NH, 256]`` fp16 del buffer de decuantizacion (crece solo si hace falta
+    mas que lo reservado: no deberia pasar con los topes de reservar())."""
+    por_pag = 2 * bs * nh * QD
+    if est["buf"] is None or est["buf"].numel() < max(PAG_TOPE, pag_min) * por_pag:
+        if est["buf"] is not None:
+            log.warning("[PN131] buffer de decuantizacion chico (%d paginas): crece fuera del perfil",
+                        est["buf"].numel() // por_pag)
+        est["buf"] = torch.empty(max(PAG_TOPE, pag_min) * por_pag, dtype=torch.float16, device=dev)
+    n = est["buf"].numel() // por_pag
+    return est["buf"][: n * por_pag].view(n, 2, bs, nh, QD)
+
+
+def reservar(dev, nh, bs, num_heads, max_model_len, max_num_seqs, max_num_batched_tokens) -> int:
+    """Crea en ``dev`` lo que el prefill y el decode de SK-18 piden en la primera inferencia. Se llama
+    desde el perfil de vLLM (PN177), con la config del runner: en la primera inferencia
+    get_current_vllm_config() no siempre esta activo. Devuelve los bytes creados."""
+    global _MAX_TOK_PASO
+    _MAX_TOK_PASO = int(max_num_batched_tokens)
+    antes = torch.cuda.memory_allocated(dev)
+    _get_bufs(dev, nh, bs, max(1, num_heads // nh), maxlen=max_model_len, bmax=max_num_seqs)
+    est = _estado_fi(dev)
+    for i in range(FI_WRAPPERS):
+        _wrapper(est, i)
+    _buffer(est, dev, bs, nh, _pag_query(bs) + 1)
+    return torch.cuda.memory_allocated(dev) - antes
+
+
+_MAX_TOK_PASO = 8192   # --max-num-batched-tokens; lo fija reservar()
+
+
+def _pag_query(bs) -> int:
+    """Paginas que puede abarcar la query de un pedido en un paso (va entera en el ultimo tramo)."""
+    return (_MAX_TOK_PASO + bs - 1) // bs + 1
+
+
+def _plan(est, i, qo, kvi, idx, last, impl, nh, bs, causal):
+    w = _wrapper(est, i)
+    w.plan(qo, kvi, idx, last, impl.num_heads, nh, QD, bs, causal=causal, pos_encoding_mode="NONE",
+           sm_scale=impl.scale, q_data_type=torch.float16, kv_data_type=torch.float16)
+    return w
+
+
+def _tramos(est, impl, md, B, nh, bs, dev, tope):
+    """Plan del paso: lista de tramos ``(wrapper, ids, q0, q1, rol)``. ``rol``: "solo" (escribe la
+    salida), "primero"/"sigue"/"ultimo" (un pedido largo partido en tramos que se combinan por LSE).
+    Pedidos consecutivos que entran juntos en ``tope`` paginas van en un solo plan, como antes."""
+    seq = md.seq_lens[:B].cpu().to(torch.int64)
+    qsl = getattr(md, "genesis_qsl_cpu", None)
+    qsl = (qsl if qsl is not None else md.query_start_loc.cpu()).to(torch.int64)
+    npag = (seq + bs - 1) // bs
+    bt = md.block_table[:B, : int(npag.max())].to(torch.int64)
+    tramos, k = [], 0
+
+    def grupo(r0, r1):
+        nonlocal k
+        sub = bt[r0:r1]
+        valid = (torch.arange(sub.shape[1])[None, :] < npag[r0:r1, None]).to(dev)
+        ids, inv = torch.unique(sub[valid], return_inverse=True)
+        kvi = torch.zeros(r1 - r0 + 1, dtype=torch.int32)
+        kvi[1:] = torch.cumsum(npag[r0:r1], 0).to(torch.int32)
+        last = (seq[r0:r1] - (npag[r0:r1] - 1) * bs).to(torch.int32)
+        qo = (qsl[r0:r1 + 1] - qsl[r0]).to(torch.int32)
+        w = _plan(est, k, qo, kvi, inv.to(torch.int32), last, impl, nh, bs, True)
+        tramos.append((w, ids, int(qsl[r0]), int(qsl[r1]), "solo"))
+        k += 1
+
+    def largo(r):
+        nonlocal k
+        n, q0, q1 = int(npag[r]), int(qsl[r]), int(qsl[r + 1])
+        ctx = int(seq[r]) - (q1 - q0)
+        ini = max(0, min(ctx // bs, n - tope))       # el ultimo tramo lleva la query entera
+        cortes = [(a, min(a + tope, ini), False) for a in range(0, ini, tope)] + [(ini, n, True)]
+        qo = torch.tensor([0, q1 - q0], dtype=torch.int32)
+        for j, (a, b, causal) in enumerate(cortes):
+            m = b - a
+            last = int(seq[r]) - (n - 1) * bs if causal else bs
+            assert m <= tope, (m, tope)
+            w = _plan(est, k, qo, torch.tensor([0, m], dtype=torch.int32),
+                      torch.arange(m, dtype=torch.int32), torch.tensor([last], dtype=torch.int32),
+                      impl, nh, bs, causal)
+            rol = ("solo" if len(cortes) == 1 else "ultimo" if j == len(cortes) - 1
+                   else "primero" if j == 0 else "sigue")
+            tramos.append((w, bt[r, a:b].to(dev), q0, q1, rol))
+            k += 1
+
+    validas = (torch.arange(bt.shape[1])[None, :] < npag[:, None]).to(dev)
+    if int(torch.unique(bt[validas]).numel()) <= tope:
+        grupo(0, B)                                   # lo de siempre: un plan para todo el paso
+        return tramos
+    r = 0
+    while r < B:
+        if int(npag[r]) > tope:
+            largo(r)
+            r += 1
+            continue
+        r1, tot = r, 0
+        while r1 < B and int(npag[r1]) <= tope and tot + int(npag[r1]) <= tope:
+            tot += int(npag[r1])
+            r1 += 1
+        grupo(r, r1)
+        r = r1
+    return tramos
 
 
 def _prefill_flashinfer(impl, layer, query, kv_cache, md, output):
     """Prefill: decuantiza a fp16 SOLO las paginas que tocan los pedidos del paso y usa el
-    prefill paginado de FlashInfer (page 832) sobre ese cache temporal. El plan se arma una
-    vez por paso (misma metadata para las 16 capas) y se reusa."""
-    import flashinfer
+    prefill paginado de FlashInfer sobre ese cache temporal. El plan se arma una vez por paso
+    (misma metadata para las 16 capas) y se reusa."""
+    from flashinfer import merge_state_in_place
     dev = query.device
     nact = md.num_actual_tokens
     nb, nh, bs, blk, raw = _geom(kv_cache)
-    G = impl.num_heads // nh
     B = md.query_start_loc.shape[0] - 1
-    est = _fi.get(dev.index)
-    if est is None:
-        ws = torch.empty(256 * 1024 * 1024, dtype=torch.uint8, device=dev)
-        est = _fi[dev.index] = dict(w=flashinfer.BatchPrefillWithPagedKVCacheWrapper(ws, "NHD"), clave=None)
+    est = _estado_fi(dev)
+    buf = _buffer(est, dev, bs, nh, _pag_query(bs) + 1)
     clave = (getattr(md, "genesis_clave", None) or id(md), md.num_actual_tokens, md.max_seq_len)
     if est["clave"] != clave:
-        seq = md.seq_lens[:B].cpu().to(torch.int64)
-        qsl = getattr(md, "genesis_qsl_cpu", None)
-        qsl = (qsl if qsl is not None else md.query_start_loc.cpu()).to(torch.int32)
-        npag = (seq + bs - 1) // bs
-        maxp = int(npag.max())
-        bt = md.block_table[:B, :maxp].to(torch.int64)
-        valid = (torch.arange(maxp)[None, :] < npag[:, None]).to(dev)
-        ids, inv = torch.unique(bt[valid], return_inverse=True)
-        kvi = torch.zeros(B + 1, dtype=torch.int32)
-        kvi[1:] = torch.cumsum(npag, 0).to(torch.int32)
-        last = (seq - (npag - 1) * bs).to(torch.int32)
-        est["w"].plan(qsl, kvi, inv.to(torch.int32), last, impl.num_heads, nh, QD, bs, causal=True,
-                      pos_encoding_mode="NONE", sm_scale=impl.scale,
-                      q_data_type=torch.float16, kv_data_type=torch.float16)
-        est.update(clave=clave, ids=ids)
-    kv = decuantizar_kv(impl, kv_cache, est["ids"])
-    o = est["w"].run(query[:nact].to(torch.float16), kv)
-    output[:nact].view(nact, impl.num_heads, QD).copy_(o.view(nact, impl.num_heads, QD))
+        est.update(clave=clave, tramos=_tramos(est, impl, md, B, nh, bs, dev, buf.shape[0]))
+    q16 = query[:nact].to(torch.float16)
+    out = output[:nact].view(nact, impl.num_heads, QD)
+    acc = None
+    for w, ids, q0, q1, rol in est["tramos"]:
+        kv = decuantizar_kv(impl, kv_cache, ids, out=buf[: ids.shape[0]])
+        if rol == "solo":
+            out[q0:q1].copy_(w.run(q16[q0:q1], kv).view(q1 - q0, impl.num_heads, QD))
+            continue
+        o, lse = w.run(q16[q0:q1], kv, return_lse=True)
+        if rol == "primero":
+            acc = (o, lse)
+        else:
+            merge_state_in_place(acc[0], acc[1], o, lse)
+        if rol == "ultimo":
+            out[q0:q1].copy_(acc[0].view(q1 - q0, impl.num_heads, QD))
+            acc = None
     return output
 
 

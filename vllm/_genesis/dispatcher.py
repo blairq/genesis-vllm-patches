@@ -1300,6 +1300,21 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN177": {
+        "title": "Reserva antes del perfil: los buffers de SK-18/GDN y la cinta entran en la cuenta de la KV",
+        "env_flag": "GENESIS_ENABLE_PN177_RESERVA",
+        "default_on": False,
+        "category": "hybrid",
+        "credit": (
+            "Genesis-original 2026-10-20. profile_run corre sin atencion; lo que SK-18 (workspace de FlashInfer, "
+            "buffers, descuantizacion del prefill), PN59 y PN122 crean despues del perfil se comia la holgura de "
+            "--gpu-memory-utilization y un paso con 8 prefills sobre contexto cacheado + 3 decodes daba OOM. Se "
+            "crean al empezar el perfil; la descuantizacion del prefill de SK-18 pasa a un buffer fijo de 64 "
+            "paginas con tramos combinados por LSE."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN176": {
         "title": "Recorte de imagenes por pedido: las que pasan --limit-mm-per-prompt se omiten (las mas viejas) en vez de dar 400",
         "env_flag": "GENESIS_ENABLE_PN176_RECORTE_MM",

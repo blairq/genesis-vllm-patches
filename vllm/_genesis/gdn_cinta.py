@@ -305,12 +305,19 @@ def fila(layer) -> int:
     return H * K + HV * V + 2 * HV
 
 
+def bytes_cinta(layer, max_reqs: int) -> int:
+    """Bytes de la cinta de ``layer`` (lo que ``enlazar`` va a crear), para reservarlos en el perfil."""
+    return (2 * max_reqs + 2) * layer.num_spec * fila(layer) * 4
+
+
 def enlazar(layer, device) -> None:
     """Crea la cinta de la capa GDN. Se llama desde ``bind_kv_cache``."""
     if not hasattr(layer, "num_v_heads") or getattr(layer, "num_spec", 0) <= 0:
         return
     if getattr(layer, "_g122_cinta", None) is not None:
         return
+    from vllm._genesis import reserva
+    reserva.soltar("cinta")
     try:
         from vllm.config import get_current_vllm_config
         max_reqs = int(get_current_vllm_config().scheduler_config.max_num_seqs)

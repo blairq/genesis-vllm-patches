@@ -134,6 +134,7 @@ services:
       - GENESIS_ENABLE_PN172_DESALOJO_SESION=${GENESIS_ENABLE_PN172_DESALOJO_SESION:-0}   # APAGADO (06-10): con L2 empata (69/70%), sin L2 resta (15 vs 22%)
       - GENESIS_PN172_TTL_S=${GENESIS_PN172_TTL_S:-1200}
       - GENESIS_ENABLE_PN176_RECORTE_MM=${GENESIS_ENABLE_PN176_RECORTE_MM:-1}   # limite de imagenes por TURNO, no por pedido: las de turnos viejos ya estan en la cache (con 2 por pedido la conversacion quedaba en 400 desde la 3a imagen)
+      - GENESIS_ENABLE_PN177_RESERVA=${GENESIS_ENABLE_PN177_RESERVA:-1}   # 20-10: buffers de SK-18/GDN y cinta dentro del perfil de memoria (sin esto, 8 prefills largos + decodes daban OOM y colgaban el motor; KV -2%)
       - GENESIS_PN176_POR_TURNO=${GENESIS_PN176_POR_TURNO:-2}
       - GENESIS_ENABLE_PN175_CIERRE_FORZADO=${GENESIS_ENABLE_PN175_CIERRE_FORZADO:-1}   # turno que termina sin </think>: se cierra y el modelo escribe la respuesta (HLE: 12% de las respuestas llegaban vacias)
       - GENESIS_ENABLE_PN174_UNLINK_L2=${GENESIS_ENABLE_PN174_UNLINK_L2:-1}   # region L2 sin nombre en /dev/shm: un motor muerto no deja 12 GB huerfanos (bucle "Insufficient space", 06-10 y 10-10)

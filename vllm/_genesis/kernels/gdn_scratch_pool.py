@@ -111,7 +111,7 @@ _DEFAULT_WINDOW_NT = 4
 HKey = tuple[int, int, int, int, int, torch.dtype, torch.device]
 VKey = tuple[int, int, int, int, torch.dtype, torch.device]
 SKey = tuple[int, int, int, int, torch.dtype, torch.device]
-OKey = tuple[int, int, int, int, torch.dtype, torch.device]  # (B, H, V, T_max_bin)
+OKey = tuple[int, int, int, torch.dtype, torch.device]  # (B, H, V)
 
 
 class GdnScratchPool:
@@ -367,15 +367,15 @@ class GdnScratchPool:
                 f"got (B={B}, T={T}, H={H}, V={V})"
             )
 
-        # Bin T to next power of 2 (min 512 to avoid pathological churn
-        # on very-short prompts).
-        T_binned = max(512, 1 << (T - 1).bit_length())
-
-        key: OKey = (B, H, V, T_binned, dtype, device)
+        # Un buffer por (B, H, V, dtype, device) que solo crece (potencias de 2, minimo 512).
+        # Antes habia uno por cada potencia vista y quedaban todos vivos; reservar() lo crea al
+        # maximo dentro del perfil de memoria de vLLM (PN177).
+        key: OKey = (B, H, V, dtype, device)
         cached = cls._O_REGISTRY.get(key)
-        if cached is not None:
+        if cached is not None and cached.shape[1] >= T:
             return cached[:, :T]
 
+        T_binned = max(512, 1 << (T - 1).bit_length())
         buf = torch.empty(
             (B, T_binned, H, V), dtype=dtype, device=device,
         )
@@ -387,6 +387,12 @@ class GdnScratchPool:
             B * T_binned * H * V * _dtype_byte_size(dtype) / 1024 / 1024,
         )
         return buf[:, :T]
+
+    @classmethod
+    def reservar(cls, T: int, H: int, V: int, dtype: torch.dtype,
+                 device: torch.device) -> None:
+        """Crea el buffer de salida para T tokens (el maximo de un paso)."""
+        cls.acquire_o_output(1, T, H, V, dtype, device)
 
     # ──────────────────────────────────────────────────────────────────
     # Introspection / lifecycle
