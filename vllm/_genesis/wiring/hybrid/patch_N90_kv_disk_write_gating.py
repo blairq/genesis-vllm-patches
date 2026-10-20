@@ -107,7 +107,7 @@ PRIMARY_STORE_NEW = (
     "        tags crece con cada clave de cada request.\n"
     "        \"\"\"\n"
     "        from vllm._genesis import kv_disk_gate as _g90\n"
-    "        if _g90.should_persist_to_secondary_tiers(\n"
+    "        if getattr(self, '_g90_activo', False) and _g90.should_persist_to_secondary_tiers(\n"
     "            getattr(req_context, 'kv_transfer_params', None)\n"
     "        ):\n"
     "            _g90.note_persistent_use(\n"
@@ -129,7 +129,7 @@ PRIMARY_STORE_NEW = (
     "        - marca las claves nuevas como persistibles si el agente lo permite.\n"
     "        \"\"\"\n"
     "        from vllm._genesis import kv_disk_gate as _g90\n"
-    "        should_persist = _g90.should_persist_to_secondary_tiers(\n"
+    "        should_persist = getattr(self, '_g90_activo', False) and _g90.should_persist_to_secondary_tiers(\n"
     "            getattr(req_context, 'kv_transfer_params', None)\n"
     "        )\n"
     "        if self.counts is not None:\n"
@@ -151,7 +151,7 @@ PRIMARY_STORE_NEW = (
     "            _region = self._mmap_region\n"
     "            _mm = getattr(_region, 'mmap_obj', None)\n"
     "            for key, block in evicted:\n"
-    "                if _mm is not None and _g90.take_demotion_snapshot(key):\n"
+    "                if getattr(self, '_g90_activo', False) and _mm is not None and _g90.take_demotion_snapshot(key):\n"
     "                    _stride = _region._row_stride\n"
     "                    _off = int(block.block_id) * _stride\n"
     "                    _g90.record_demotion(key, bytes(_mm[_off : _off + _stride]))\n"
@@ -306,7 +306,7 @@ REQUEST_LEVEL_NEW = (
     "        # el mismo gate. Esta dormido para el tier fs (politica BLOCK_LEVEL),\n"
     "        # pero dejarlo sin gatear era una via de escritura sin control.\n"
     "        from vllm._genesis import kv_disk_gate as _g90\n"
-    "        if not _g90.should_persist_to_secondary_tiers(\n"
+    "        if not self.secondary_tiers or not _g90.should_persist_to_secondary_tiers(\n"
     "            getattr(req_context, 'kv_transfer_params', None)\n"
     "        ):\n"
     "            return\n"
@@ -316,6 +316,25 @@ REQUEST_LEVEL_NEW = (
     "            result = self.primary_tier.lookup(key, req_context)\n"
 )
 
+
+# 20-10: sin L3 (ningun tier con submit_demote), PN90 queda inerte. Antes, cada desalojo de L2 de un
+# bloque persistible copiaba la fila entera del mmap (decenas de MB) para tirarla al no haber a quien
+# entregarla, y volvia a taguear la clave.
+TIER_INIT_OLD = (
+    "        self.secondary_tiers = secondary_tiers or []\n"
+)
+TIER_INIT_NEW = (
+    "        self.secondary_tiers = secondary_tiers or []\n"
+    "        # " + GENESIS_PN90_MARKER + " activa solo si algun tier acepta demociones\n"
+    "        self.primary_tier._g90_activo = any(\n"
+    "            getattr(t, 'submit_demote', None) is not None for t in self.secondary_tiers\n"
+    "        )\n"
+    "        logger.info(\n"
+    "            'Tiers secundarios (L3): %s; democion de L2 a disco (PN90): %s',\n"
+    "            [t.tier_type for t in self.secondary_tiers] or 'ninguno',\n"
+    "            'activa' if self.primary_tier._g90_activo else 'apagada',\n"
+    "        )\n"
+)
 
 # ─────────────────── patchers ───────────────────
 
@@ -376,6 +395,12 @@ def _tiering_patcher() -> TextPatcher | None:
                 name="pn90_gate_request_level_cascade",
                 anchor=REQUEST_LEVEL_OLD,
                 replacement=REQUEST_LEVEL_NEW,
+                required=True,
+            ),
+            TextPatch(
+                name="pn90_tiering_init_activo",
+                anchor=TIER_INIT_OLD,
+                replacement=TIER_INIT_NEW,
                 required=True,
             ),
             TextPatch(
