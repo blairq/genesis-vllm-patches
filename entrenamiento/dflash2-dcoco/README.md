@@ -40,9 +40,11 @@ entrenamiento la importa por ruta y el servidor la usa tal cual.
 |---|---|
 | `dflash2_dcoco.sh` | Pipeline completo y retomable (pasos 0 a 4, abajo) |
 | `entrenar_dcoco.py` | Entrena la cabeza (`--modo cabeza`) o cabeza + LoRA (`--modo conjunto`). Evalúa y exporta |
+| `evaluacion.py` | Cadena y árbol sobre una tabla fija o con filas que dependen del camino, aceptación golosa y con muestreo, calibración del árbol |
+| `recurrente.py` | La cabeza con estado del camino (`--estado recurrente`, solo entrenamiento) |
 | `selector.py` | El `CandidateSelector` y el top-k de vLLM en PyTorch, cargados del checkpoint (`../dflash2/` no carga el selector) |
 | `subir_hf.sh`, `README_hf.md` | Validación y publicación en Hugging Face |
-| `test_entrenar_dcoco.py` | Pruebas en CPU de la pérdida, los recorridos, el árbol y el aprendizaje |
+| `test_entrenar_dcoco.py` | Pruebas en CPU de la pérdida, los recorridos, el árbol, el muestreo, la calibración, la cabeza recurrente y el aprendizaje |
 
 [`../dflash2/`](../dflash2/) no se toca: de ahí se importan los datos, la LoRA, la pérdida del
 borrador y `guardar`.
@@ -89,6 +91,7 @@ Cada paso se saltea si su salida ya existe. Para rehacer uno, borrá esa salida 
 | `FLAGS` | `--vocab 65536` | Restricciones de servicio que se simulan al entrenar |
 | `ENV_BORRADOR` | `GENESIS_PN157_BITS_CONV=0 GENESIS_PN159_VOCAB=65536` | Las mismas restricciones, para el servidor del A/B |
 | `PASOS` | `0 1 2 3 4` | Qué pasos correr |
+| `EXTRA` | (vacío) | Flags opcionales del paso 2 (ver [Opciones](#opciones-muestreo-calibración-y-estado-recurrente)). Con `--estado recurrente` se saltean 3 y 4 |
 | `MC`, `IMG`, `PROD` | los de la máquina de siempre | models-cache, imagen y borrador de producción |
 
 `FLAGS` y `ENV_BORRADOR` tienen que describir **lo mismo**. Si se sirve la conv en int8
@@ -107,6 +110,10 @@ por época. Los campos de `registro.json`:
 | `largo_arbol_selector`, `largo_arbol_dcoco` | Largo aceptado verificando el árbol best-first de `--nodos` nodos (8, como en producción) |
 | `por_posicion_*` | Aceptación acumulada por posición en cadena |
 | `recall_top16` | Si el token real está entre los 16 candidatos de esa posición |
+| `ce_fila_selector`, `ce_fila_dcoco` | Entropía cruzada forzada por el maestro de la transición real (`-log p(real en p | real en p-1)`) en los pedidos apartados, sin peso por profundidad |
+| `top1_fila_selector`, `top1_fila_dcoco` | Cuántas veces el real es el argmax de su fila |
+| `perdida_entreno_dcoco`, `perdida_entreno_selector` | Pérdida media de la época en entrenamiento, con la cabeza y la misma cuenta sobre la tabla del selector |
+| `largo_muestreo_T{T}_*` | Con `--temperaturas`: largo aceptado esperado con muestreo a esa temperatura (ver abajo) |
 
 - **El margen (paso 1):** `recall_top16[p] − por_posicion_selector[p]` es la cota de lo que
   cualquier re-selección puede ganar en la posición `p`. Si es chico en todas las posiciones,
@@ -114,6 +121,14 @@ por época. Los campos de `registro.json`:
 - **El criterio para seguir:** que `largo_arbol_dcoco` supere a `largo_arbol_selector` en los pedidos
   apartados. Es lo que se va a servir, porque producción usa el árbol. Si no lo supera, no vale la
   pena el A/B.
+- **¿Bug o falta de señal?** Si `ce_fila_dcoco` baja respecto de `ce_fila_selector` y
+  `perdida_entreno_dcoco` respecto de `perdida_entreno_selector`, la cabeza aprende. Si las dos bajan
+  pero el largo no se mueve, lo que aprende no cambia el argmax de las filas que importan
+  (`top1_fila_*`). Si baja la de entreno y no la de los apartados, sobreajusta: menos épocas o un
+  `--lr` más bajo.
+- **Qué se exporta:** con `--quedarse mejor` (default), la mejor época por `--criterio`
+  (`largo_arbol_dcoco`). La base también cuenta: si ninguna época la supera, se exporta la cabeza en
+  cero (el borrador de hoy) y el log lo dice en la línea `MEJOR`.
 - **El A/B (paso 4)** da `largo_aceptacion` por arranque. Los tokens por segundo de prosa y de
   código se miran después con `bateria.py` contra el servidor.
 
@@ -139,7 +154,11 @@ Se puede llamar directo, con el mismo `docker run` de `../dflash2/README.md`:
 | `--nodos` | `8` | Nodos del árbol en la evaluación |
 | `--apartar` | `0,03` | Igual que `dflash2.sh`: los mismos pedidos apartados que el borrador de producción |
 | `--conv_int8`, `--conv_grupo`, `--vocab`, `--vocab_orden` | | Restricciones de servicio, como en `dflash2/` |
-| `--solo_evaluar`, `--max_pedidos`, `--max_anclas_eval`, `--max_pasos` | | Medición sola y recortes para pruebas |
+| `--quedarse`, `--criterio` | `mejor`, `largo_arbol_dcoco` | Exporta la mejor época (o la `ultima`) según esa métrica de la evaluación |
+| `--temperaturas T...`, `--nucleo` | ninguna, `1` | Métrica con muestreo (opción 1, abajo) |
+| `--calibrar`, `--calibrar_T` | `no`, la primera temperatura | Escala del árbol por profundidad (opción 3) |
+| `--estado` | `pares` | `recurrente`: cabeza con estado del camino (opción 6) |
+| `--solo_evaluar`, `--max_pedidos`, `--max_anclas_eval`, `--max_pasos` | | Medición sola y recortes para pruebas. `--solo_evaluar --calibrar ...` exporta un checkpoint solo calibrado (cabeza en cero) |
 
 **La pérdida** es entropía cruzada forzada por el maestro:
 
@@ -152,10 +171,98 @@ Se puede llamar directo, con el mismo `docker run` de `../dflash2/README.md`:
 
 - la cabeza en bf16 como `dcoco.*`, 10 tensores con los mismos nombres que `DCOCOHead` del repo de
   DCOCO;
-- en `dflash_config`: `dcoco_candidate_topk`, `dcoco_emb_dim`, `dcoco_state_dim` y `dcoco_mlp_dim`;
+- en `dflash_config`: `dcoco_candidate_topk`, `dcoco_emb_dim`, `dcoco_state_dim`, `dcoco_mlp_dim`,
+  `dcoco_estado` y, con `--calibrar`, `dcoco_escala_arbol`;
 - un bloque `dcoco` con la receta.
 
 `../dflash2/cuantizar_rtn.py` lo cuantiza dejando la cabeza intacta.
+
+## Opciones: muestreo, calibración y estado recurrente
+
+Las tres están apagadas por defecto; sin ellas el entrenamiento es el de antes.
+
+### 1. Métrica con muestreo (`--temperaturas`)
+
+La métrica golosa supone que el target elige su top-1. Sirviendo agentes de código con la
+temperatura que recomienda el paper de Qwen3.8 para código, el target muestrea y la aceptación es
+otra. Con `--temperaturas T1 T2 ...` (y `--nucleo` si se sirve con top-p) cada evaluación agrega
+`largo_muestreo_T{T}_{unario,selector,dcoco,arbol_selector,arbol_dcoco}`:
+
+- la propuesta es determinista y el token propuesto se acepta con `p_T(token)`;
+- cadena: `Σ_k Π_{j≤k} p_T(x_j)`; árbol: la suma sobre nodos de P(llegar y aceptar);
+- `p_T` sale del top-16 capturado: `p^(1/T)` renormalizado y, con `--nucleo`, cortado a top-p.
+
+**Aproximación:** en cada profundidad se usa la distribución que el target dio con el prefijo
+real; para prefijos que el target no generó no hay capturas. Sirve para comparar borradores entre
+sí, no como número absoluto. Para elegir la época con esta métrica:
+`--criterio largo_muestreo_T<T>_arbol_dcoco`.
+
+### 3. Calibración del árbol (`--calibrar voraz|muestreo`)
+
+El árbol best-first ordena por probabilidad de camino, `log_softmax` de cada fila. Con la cabeza
+corregida esas probabilidades pueden quedar mal calibradas entre profundidades: el árbol se va a lo
+hondo o a lo ancho cuando no conviene. Después de entrenar, se busca una escala por profundidad
+(multiplica la fila antes del `log_softmax`):
+
+- descenso por coordenadas sobre una grilla de 0,5 a 2, dos rondas;
+- en la mitad par de los lotes apartados se busca y en la impar se informa
+  (`CALIBRACION ... arbol dcoco antes -> despues`);
+- `voraz` maximiza el largo goloso; `muestreo`, el esperado a `--calibrar_T` (default: la primera de
+  `--temperaturas`).
+
+La cadena no cambia, porque el argmax de una fila no depende de la escala. El log trae después la
+línea `CALIBRADO {...}`, que es la evaluación completa con la escala. La escala queda en
+`dflash_config.dcoco_escala_arbol`, y PN178 y vllm-idiotsavant la aplican al servir. Con
+`--solo_evaluar --calibrar ...` se calibra el borrador sin entrenar la cabeza.
+
+### 6. Estado recurrente del camino (`--estado recurrente`)
+
+La cabeza de pares es una corrección de Markov de orden 1, igual que el selector: la fila de `p`
+solo ve el candidato elegido en `p-1`. Los correctores que más le ganan a DFlash condicionan en todo
+el prefijo elegido: xPress (arXiv 2608.02438) y la corrección RNN de DARTree (arXiv 2608.13524).
+`recurrente.py` hace
+
+```
+s_a   = GRU(s_prefijo, [pe(a); l(a)])          estado después de elegir a en p-1
+delta = MLP([s_a; l(a); pe(b); l(b)])          se suma a la fila a de la tabla del selector
+```
+
+con la misma `pe` que la cabeza de pares y la última capa en cero:
+
+- **al entrenar** la tabla se arma forzada por el maestro, con el prefijo real. La pérdida solo
+  cuenta las transiciones con todo el prefijo dentro del top-16;
+- **al evaluar**, la cadena y el árbol calculan cada fila sobre el camino que van eligiendo, con
+  estado por nodo.
+
+**Todavía no se sirve.** PN178 y vllm-idiotsavant rechazan un checkpoint con
+`dcoco_estado: recurrente` (salvo `dcoco=false` / `GENESIS_PN178_CORRECTOR=0`). Servirla pide un
+constructor del árbol con estado por nodo en el servidor; `evaluacion.arbol` es la referencia.
+`dflash2_dcoco.sh` saltea la cuantización y el A/B. Sirve para medir offline si condicionar en el
+prefijo gana lo suficiente como para hacer ese trabajo.
+
+```bash
+# por ejemplo: T de código del paper, calibrar con muestreo y elegir la época con esa métrica
+EXTRA="--temperaturas <T> --calibrar muestreo --criterio largo_muestreo_T<T>_arbol_dcoco" ./dflash2_dcoco.sh
+EXTRA="--estado recurrente --temperaturas <T>" NOMBRE=recurrente PASOS="2" ./dflash2_dcoco.sh
+```
+
+## Relación con el repo de DCOCO
+
+[two-delta/DCOCO](https://github.com/two-delta/DCOCO) solo trae el servidor (un overlay de vLLM
+v0.31.0), el benchmark contra un servidor y los checkpoints de Qwen3-4B/8B. **No trae el
+entrenamiento.** Lo de esta carpeta es propio, armado a partir del paper. La cabeza es la misma
+cuenta que su `DCOCOHead` (mismos nombres de parámetros, misma partición de `trans_mlp[0]`), con
+dos diferencias de diseño:
+
+- **acá** corrige la tabla del selector de DFlash2: `scores = selector + delta`;
+- **allá** el borrador es DFlash sin selector y la tabla es `logit crudo del siguiente + delta`, así
+  que DCOCO es lo único que modela las transiciones. Por eso las ganancias del paper (contra DFlash
+  sin selector) no se trasladan directo a DFlash2, que ya tiene un modelo de pares.
+
+Ellos también usan logits crudos, sin escala ni soft cap, y un bloque de 15. Su recorrido es el
+mismo que la cadena de acá (goloso prefijo-primero, o muestreado). El árbol de 8 nodos es nuestro,
+y es lo que se sirve. Su `scripts/benchmark.py` se puede apuntar a nuestro servidor para un A/B de
+punta a punta, pero sus checkpoints son para otros targets.
 
 ## Servir un borrador DFlash2-DCOCO
 
@@ -208,7 +315,7 @@ Para subidas largas, `../idiotsavant/vigia_subida_hf.sh` relanza la subida si se
 ## Pruebas sin GPU
 
 ```bash
-python3 -m pytest -q entrenamiento/dflash2-dcoco/test_entrenar_dcoco.py        # pérdida, recorridos, árbol, aprendizaje
+python3 -m pytest -q entrenamiento/dflash2-dcoco/test_entrenar_dcoco.py        # pérdida, árbol, muestreo, calibración, recurrente
 PYTHONPATH=. python3 -m pytest -q vllm/_genesis/tests/test_pn178_dcoco.py \
     vllm/_genesis/tests/test_pn178_wiring.py                                    # cabeza y parche
 ```

@@ -57,6 +57,8 @@ sys.path.insert(0, AQUI)
 import entrenar as E  # noqa: E402  (dflash2/entrenar.py: datos, LoRA, perdida del borrador, guardar)
 from dflash2_torch import cargar_borrador, cargar_target  # noqa: E402
 from selector import candidatos, cargar_selector, procesador  # noqa: E402
+import evaluacion as EV  # noqa: E402
+import recurrente as RC  # noqa: E402
 
 
 def _modulo(nombre, ruta):
@@ -79,9 +81,13 @@ def indices_reales(cand, lab):
     return igual.float().argmax(-1), igual.any(-1) & (lab >= 0)
 
 
-def perdida_dcoco(sc, cand, lab, rho=4.0, modo="fila"):
+def perdida_dcoco(sc, cand, lab, rho=4.0, modo="fila", prefijo=False):
+    """``prefijo``: la transicion p-1 -> p cuenta solo si TODO el prefijo real 0..p esta en el top-K (la
+    cabeza recurrente arma el estado con esos candidatos)."""
     B, S, K = cand.shape
     idx, esta = indices_reales(cand, lab)
+    if prefijo:
+        esta = torch.cumprod(esta.int(), -1).bool()
     valido = (esta[:, 1:] & esta[:, :-1]).float()                                   # [B, S-1]
     if modo == "fila":
         fila = sc[:, 1:].gather(2, idx[:, :-1, None, None].expand(-1, -1, 1, K)).squeeze(2)
@@ -91,6 +97,18 @@ def perdida_dcoco(sc, cand, lab, rho=4.0, modo="fila"):
     w = torch.exp(-torch.arange(S - 1, device=sc.device, dtype=torch.float32) / rho)
     pw = valido * w
     return -(lp * pw).sum() / pw.sum().clamp(min=1)
+
+
+def ce_forzada(sc, cand, lab):
+    """Diagnostico: suma y cantidad de -log p(real en p | real en p-1) sobre la fila (sin peso por
+    profundidad), y cuantas veces el real es el argmax de su fila."""
+    B, S, K = cand.shape
+    idx, esta = indices_reales(cand, lab)
+    valido = esta[:, 1:] & esta[:, :-1]
+    fila = sc[:, 1:].gather(2, idx[:, :-1, None, None].expand(-1, -1, 1, K)).squeeze(2).float()
+    lp = fila.log_softmax(-1).gather(-1, idx[:, 1:, None]).squeeze(-1)
+    top1 = fila.argmax(-1) == idx[:, 1:]
+    return float(-(lp * valido).sum()), int(valido.sum()), int((top1 & valido).sum())
 
 
 # ───────────────────────────── metricas ─────────────────────────────
@@ -126,23 +144,30 @@ def aceptados_arbol(sc, cand, lab, n):
 
 
 class Acum:
+    """Sumas por metrica. Las que tienen ``por_posicion`` son cadenas golosas."""
+
     def __init__(self, S):
+        self.S = S
         self.n = 0
-        self.suma = {k: 0.0 for k in ("unario", "selector", "dcoco", "arbol_selector", "arbol_dcoco")}
-        self.pos = {k: torch.zeros(S, dtype=torch.float64) for k in ("unario", "selector", "dcoco")}
+        self.suma = {}
+        self.pos = {}
+        self.ce = {}
         self.rec16 = torch.zeros(S, dtype=torch.float64)
         self.valido = torch.zeros(S, dtype=torch.float64)
 
-    def sumar(self, nombre, cad):
-        self.suma[nombre] += float(cad.sum())
-        if nombre in self.pos:
-            self.pos[nombre] += cad.sum(0).double().cpu()
+    def sumar(self, nombre, v, por_posicion=False):
+        self.suma[nombre] = self.suma.get(nombre, 0.0) + float(v.sum())
+        if por_posicion:
+            self.pos[nombre] = self.pos.get(nombre, torch.zeros(self.S, dtype=torch.float64)) + v.sum(0).double().cpu()
 
     def resumen(self):
         n = max(self.n, 1)
         r = {"anclas": self.n}
         r.update({f"largo_{k}": v / n for k, v in self.suma.items()})
         r.update({f"por_posicion_{k}": (v / n).tolist() for k, v in self.pos.items()})
+        for k, (suma, cnt, top1) in self.ce.items():
+            r[f"ce_fila_{k}"] = suma / max(cnt, 1)
+            r[f"top1_fila_{k}"] = top1 / max(cnt, 1)
         r["recall_top16"] = (self.rec16 / self.valido.clamp(min=1)).tolist()
         return r
 
@@ -179,12 +204,50 @@ class Borrador:
         sc = self.sel(cand, val, hs, b_ids[:, 0])
         emb = self.m.embed[cand]                                                    # base original (como PN149)
         with torch.autocast(torch.device(dev).type, dtype=torch.bfloat16):
-            sc2 = cab(sc, emb, val, hs)
-        return dict(lab=lab, top_i=top_i, top_p=top_p, logits=logits, cand=cand, sc=sc, sc2=sc2.float())
+            if isinstance(cab, RC.CabezaRecurrente):
+                sc2 = cab.tabla_forzada(sc, emb, val, hs, indices_reales(cand, lab)[0])
+            else:
+                sc2 = cab(sc, emb, val, hs)
+        return dict(lab=lab, top_i=top_i, top_p=top_p, logits=logits, cand=cand, sc=sc, sc2=sc2.float(),
+                    emb=emb, val=val, hs=hs)
+
+
+def _puntuadores(cab, r):
+    """(selector, dcoco) para evaluacion.cadena / arbol. Con la cabeza recurrente, las filas de dcoco se
+    calculan sobre el camino elegido (no la tabla forzada por el maestro, que ve las etiquetas)."""
+    sel = EV.Tabla(r["sc"])
+    if isinstance(cab, RC.CabezaRecurrente):
+        return sel, RC.Puntuador(cab, r["sc"], r["emb"], r["val"], r["hs"])
+    return sel, EV.Tabla(r["sc2"])
+
+
+def medir_lote(ac, cab, r, a, escala=None):
+    lab, cand = r["lab"], r["cand"]
+    ac.n += int((lab[:, 0] >= 0).sum())
+    p_sel, p_dc = _puntuadores(cab, r)
+    cadenas = {"unario": cand[..., 0], "selector": EV.cadena(p_sel, cand), "dcoco": EV.cadena(p_dc, cand)}
+    arboles = {"arbol_selector": EV.arbol(p_sel, cand, a.nodos), "arbol_dcoco": EV.arbol(p_dc, cand, a.nodos, escala)}
+    for k, tok in cadenas.items():
+        ac.sumar(k, EV.aceptados_cadena(tok, lab), por_posicion=True)
+    for k, (tok, pa, pr) in arboles.items():
+        ac.sumar(k, EV.aceptados_arbol(tok, pa, pr, lab))
+    for T in a.temperaturas:
+        pT = EV.dist_muestreo(r["top_p"], T, a.nucleo)
+        for k, tok in cadenas.items():
+            ac.sumar(f"muestreo_T{T:g}_{k}", EV.muestreo_cadena(tok, r["top_i"], pT))
+        for k, (tok, pa, pr) in arboles.items():
+            ac.sumar(f"muestreo_T{T:g}_{k}", EV.muestreo_arbol(tok, pa, pr, r["top_i"], pT))
+    for k, t in (("selector", r["sc"]), ("dcoco", r["sc2"])):
+        v = ce_forzada(t, cand, lab)
+        ac.ce[k] = [x + y for x, y in zip(ac.ce.get(k, (0.0, 0, 0)), v)]
+    _, esta = indices_reales(cand, lab)
+    ac.rec16 += esta.sum(0).double().cpu()
+    ac.valido += (lab >= 0).sum(0).double().cpu()
 
 
 @torch.no_grad()
-def evaluar(bor, cab, peds, a, dev):
+def evaluar(bor, cab, peds, a, dev, escala=None, cache=None):
+    """Metricas sobre los pedidos apartados. Con ``cache`` (lista) guarda lo que necesita la calibracion."""
     cab.eval()
     bor.m.eval()
     ac = Acum(a.K)
@@ -197,17 +260,44 @@ def evaluar(bor, cab, peds, a, dev):
             an = an[: a.max_anclas_eval]
         for i in range(0, len(an), a.lote):
             r = bor.paso(p, an[i:i + a.lote], a, dev, cab, False)
-            lab, cand = r["lab"], r["cand"]
-            ac.n += int((lab[:, 0] >= 0).sum())
-            ac.sumar("unario", aceptados_cadena(cand[..., 0], lab))
-            ac.sumar("selector", aceptados_cadena(recorrido(r["sc"], cand), lab))
-            ac.sumar("dcoco", aceptados_cadena(recorrido(r["sc2"], cand), lab))
-            ac.suma["arbol_selector"] += float(aceptados_arbol(r["sc"], cand, lab, a.nodos).sum())
-            ac.suma["arbol_dcoco"] += float(aceptados_arbol(r["sc2"], cand, lab, a.nodos).sum())
-            _, esta = indices_reales(cand, lab)
-            ac.rec16 += esta.sum(0).double().cpu()
-            ac.valido += (lab >= 0).sum(0).double().cpu()
+            medir_lote(ac, cab, r, a, escala)
+            if cache is not None:
+                c = {k: r[k].cpu() for k in ("lab", "cand", "sc", "top_i", "top_p")}
+                if isinstance(cab, RC.CabezaRecurrente):
+                    c["pe"] = cab.pe(r["emb"], r["hs"]).half().cpu()
+                    c["val"] = r["val"].float().cpu()
+                else:
+                    c["sc2"] = r["sc2"].cpu()
+                cache.append(c)
     return ac.resumen()
+
+
+def calibrar_arbol(cab, cache, a, dev):
+    """Escala por profundidad del arbol corregido (paso 3 del README): se busca en la mitad par de los lotes
+    apartados y se informa en la impar, antes y despues."""
+    T = a.calibrar_T if a.calibrar_T is not None else (a.temperaturas[0] if a.temperaturas else 1.0)
+
+    def objetivo(c, escala):
+        r = {k: v.to(dev) for k, v in c.items()}
+        if isinstance(cab, RC.CabezaRecurrente):
+            punt = RC.Puntuador.desde(cab, r["sc"], r["pe"].float(), r["val"])
+        else:
+            punt = EV.Tabla(r["sc2"])
+        tok, pa, pr = EV.arbol(punt, r["cand"], a.nodos, escala)
+        if a.calibrar == "muestreo":
+            pT = EV.dist_muestreo(r["top_p"], T, a.nucleo)
+            return float(EV.muestreo_arbol(tok, pa, pr, r["top_i"], pT).sum())
+        return float(EV.aceptados_arbol(tok, pa, pr, r["lab"]).sum())
+
+    with torch.no_grad():
+        busq, control = cache[0::2], cache[1::2]
+        n_ctl = max(1, sum(int((c["lab"][:, 0] >= 0).sum()) for c in control))
+        antes = sum(objetivo(c, None) for c in control) / n_ctl
+        esc = EV.calibrar(busq, objetivo, a.K, log=lambda m: print(m, flush=True))
+        despues = sum(objetivo(c, esc) for c in control) / n_ctl
+    obj = "muestreo T=%g" % T if a.calibrar == "muestreo" else "voraz"
+    print(f"CALIBRACION ({obj}) en la mitad de control: arbol dcoco {antes:.4f} -> {despues:.4f}", flush=True)
+    return esc, {"objetivo": obj, "control_antes": antes, "control_despues": despues, "escala": esc}
 
 
 def contar_anclas(d):
@@ -219,7 +309,7 @@ def contar_anclas(d):
 # ───────────────────────────── exportar ─────────────────────────────
 
 @torch.no_grad()
-def guardar(bor, cab, a, hp):
+def guardar(bor, cab, a, hp, escala=None):
     """Checkpoint DFlash2-DCOCO bf16: el del borrador (con la LoRA fusionada si hubo) mas ``dcoco.*`` y
     los hiperparametros en dflash_config. Despues va por dflash2/cuantizar_rtn.py, que deja la cabeza
     tal cual (no es una de sus lineales objetivo)."""
@@ -236,9 +326,13 @@ def guardar(bor, cab, a, hp):
     save_file(sd, os.path.join(a.salida, "model.safetensors"))
     c = json.load(open(os.path.join(a.borrador, "config.json")))
     c["dflash_config"].update({"dcoco_candidate_topk": bor.K, "dcoco_emb_dim": hp["emb"],
-                               "dcoco_state_dim": hp["state"], "dcoco_mlp_dim": hp["mlp"]})
+                               "dcoco_state_dim": hp["state"], "dcoco_mlp_dim": hp["mlp"],
+                               "dcoco_estado": a.estado})
+    if escala is not None:
+        c["dflash_config"]["dcoco_escala_arbol"] = [float(x) for x in escala]
     c["dcoco"] = {"metodo": "DCOCO residual sobre el CandidateSelector (arXiv 2610.12570)",
-                  "modo": a.modo, "perdida": a.perdida, "rho": a.rho, "vocab": a.vocab, "conv_int8": a.conv_int8}
+                  "modo": a.modo, "estado": a.estado, "perdida": a.perdida, "rho": a.rho, "vocab": a.vocab,
+                  "conv_int8": a.conv_int8, "calibracion": a.calibrar, "entrenada": not a.solo_evaluar}
     json.dump(c, open(os.path.join(a.salida, "config.json"), "w"), indent=2)
     print("guardado en", a.salida, flush=True)
 
@@ -253,6 +347,18 @@ def main():
     ap.add_argument("--noon", required=True, help="target: embed y lm_head efectivos (con la rotacion de PN149)")
     ap.add_argument("--modo", choices=("cabeza", "conjunto"), default="cabeza")
     ap.add_argument("--perdida", choices=("fila", "conjunta"), default="fila")
+    ap.add_argument("--estado", choices=("pares", "recurrente"), default="pares",
+                    help="pares: la cabeza de PN178; recurrente: estado GRU del camino elegido (solo entrenamiento)")
+    ap.add_argument("--temperaturas", type=float, nargs="*", default=[],
+                    help="ademas de la golosa, aceptacion esperada con muestreo a estas temperaturas")
+    ap.add_argument("--nucleo", type=float, default=1.0, help="top-p del muestreo en las metricas (1 = sin corte)")
+    ap.add_argument("--calibrar", choices=("no", "voraz", "muestreo"), default="no",
+                    help="escala por profundidad del arbol, buscada en los pedidos apartados; va al checkpoint")
+    ap.add_argument("--calibrar_T", type=float, default=None, help="temperatura de --calibrar muestreo [la primera]")
+    ap.add_argument("--quedarse", choices=("mejor", "ultima"), default="mejor",
+                    help="que se exporta: la mejor epoca por --criterio (la base cuenta) o la ultima")
+    ap.add_argument("--criterio", default="largo_arbol_dcoco",
+                    help="metrica de la evaluacion para --quedarse mejor (p. ej. largo_muestreo_T0.6_arbol_dcoco)")
     ap.add_argument("--rho", type=float, default=4.0)
     ap.add_argument("--peso_dcoco", type=float, default=1.0, help="en modo conjunto, peso de la perdida de DCOCO")
     ap.add_argument("--emb", type=int, default=128)
@@ -297,7 +403,10 @@ def main():
     bor = Borrador(a, dev)
     hp = dict(emb=a.emb, state=a.state, mlp=a.mlp)
     H = bor.m.c["hidden_size"]
-    cab = D.CabezaDCOCO(H, bor.K, **hp).to(dev)
+    if a.estado == "recurrente":
+        cab = RC.CabezaRecurrente(H, bor.K, **hp).to(dev)
+    else:
+        cab = D.CabezaDCOCO(H, bor.K, **hp).to(dev)
     print(f"cabeza DCOCO: {sum(p.numel() for p in cab.parameters()) / 1e6:.2f} M parametros; K={bor.K}, "
           f"escala {bor.escala}, soft cap {bor.softcap}", flush=True)
 
@@ -306,12 +415,18 @@ def main():
     registro = {"args": vars(a), "base": base, "epocas": []}
     json.dump(registro, open(os.path.join(a.salida, "registro.json"), "w"), indent=1)
     if a.solo_evaluar:
+        if a.calibrar != "no":
+            terminar(bor, cab, evalp, a, dev, hp, registro)                         # checkpoint solo calibrado
         return
 
     grupos = [{"params": list(cab.parameters()), "lr": a.lr}]
     if a.modo == "conjunto":
         grupos.append({"params": E.poner_lora(bor.m, a.rango, 2 * a.rango), "lr": a.lr_lora})
     opt = torch.optim.AdamW(grupos, weight_decay=0.0)
+    entrenables = [q for g in grupos for q in g["params"]]
+    if a.criterio not in base:
+        raise SystemExit(f"--criterio {a.criterio}: no es una metrica de la evaluacion ({sorted(base)})")
+    mejor = (base[a.criterio], -1, [q.detach().clone() for q in entrenables])
     total = a.max_pasos or sum(math.ceil(n / a.lote) for n in map(contar_anclas, trainp) if n) * a.epocas
     calor = max(1, int(0.04 * total))
     sched = torch.optim.lr_scheduler.LambdaLR(
@@ -323,6 +438,8 @@ def main():
             bor.m.train()
         rng.shuffle(trainp)
         t0 = time.time()
+        suma_dc = suma_sel = 0.0
+        n_pasos = 0
         for k, d in enumerate(trainp):
             p = E.cargar_pedido(d)
             if p is None:
@@ -331,12 +448,17 @@ def main():
             rng.shuffle(an)
             for i in range(0, len(an), a.lote):
                 r = bor.paso(p, an[i:i + a.lote], a, dev, cab, a.modo == "conjunto")
-                loss = perdida_dcoco(r["sc2"], r["cand"], r["lab"], a.rho, a.perdida)
+                loss = perdida_dcoco(r["sc2"], r["cand"], r["lab"], a.rho, a.perdida, a.estado == "recurrente")
+                with torch.no_grad():
+                    suma_sel += float(perdida_dcoco(r["sc"], r["cand"], r["lab"], a.rho, a.perdida,
+                                                    a.estado == "recurrente"))
+                suma_dc += float(loss.detach())
+                n_pasos += 1
                 if a.modo == "conjunto":
                     loss = E.perdida(r["logits"], r["lab"], r["top_i"], r["top_p"], a.auf) + a.peso_dcoco * loss
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_([q for g in grupos for q in g["params"]], 1.0)
+                torch.nn.utils.clip_grad_norm_(entrenables, 1.0)
                 opt.step()
                 sched.step()
                 paso += 1
@@ -348,13 +470,40 @@ def main():
             if a.max_pasos and paso >= a.max_pasos:
                 break
         ev = evaluar(bor, cab, evalp, a, dev)
+        ev["perdida_entreno_dcoco"] = suma_dc / max(n_pasos, 1)
+        ev["perdida_entreno_selector"] = suma_sel / max(n_pasos, 1)
         print(f"EPOCA {ep}", json.dumps(ev), flush=True)
         registro["epocas"].append(ev)
+        if a.quedarse == "mejor" and ev[a.criterio] > mejor[0]:
+            mejor = (ev[a.criterio], ep, [q.detach().clone() for q in entrenables])
         json.dump(registro, open(os.path.join(a.salida, "registro.json"), "w"), indent=1)
         if a.max_pasos and paso >= a.max_pasos:
             break
 
-    guardar(bor, cab, a, hp)
+    if a.quedarse == "mejor":
+        with torch.no_grad():
+            for q, v in zip(entrenables, mejor[2]):
+                q.copy_(v)
+        cual = "la base (ninguna epoca la supera: la cabeza queda en cero)" if mejor[1] < 0 else f"la epoca {mejor[1]}"
+        print(f"MEJOR por {a.criterio}: {cual}, {mejor[0]:.4f}", flush=True)
+        registro["exportada"] = mejor[1]
+    terminar(bor, cab, evalp, a, dev, hp, registro)
+
+
+def terminar(bor, cab, evalp, a, dev, hp, registro):
+    """Calibra el arbol si se pidio, mide con la escala y exporta."""
+    escala = None
+    if a.calibrar != "no":
+        cache = []
+        evaluar(bor, cab, evalp, a, dev, cache=cache)
+        escala, info = calibrar_arbol(cab, cache, a, dev)
+        ev = evaluar(bor, cab, evalp, a, dev, escala=escala)
+        print("CALIBRADO", json.dumps(ev), flush=True)
+        registro["calibracion"] = dict(info, metricas=ev)
+        json.dump(registro, open(os.path.join(a.salida, "registro.json"), "w"), indent=1)
+    if a.estado == "recurrente":
+        print("AVISO: la cabeza recurrente se exporta, pero PN178 todavia no la sirve", flush=True)
+    guardar(bor, cab, a, hp, escala)
 
 
 if __name__ == "__main__":

@@ -14,7 +14,8 @@
 #       PASOS="1" ./dflash2_dcoco.sh                  # solo la evaluacion de base
 # Variables: NOMBRE [cabeza], MODO [cabeza|conjunto], EPOCAS [2], CAPTURAS [entrena_rot],
 #            FLAGS [--vocab 65536], ENV_BORRADOR [GENESIS_PN157_BITS_CONV=0 GENESIS_PN159_VOCAB=65536],
-#            PASOS [0 1 2 3 4]. FLAGS y ENV_BORRADOR tienen que describir lo MISMO: como se sirve el borrador
+#            PASOS [0 1 2 3 4], EXTRA [] (flags opcionales del paso 2: --temperaturas, --calibrar, --estado
+#            recurrente, --criterio; con --estado recurrente no se corren 3 y 4). FLAGS y ENV_BORRADOR tienen que describir lo MISMO: como se sirve el borrador
 #            (los defaults son los de la compose idiotsavant-sm86). Con la conv en int8 al servir
 #            (GENESIS_PN157_BITS_CONV=8), entrenar con --conv_int8.
 set -u
@@ -32,6 +33,7 @@ CAPTURAS=${CAPTURAS:-entrena_rot}
 FLAGS=${FLAGS:---vocab 65536}
 ENV_BORRADOR=${ENV_BORRADOR:-GENESIS_PN157_BITS_CONV=0 GENESIS_PN159_VOCAB=65536}
 PASOS=${PASOS:-0 1 2 3 4}
+EXTRA=${EXTRA:-}
 SALIDA=${PROD}_dcoco_$NOMBRE
 log() { echo "$(date +%T) [dcoco] $*"; }
 quiere() { [[ " $PASOS " == *" $1 "* ]]; }
@@ -65,15 +67,24 @@ fi
 if quiere 2 && [ ! -f $T/borrador_dcoco_$NOMBRE/model.safetensors ]; then
   log "2. entrenando ($MODO, $EPOCAS epocas)"
   extra=""; [ $MODO = conjunto ] && extra="--auf"
-  entrenar /traces/borrador_dcoco_$NOMBRE --modo $MODO --epocas $EPOCAS $extra > $T/banco/dcoco_$NOMBRE.log 2>&1
-  grep -E "^BASE|^EPOCA" $T/banco/dcoco_$NOMBRE.log | python3 -c "
+  entrenar /traces/borrador_dcoco_$NOMBRE --modo $MODO --epocas $EPOCAS $extra $EXTRA > $T/banco/dcoco_$NOMBRE.log 2>&1
+  grep -E "^BASE|^EPOCA|^CALIBRADO" $T/banco/dcoco_$NOMBRE.log | python3 -c "
 import sys, json
 for l in sys.stdin:
-    t, j = l.split(' ', 1) if l.startswith('BASE') else (' '.join(l.split(' ', 2)[:2]), l.split(' ', 2)[2])
+    t, j = (' '.join(l.split(' ', 2)[:2]), l.split(' ', 2)[2]) if l.startswith('EPOCA') else l.split(' ', 1)
     d = json.loads(j)
-    print('   %-8s cadena: unario %.3f selector %.3f dcoco %.3f | arbol: selector %.3f dcoco %.3f' % (
-        t, d['largo_unario'], d['largo_selector'], d['largo_dcoco'], d['largo_arbol_selector'], d['largo_arbol_dcoco']))"
+    m = ' '.join('%s %.3f' % (k[len('largo_muestreo_'):-len('_arbol_dcoco')], v) for k, v in d.items()
+                 if k.startswith('largo_muestreo_') and k.endswith('_arbol_dcoco'))
+    print('   %-9s cadena: unario %.3f selector %.3f dcoco %.3f | arbol: selector %.3f dcoco %.3f | ce fila: %.3f -> %.3f %s' % (
+        t, d['largo_unario'], d['largo_selector'], d['largo_dcoco'], d['largo_arbol_selector'], d['largo_arbol_dcoco'],
+        d['ce_fila_selector'], d['ce_fila_dcoco'], ('| arbol dcoco muestreo ' + m) if m else ''))"
+  grep -E "^MEJOR|^CALIBRACION" $T/banco/dcoco_$NOMBRE.log
   [ -f $T/borrador_dcoco_$NOMBRE/model.safetensors ] || { log "fallo el paso 2"; exit 1; }
+fi
+
+if [[ "$EXTRA" == *recurrente* ]]; then
+  log "cabeza recurrente: PN178 todavia no la sirve, no se cuantiza ni se hace el A/B"
+  PASOS="${PASOS//3/}"; PASOS="${PASOS//4/}"
 fi
 
 if quiere 3 && [ ! -f $MC/$SALIDA/model.safetensors ]; then
