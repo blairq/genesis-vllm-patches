@@ -96,6 +96,23 @@ def test_crear_modos():
     assert isinstance(m.dcoco, D.CabezaDCOCO) and m.dcoco.topk == 16
 
 
+def test_escala_del_arbol_por_fila():
+    m = torch.nn.Module()
+    D.crear(m, dict(CFG, dcoco_escala_arbol=[0.5, 2.0, 1.5]), H, None)
+    emb, lg, h, sc = _entradas()
+    out = m.dcoco(sc, emb, lg, h)
+    e = torch.tensor([0.5, 2.0, 1.5] + [1.0] * (S - 3)).view(1, S, 1, 1)
+    assert torch.allclose(out, sc * e)
+
+
+def test_rechaza_la_cabeza_recurrente():
+    m = torch.nn.Module()
+    with pytest.raises(ValueError, match="recurrente"):
+        D.crear(m, dict(CFG, dcoco_estado="recurrente"), H, None)
+    D.crear(m, dict(CFG, dcoco_estado="recurrente"), H, False)
+    assert m.dcoco is None
+
+
 def _pesos(c, prefijo="dcoco."):
     return [(prefijo + n, p.detach().clone() + 1) for n, p in c.named_parameters()]
 
