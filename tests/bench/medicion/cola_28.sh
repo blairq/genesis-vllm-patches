@@ -10,7 +10,7 @@ echo "$(date +%T) destilacion y D terminados"
 docker stop genesis-27b-idiotsavant >/dev/null 2>&1
 if [ -f $T/borrador_ft_D/model.safetensors ] && [ ! -f $MC/${PROD}_D/model.safetensors ]; then
   docker run --rm --memory 9g --memory-swap 9g -v $R:/repo:ro -v $MC:/models -v $T:/traces --entrypoint bash $IMG -c \
-    "python3 /repo/entrenamiento/borrador/cuantizar_rtn.py /traces/borrador_ft_D /models/${PROD}_D /models/$PROD --escalas=/models/$PROD && chmod -R a+rX /models/${PROD}_D" 2>&1 | grep -v -i warn | tail -1
+    "python3 /repo/entrenamiento/dflash2/cuantizar_rtn.py /traces/borrador_ft_D /models/${PROD}_D /models/$PROD --escalas=/models/$PROD && chmod -R a+rX /models/${PROD}_D" 2>&1 | grep -v -i warn | tail -1
 fi
 grep -E "^BASE|^EPOCA" $T/banco/ft_D.log | cut -c1-60
 C="-f $R/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml -f $R/compose/ov-aislado.yml"

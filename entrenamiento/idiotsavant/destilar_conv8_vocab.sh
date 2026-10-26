@@ -16,7 +16,7 @@ docker stop genesis-27b-idiotsavant >/dev/null 2>&1
 
 # 0. produccion en fp16 (exactamente los pesos servidos)
 [ -f $T/borrador_prod_fp16/model.safetensors ] || docker run --rm -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint bash $IMG -c \
-  "python3 /repo/entrenamiento/borrador/decuantizar.py /models/$PROD /traces/borrador_prod_fp16 && chmod -R a+rwX /traces/borrador_prod_fp16"
+  "python3 /repo/entrenamiento/dflash2/decuantizar.py /models/$PROD /traces/borrador_prod_fp16 && chmod -R a+rwX /traces/borrador_prod_fp16"
 
 entrenar() {  # nombre salida flags...
   local n=$1; shift
@@ -25,7 +25,7 @@ entrenar() {  # nombre salida flags...
   while [ "$(ram_libre_gb)" -lt 17 ]; do sleep 30; done
   log "$n: $*"
   docker run --rm --name ft-$n --gpus '"device=0"' --ipc host --memory 16g --memory-swap 16g \
-    -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint python3 $IMG /repo/entrenamiento/borrador/entrenar.py \
+    -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint python3 $IMG /repo/entrenamiento/dflash2/entrenar.py \
     --datos /traces/captura/entrena_rot --salida $sal --borrador /traces/borrador_prod_fp16 --noon $MOD \
     --epocas 1 --lote 32 --lr 1e-4 --rango 64 --apartar 0.03 --auf "$@" > $T/banco/ft_$n.log 2>&1
   grep -E "^BASE|^EPOCA" $T/banco/ft_$n.log | python3 -c "
@@ -50,7 +50,7 @@ for n in B C D; do
   [ -f $MC/${PROD}_$n/model.safetensors ] && continue
   [ -f $T/borrador_ft_$n/model.safetensors ] || { log "falta el entrenado $n"; continue; }
   docker run --rm --memory 9g --memory-swap 9g -v $R:/repo:ro -v $MC:/models -v $T:/traces --entrypoint bash $IMG -c \
-    "python3 /repo/entrenamiento/borrador/cuantizar_rtn.py /traces/borrador_ft_$n /models/${PROD}_$n /models/$PROD --escalas=/models/$PROD && chmod -R a+rX /models/${PROD}_$n" 2>&1 | grep -v -i warn | tail -1
+    "python3 /repo/entrenamiento/dflash2/cuantizar_rtn.py /traces/borrador_ft_$n /models/${PROD}_$n /models/$PROD --escalas=/models/$PROD && chmod -R a+rX /models/${PROD}_$n" 2>&1 | grep -v -i warn | tail -1
 done
 # 4. A/B en vLLM: banco de agente (40 pedidos, conc 4), dos arranques por brazo, intercalados
 OV=$T/banco/ov-destilar; mkdir -p $OV

@@ -907,7 +907,7 @@ services:
       # 2026-09-24: el borrador AJUSTADO contra noon (incoai DFlash2 + LoRA sobre 1209 pedidos
       # de agente de codigo capturados de este mismo runtime, variante AUF, RTN W4A16 g128).
       # Banco de 40 pedidos de agente con arbol: 5,46 -> 5,64 aceptados/paso, 214 -> 245 tok/s;
-      # bench.sh de club-3090: prosa 140,2 -> 146,6, codigo empata. Ver entrenamiento/borrador/.
+      # bench.sh de club-3090: prosa 140,2 -> 146,6, codigo empata. Ver entrenamiento/dflash2/.
       # Para volver al de syvai: ".../qwen3.8-27b-dflash2-w4a16".
       - '{"method":"dflash","model":"/root/.cache/huggingface/dflash2-ft-auf-rtn-w4a16","num_speculative_tokens":8}'
       - --host

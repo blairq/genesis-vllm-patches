@@ -461,6 +461,7 @@ the sum, so *smaller* groups yield *more* total blocks.
 | ✅ | **PN144** | Scales the DFlash2 drafter's residual so it fits fp16. The drafter ships in bf16 and overflowed at 50 080 against fp16's 65 504 ceiling, accepting **0%** while producing perfectly coherent text. Watch the `eps` trap: RMSNorm is scale-invariant, `eps` is not |
 | ✅ | **PN128** | Async input-prep waits for spec-decode post-processing (GDN+MTP) |
 | | PN132 | Trimmed vocabulary for the drafter (FR-Spec) |
+| | PN178 | **DCOCO** corrector on the DFlash2 candidate selector ([arXiv 2610.12570](https://arxiv.org/abs/2610.12570)): a small MLP scores each transition between candidates of adjacent draft slots from a pair state of their hidden states and the candidates' embeddings, added to the selector's table before the chain or the tree. Off (`GENESIS_ENABLE_PN178_DCOCO`); only acts with a DFlash2-DCOCO checkpoint, trained in [`entrenamiento/dflash2-dcoco/`](entrenamiento/dflash2-dcoco/) |
 
 ### Infrastructure
 
@@ -918,6 +919,7 @@ tests/
   ├─ bench/medicion/  one script per question (acceptance, KV blocks, concurrency)
   ├─ bench/resultados/raw benchmark output, with the config that produced it
   └─ repro/           standalone harnesses that reproduce upstream bugs without a GPU
+entrenamiento/        how the served models are built: idiotsavant/ (target), dflash2/ and dflash2-dcoco/ (drafters)
 docs/                 subsystem write-ups, hardware notes, decode profiles
 benchmarks/           historical measurement campaigns
 ```

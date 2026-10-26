@@ -6,7 +6,7 @@ apagado. Ejemplo:
 
   docker run --rm --gpus '"device=0"' --ipc host -v <repo>:/repo -v <models-cache>:/models \\
       -v <trazas>:/traces vllm/vllm-openai:v0.29.0 --entrypoint python3 \\
-      /repo/entrenamiento/borrador/entrenar.py --datos /traces/captura/entrena --salida /traces/borrador_ft
+      /repo/entrenamiento/dflash2/entrenar.py --datos /traces/captura/entrena --salida /traces/borrador_ft
 
 Que se entrena
 --------------

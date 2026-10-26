@@ -7,13 +7,13 @@ docker stop genesis-27b-idiotsavant >/dev/null 2>&1
 if [ ! -f $T/borrador_ft_E/model.safetensors ]; then
   echo "$(date +%T) entrenando E"
   docker run --rm --name ft-E --gpus '"device=0"' --ipc host --memory 16g --memory-swap 16g -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces \
-    --entrypoint python3 $IMG /repo/entrenamiento/borrador/entrenar.py --datos /traces/captura/entrena_rot --salida /traces/borrador_ft_E \
+    --entrypoint python3 $IMG /repo/entrenamiento/dflash2/entrenar.py --datos /traces/captura/entrena_rot --salida /traces/borrador_ft_E \
     --borrador /traces/borrador_prod_fp16 --noon /models/qwen3.8_27b_idiotSavant_sm_86 --epocas 1 --lote 32 --lr 1e-4 --rango 64 \
     --apartar 0.03 --auf --conv_int8 --vocab 65536 > $T/banco/ft_E.log 2>&1
   grep -E "^BASE|^EPOCA" $T/banco/ft_E.log | cut -c1-60
 fi
 [ -f $MC/${PROD}_E/model.safetensors ] || docker run --rm --memory 9g --memory-swap 9g -v $R:/repo:ro -v $MC:/models -v $T:/traces --entrypoint bash $IMG -c \
-  "python3 /repo/entrenamiento/borrador/cuantizar_rtn.py /traces/borrador_ft_E /models/${PROD}_E /models/$PROD --escalas=/models/$PROD && chmod -R a+rX /models/${PROD}_E" 2>&1 | tail -1
+  "python3 /repo/entrenamiento/dflash2/cuantizar_rtn.py /traces/borrador_ft_E /models/${PROD}_E /models/$PROD --escalas=/models/$PROD && chmod -R a+rX /models/${PROD}_E" 2>&1 | tail -1
 C="-f $R/compose/docker-compose.qwen38-27b-idiotsavant-sm86.yml -f $R/compose/ov-aislado.yml"
 OV=$T/banco/ov-destilar; mkdir -p $OV
 for r in 3 4; do for b in B E A; do
