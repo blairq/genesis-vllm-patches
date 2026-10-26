@@ -24,6 +24,8 @@ misma cuenta que el servidor.
 """
 from __future__ import annotations
 
+import os
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -98,6 +100,13 @@ class CabezaDCOCO(nn.Module):
             return scores
         d = self.delta(emb_cand, logits, hidden)
         return torch.cat((scores[:, :1], scores[:, 1:] + d.to(scores.dtype)), 1)
+
+
+def modo_env():
+    """Con PN178 aplicado: GENESIS_PN178_CORRECTOR = auto (default: si el checkpoint trae la cabeza),
+    1 (obligatoria) o 0 (apagada: la cabeza del checkpoint se descarta y el borrador corre como DFlash2)."""
+    v = os.environ.get("GENESIS_PN178_CORRECTOR", "auto").strip().lower()
+    return None if v in ("", "auto") else v in ("1", "true", "si", "on")
 
 
 def crear(modelo: nn.Module, draft_config, hidden_size: int, modo=None) -> None:

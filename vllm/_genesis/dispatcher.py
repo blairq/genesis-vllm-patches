@@ -1300,6 +1300,17 @@ PATCH_REGISTRY: dict[str, dict[str, Any]] = {
         "upstream_pr": None,
         "applies_to": {},
     },
+    "PN178": {
+        "title": "Corrector DCOCO sobre el selector de candidatos del borrador DFlash2",
+        "env_flag": "GENESIS_ENABLE_PN178_DCOCO",
+        "default_on": False,
+        "category": "spec_decode",
+        "credit": (
+            "Genesis 2026-10-26, sobre DCOCO (Eisenstadt et al., arXiv 2610.12570; github.com/two-delta/DCOCO). Un MLP chico puntua cada transicion entre candidatos de posiciones vecinas con un estado de par (las ocultas de las dos posiciones) y el embedding de cada candidato; se suma a la tabla del CandidateSelector de DFlash2 (correccion residual, sin entrenar no cambia nada) antes de la cadena o el arbol. Solo actua con un checkpoint DFlash2-DCOCO (dcoco_emb_dim en dflash_config, pesos dcoco.*), que sin este parche no carga. GENESIS_PN178_CORRECTOR=auto|1|0. Entrenamiento: entrenamiento/dflash2-dcoco/."
+        ),
+        "upstream_pr": None,
+        "applies_to": {},
+    },
     "PN177": {
         "title": "Reserva antes del perfil: los buffers de SK-18/GDN y la cinta entran en la cuenta de la KV",
         "env_flag": "GENESIS_ENABLE_PN177_RESERVA",

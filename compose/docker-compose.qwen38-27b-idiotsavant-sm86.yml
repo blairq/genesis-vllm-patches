@@ -108,6 +108,8 @@ services:
       - GENESIS_PN159_SK28=${GENESIS_PN159_SK28:-0}                         # top-k de los candidatos en PTX (SK-28/29): sin flashinfer ni casts
       - GENESIS_PN159_DINAMICO=${GENESIS_PN159_DINAMICO:-0}                 # fase 2: anillo de N filas con los tokens del prompt y lo aceptado (SK-27, NanoSpec)
       - GENESIS_PN159_VERIFICAR=${GENESIS_PN159_VERIFICAR:-0}               # diagnostico: SK-29 contra flashinfer en cada paso, contador en el log
+      - GENESIS_ENABLE_PN178_DCOCO=${GENESIS_ENABLE_PN178_DCOCO:-0}                 # corrector DCOCO del borrador (necesario para cargar un checkpoint DFlash2-DCOCO; sin cabeza no hace nada)
+      - GENESIS_PN178_CORRECTOR=${GENESIS_PN178_CORRECTOR:-auto}                # auto = si el checkpoint trae la cabeza, 1 = obligatoria, 0 = la descarta
       - GENESIS_PN144_ESCALA_RESIDUAL=32         # el residual del borrador desborda fp16 sin esto
       - GENESIS_ENABLE_ARBOL=1                   # arbol de borrador (+10-11% prosa)
       - GENESIS_ARBOL_CERRADA=0

@@ -6383,6 +6383,24 @@ def apply_patch_PN172() -> PatchResult:
     return _failed(name, reason)
 
 
+@register_patch("PN178 corrector DCOCO")
+def apply_patch_PN178() -> PatchResult:
+    """PN178: corrector DCOCO sobre la tabla del selector del borrador DFlash2."""
+    name = "PN178 corrector DCOCO"
+    if not _APPLY_MODE:
+        return _applied(name, "dry-run: text-patch ready")
+    try:
+        from vllm._genesis.wiring.spec_decode import patch_PN178_dcoco
+    except Exception as e:
+        return _failed(name, f"wiring import failed: {e}")
+    status, reason = patch_PN178_dcoco.apply()
+    if status == "applied":
+        return _applied(name, reason)
+    if status == "skipped":
+        return _skipped(name, reason)
+    return _failed(name, reason)
+
+
 @register_patch("PN177 reserva antes del perfil")
 def apply_patch_PN177() -> PatchResult:
     """PN177: los buffers que los parches crean despues del perfil se crean dentro, y la KV los cuenta."""
