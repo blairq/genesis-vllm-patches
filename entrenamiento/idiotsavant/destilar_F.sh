@@ -13,7 +13,7 @@ docker rm -f genesis-27b-pruebas >/dev/null 2>&1
 if [ ! -f $T/borrador_ft_F/model.safetensors ]; then
   log "entrenando F (--vocab 65536)"
   docker run --rm --name ft-F --gpus '"device=0"' --ipc host --memory 16g --memory-swap 16g \
-    -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint python3 $IMG /repo/entrenamiento/borrador/entrenar.py \
+    -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint python3 $IMG /repo/entrenamiento/dflash2/entrenar.py \
     --datos /traces/captura/entrena_rot --salida /traces/borrador_ft_F --borrador /traces/borrador_prod_fp16 --noon $MOD \
     --epocas 1 --lote 32 --lr 1e-4 --rango 64 --apartar 0.03 --auf --vocab 65536 > $T/banco/ft_F.log 2>&1
   grep -E "^BASE|^EPOCA" $T/banco/ft_F.log | cut -c1-200
@@ -21,7 +21,7 @@ fi
 [ -f $T/borrador_ft_F/model.safetensors ] || { log "el entrenamiento no dejo modelo: ver ft_F.log"; exit 1; }
 # 2. cuantizar con las escalas de produccion
 [ -f $MC/${PROD}_F/model.safetensors ] || docker run --rm --memory 9g --memory-swap 9g -v $R:/repo:ro -v $MC:/models -v $T:/traces --entrypoint bash $IMG -c \
-  "python3 /repo/entrenamiento/borrador/cuantizar_rtn.py /traces/borrador_ft_F /models/${PROD}_F /models/$PROD --escalas=/models/$PROD && chmod -R a+rX /models/${PROD}_F" 2>&1 | grep -v -i warn | tail -1
+  "python3 /repo/entrenamiento/dflash2/cuantizar_rtn.py /traces/borrador_ft_F /models/${PROD}_F /models/$PROD --escalas=/models/$PROD && chmod -R a+rX /models/${PROD}_F" 2>&1 | grep -v -i warn | tail -1
 # 3. A/B corto: A, B, F x 3 arranques de 20 pedidos, intercalados
 OV=$T/banco/ov-destilar; mkdir -p $OV
 for r in 1 2 3; do for b in A B F; do

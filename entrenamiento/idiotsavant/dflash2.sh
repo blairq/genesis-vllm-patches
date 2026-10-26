@@ -183,7 +183,7 @@ if quiere 1; then
   if [ -f $(en_host $BASE_ROT)/model.safetensors ]; then log "1. ya hecho ($BASE_ROT)"; else
     estado 1 "plegando la rotacion en el fc"; log "1. plegando la rotacion en el fc de $BASE"
     docker run --rm --memory 12g -v $R:/repo -v $MC:/models -v $T:/traces --entrypoint bash $IMG -c \
-      "cd /repo/entrenamiento/borrador && python3 rotar_borrador.py $BASE /models/orcarouter-qwen3.8-27b-uncensored-bf16 \
+      "cd /repo/entrenamiento/dflash2 && python3 rotar_borrador.py $BASE /models/orcarouter-qwen3.8-27b-uncensored-bf16 \
        $MODELO $BASE_ROT && chmod -R a+rwX $BASE_ROT" 2>&1 | grep -v -i warn | tail -1
     [ -f $(en_host $BASE_ROT)/model.safetensors ] || { log "fallo el paso 1"; exit 1; }
   fi
@@ -196,7 +196,7 @@ if quiere 2; then
   if [ -f $BASE_Q/model.safetensors ]; then log "2. ya hecho ($BASE_Q)"; else
     estado 2 "cuantizando la base rotada"; log "2. cuantizando la base rotada"
     docker run --rm --memory 9g --memory-swap 9g -v $R:/repo:ro -v $MC:/models -v $T:/traces --entrypoint python3 $IMG \
-      /repo/entrenamiento/borrador/cuantizar_rtn.py $BASE_ROT /models/${NOMBRE}_base_rot_w4a16 \
+      /repo/entrenamiento/dflash2/cuantizar_rtn.py $BASE_ROT /models/${NOMBRE}_base_rot_w4a16 \
       /models/qwen3.8_27b_idiotSavant_sm_86_dflash2 2>&1 | grep -v -i warn | tail -1
     docker run --rm -v $MC:/models --entrypoint bash $IMG -c "chmod -R a+rX /models/${NOMBRE}_base_rot_w4a16"
     [ -f $BASE_Q/model.safetensors ] || { log "fallo el paso 2"; exit 1; }
@@ -234,13 +234,13 @@ if quiere 4; then
     [ "$(ram_libre_gb)" -ge 18 ] && TOPE=16g || TOPE=9g
     estado 4 "entrenando (tope $TOPE)"; log "4. entrenando (tope de memoria $TOPE)"
     docker run --rm --name ft-$NOMBRE --gpus '"device=0"' --ipc host --memory $TOPE --memory-swap $TOPE \
-      -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint python3 $IMG /repo/entrenamiento/borrador/entrenar.py \
+      -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint python3 $IMG /repo/entrenamiento/dflash2/entrenar.py \
       --datos /traces/captura/$NOMBRE --salida $FT --borrador $BASE_ROT \
       --noon $MODELO --epocas 1 --lote 32 --lr 1e-4 --rango 64 --apartar 0.03 --auf > $T/banco/ft_$NOMBRE.log 2>&1
     rc=$?
     if [ $rc = 137 ]; then log "   murio por memoria: reintento con 18 GB"; esperar_ram 20
       docker run --rm --name ft-$NOMBRE --gpus '"device=0"' --ipc host --memory 18g --memory-swap 18g \
-        -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint python3 $IMG /repo/entrenamiento/borrador/entrenar.py \
+        -v $R:/repo:ro -v $MC:/models:ro -v $T:/traces --entrypoint python3 $IMG /repo/entrenamiento/dflash2/entrenar.py \
         --datos /traces/captura/$NOMBRE --salida $FT --borrador $BASE_ROT \
         --noon $MODELO --epocas 1 --lote 32 --lr 1e-4 --rango 64 --apartar 0.03 --auf >> $T/banco/ft_$NOMBRE.log 2>&1
     fi
@@ -254,7 +254,7 @@ if quiere 5; then
   if [ -f $MC/$SALIDA/model.safetensors ]; then log "5. ya hecho ($SALIDA)"; else
     estado 5 "cuantizando el ajustado"; log "5. cuantizando -> models-cache/$SALIDA"
     docker run --rm --memory 9g --memory-swap 9g -v $R:/repo:ro -v $MC:/models -v $T:/traces --entrypoint python3 $IMG \
-      /repo/entrenamiento/borrador/cuantizar_rtn.py $FT /models/$SALIDA \
+      /repo/entrenamiento/dflash2/cuantizar_rtn.py $FT /models/$SALIDA \
       /models/qwen3.8_27b_idiotSavant_sm_86_dflash2 2>&1 | grep -v -i warn | tail -1
     docker run --rm -v $MC:/models --entrypoint bash $IMG -c "chmod -R a+rX /models/$SALIDA"
     [ -f $MC/$SALIDA/model.safetensors ] || { log "fallo el paso 5"; exit 1; }

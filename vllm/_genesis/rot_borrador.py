@@ -2,7 +2,7 @@
 """PN149: borrador DFlash en su base ORIGINAL sobre un target con el residuo rotado.
 
 El target rotado (entrenamiento/cuant/armar_rot.py) guarda el embedding como E Rt y el lm_head como
-W diag(g_final) Rt, y el borrador los comparte. El borrador rotado (entrenamiento/borrador/
+W diag(g_final) Rt, y el borrador los comparte. El borrador rotado (entrenamiento/dflash2/
 rotar_borrador.py) deja su residuo en la base original y trae en el config ``genesis_rotacion``:
 
   desrotar(e_rot) = e_rot R            = bloques(e_rot) * s      (embedding del target -> original)
