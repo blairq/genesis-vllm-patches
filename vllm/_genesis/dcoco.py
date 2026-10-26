@@ -16,7 +16,9 @@ con la oculta de su posicion). Aca va como correccion RESIDUAL de la tabla del s
     st[p]    = pair_proj([h[p], h[p+1]])
 
 con la ultima capa del MLP en cero al crearla: sin entrenar, la tabla queda exactamente como la del
-selector. La fila 0 (desde el ancla) no se toca. Los nombres de los parametros son los de DCOCOHead
+selector. La fila 0 (desde el ancla) no se toca. Si el checkpoint trae ``dcoco_escala_arbol`` (la
+calibracion de entrenar_dcoco.py --calibrar), la fila s se multiplica por escala[s]: no cambia el argmax
+de la cadena, solo las probabilidades de camino con que se arma el arbol. Los nombres de los parametros son los de DCOCOHead
 del repo de DCOCO, asi una cabeza entrenada alla carga aca.
 
 Solo depende de torch: el entrenamiento (entrenamiento/dflash2-dcoco/) lo importa por ruta y usa la
@@ -42,11 +44,13 @@ def config_de(draft_config) -> dict | None:
         emb=int(draft_config["dcoco_emb_dim"]),
         state=int(draft_config["dcoco_state_dim"]),
         mlp=int(draft_config["dcoco_mlp_dim"]),
+        escala=draft_config.get("dcoco_escala_arbol"),
     )
 
 
 class CabezaDCOCO(nn.Module):
-    def __init__(self, hidden: int, topk: int, emb: int = 128, state: int = 128, mlp: int = 256):
+    def __init__(self, hidden: int, topk: int, emb: int = 128, state: int = 128, mlp: int = 256,
+                 escala=None):
         super().__init__()
         self.topk, self.emb, self.state = topk, emb, state
         self.cand_proj = nn.Linear(hidden, emb, bias=False)
@@ -59,6 +63,8 @@ class CabezaDCOCO(nn.Module):
         nn.init.zeros_(self.trans_mlp[2].weight)
         nn.init.zeros_(self.trans_mlp[2].bias)
         self._partida = None
+        self.register_buffer("escala_arbol", None if escala is None else
+                             torch.tensor([float(x) for x in escala], dtype=torch.float32), persistent=False)
 
     def _w0(self):
         """trans_mlp[0] partida en estado / previo / siguiente: cada candidato se proyecta una vez en
@@ -96,10 +102,16 @@ class CabezaDCOCO(nn.Module):
 
     def forward(self, scores, emb_cand, logits, hidden):
         """scores [R, S, K, K] del selector -> la misma tabla con la correccion en las filas 1.."""
-        if scores.shape[1] < 2:
-            return scores
-        d = self.delta(emb_cand, logits, hidden)
-        return torch.cat((scores[:, :1], scores[:, 1:] + d.to(scores.dtype)), 1)
+        S = scores.shape[1]
+        if S >= 2:
+            d = self.delta(emb_cand, logits, hidden)
+            scores = torch.cat((scores[:, :1], scores[:, 1:] + d.to(scores.dtype)), 1)
+        if self.escala_arbol is not None:
+            e = self.escala_arbol[:S]
+            if e.shape[0] < S:
+                e = torch.cat((e, e.new_ones(S - e.shape[0])))
+            scores = scores * e.view(1, S, 1, 1).to(scores.dtype)
+        return scores
 
 
 def modo_env():
@@ -113,13 +125,18 @@ def crear(modelo: nn.Module, draft_config, hidden_size: int, modo=None) -> None:
     """Desde el __init__ del modelo del borrador. ``modo``: None = si el checkpoint trae la cabeza,
     True = obligatoria (error si no la trae), False = apagada aunque la traiga."""
     cfg = config_de(draft_config)
+    estado = (draft_config or {}).get("dcoco_estado", "pares")
+    if cfg is not None and estado != "pares" and modo is not False:
+        raise ValueError(f"checkpoint DFlash2-DCOCO con dcoco_estado={estado!r}: PN178 solo sirve la cabeza de "
+                         "pares (la recurrente es solo de entrenamiento). Apagalo con dcoco=false / "
+                         "GENESIS_PN178_CORRECTOR=0")
     if modo is True and cfg is None:
         raise ValueError("DCOCO pedido pero el dflash_config del borrador no trae dcoco_emb_dim: no es un "
                          "checkpoint DFlash2-DCOCO")
     if modo is False or cfg is None:
         modelo.dcoco = None
         return
-    modelo.dcoco = CabezaDCOCO(hidden_size, cfg["topk"], cfg["emb"], cfg["state"], cfg["mlp"])
+    modelo.dcoco = CabezaDCOCO(hidden_size, cfg["topk"], cfg["emb"], cfg["state"], cfg["mlp"], cfg["escala"])
 
 
 def cargar(modelo: nn.Module, cargar_base, weights):
